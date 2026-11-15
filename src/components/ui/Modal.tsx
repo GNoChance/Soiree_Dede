@@ -1,0 +1,116 @@
+import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { AnimatePresence, motion } from 'framer-motion'
+import { X } from 'lucide-react'
+import { cn } from '@/lib/cn'
+import { fx } from '@/lib/feedback'
+
+interface BaseProps {
+  open: boolean
+  onClose: () => void
+  title?: string
+  children?: ReactNode
+  className?: string
+}
+
+function useEscape(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return
+    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', h)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', h)
+      document.body.style.overflow = ''
+    }
+  }, [open, onClose])
+}
+
+function Backdrop({ onClick }: { onClick: () => void }) {
+  return (
+    <motion.div
+      className="absolute inset-0 bg-[#07050f]/60 backdrop-blur-[2px]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClick}
+    />
+  )
+}
+
+function Header({ title, onClose }: { title?: string; onClose: () => void }) {
+  if (!title) return null
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="text-2xl">{title}</h2>
+      <button
+        aria-label="Fermer"
+        onClick={onClose}
+        className="flex size-10 items-center justify-center rounded-full border-[3px] border-ink bg-surface text-text shadow-sticker-sm active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+      >
+        <X className="size-5" strokeWidth={3} />
+      </button>
+    </div>
+  )
+}
+
+/** Fenetre centree, entree en rebond. */
+export function Modal({ open, onClose, title, children, className }: BaseProps) {
+  useEscape(open, onClose)
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" role="dialog" aria-modal="true">
+          <Backdrop onClick={onClose} />
+          <motion.div
+            className={cn('sticker relative max-h-[85dvh] w-full max-w-sm overflow-auto rounded-bubble bg-surface p-5 text-text', className)}
+            initial={{ scale: 0.6, rotate: -6, opacity: 0, y: 40 }}
+            animate={{ scale: 1, rotate: 0, opacity: 1, y: 0 }}
+            exit={{ scale: 0.8, opacity: 0, y: 20, transition: { duration: 0.15 } }}
+            transition={{ type: 'spring', stiffness: 380, damping: 17 }}
+            onAnimationStart={() => fx.whoosh()}
+          >
+            <Header title={title} onClose={onClose} />
+            {children}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  )
+}
+
+/** Feuille qui monte du bas, fermable par glissement vers le bas. */
+export function BottomSheet({ open, onClose, title, children, className }: BaseProps) {
+  useEscape(open, onClose)
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true">
+          <Backdrop onClick={onClose} />
+          <motion.div
+            className={cn(
+              'sticker pb-safe relative max-h-[88dvh] w-full overflow-auto rounded-b-none rounded-t-bubble border-b-0 bg-surface p-5 text-text',
+              className,
+            )}
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%', transition: { duration: 0.2 } }}
+            transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+            drag="y"
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.6 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 120 || info.velocity.y > 600) onClose()
+            }}
+          >
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-ink/40" />
+            <Header title={title} onClose={onClose} />
+            {children}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  )
+}

@@ -1,0 +1,1 @@
+{"name":"slice-chibis","private":true,"type":"module","scripts":{"slice":"node slice.mjs"},"dependencies":{"sharp":"^0.34.0"}}
