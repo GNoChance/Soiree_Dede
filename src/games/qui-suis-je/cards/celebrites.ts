@@ -1,0 +1,6 @@
+// Cartes par difficulté, séparées par « | ».
+export default {
+  1: `Omar Sy|Jean Dujardin|Gad Elmaleh|Dany Boon|Jamel Debbouze|Kev Adams|Brad Pitt|Angelina Jolie|Leonardo DiCaprio|Tom Cruise|Johnny Depp|Will Smith|Jackie Chan|Arnold Schwarzenegger|Marilyn Monroe|Charlie Chaplin|Louis de Funès|Bourvil|Jean-Paul Belmondo|Alain Delon|Brigitte Bardot|Sophie Marceau|Marion Cotillard|Jean Reno|Gérard Depardieu|Christian Clavier|Cyril Hanouna|Nagui|Michel Drucker|Squeezie|Cyprien|Mister Bean|Tom Hanks|Julia Roberts|Keanu Reeves|Dwayne Johnson|Jim Carrey|Sylvester Stallone|Bruce Willis|Chuck Norris|Emma Watson|Kim Kardashian|Jean-Pierre Foucault`,
+  2: `Catherine Deneuve|Vincent Cassel|Guillaume Canet|Florence Foresti|Elie Semoun|Gérard Jugnot|Thierry Lhermitte|Michel Blanc|Fabrice Luchini|Alain Chabat|Stéphane Bern|Laurent Ruquier|Thierry Ardisson|Karine Ferri|Camille Combal|Norman|Natoo|Michel Cymes|Jean-Luc Reichmann|Julien Lepers|Meryl Streep|Morgan Freeman|Robert Downey Jr.|Natalie Portman|Ryan Gosling|Margot Robbie|Zendaya|George Clooney|Jennifer Aniston|Samuel L. Jackson`,
+  3: `Léa Seydoux|Tahar Rahim|Mélanie Laurent|Vincent Lindon|Virginie Efira|Pierre Niney|Camille Cottin|Benedict Cumberbatch|Cate Blanchett|Pedro Pascal|Anya Taylor-Joy|Hugh Grant|Christoph Waltz`,
+}

@@ -70,6 +70,22 @@ const MESSAGES: Record<string, string> = {
   wrong_roll: 'Ce lancer ne correspond pas à ta feuille de score.',
   invalid_roll: 'Lancer invalide : ces quilles sont déjà tombées.',
   already_done: 'Tu as déjà fini ta partie !',
+  // Qui suis-je ?
+  wrong_card: 'Carte déjà validée !',
+  invalid_card: 'Carte invalide.',
+  missing_cards: 'Il manque des cartes.',
+  not_enough_cards: 'Pas assez de cartes pour ces réglages.',
+  invalid_cards: 'Cartes invalides.',
+  // Le plus proche
+  invalid_number: 'Ce n’est pas un nombre valide.',
+  number_out_of_range: 'Nombre beaucoup trop grand !',
+  // Action ou vérité
+  target_cannot_vote: 'C’est ton destin : pas le droit de voter !',
+  // Devine en équipe / Dessine & devine
+  invalid_teams: 'Chaque équipe doit avoir au moins 2 joueurs.',
+  not_speaker: 'Ce n’est pas toi l’orateur !',
+  missing_words: 'Aucun mot tiré pour la partie.',
+  invalid_words: 'Liste de mots invalide.',
   not_your_guess: 'Ce n’est pas à toi de deviner.',
   invalid_guess: 'Écris un mot.',
   code_generation_failed: 'Impossible de créer le code, réessaie.',

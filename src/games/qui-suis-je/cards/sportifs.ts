@@ -1,0 +1,6 @@
+// Cartes par difficulté, séparées par « | ».
+export default {
+  1: `Zinédine Zidane|Kylian Mbappé|Lionel Messi|Cristiano Ronaldo|Neymar|Michael Jordan|Usain Bolt|Rafael Nadal|Roger Federer|Novak Djokovic|Teddy Riner|Tony Parker|Muhammad Ali|Pelé|Diego Maradona|Thierry Henry|Antoine Griezmann|Didier Deschamps|Eric Cantona|LeBron James|Serena Williams|Marie-José Pérec|Lewis Hamilton|Michael Schumacher|Sébastien Loeb|Tiger Woods|Zlatan Ibrahimović|David Beckham|Karim Benzema|Paul Pogba|N’Golo Kanté|Kobe Bryant|Stephen Curry|Alain Prost|Laure Manaudou|Yannick Noah|Michael Phelps|Victor Wembanyama|Léon Marchand`,
+  2: `Michel Platini|Amélie Mauresmo|Jo-Wilfried Tsonga|Gaël Monfils|Andy Murray|Andre Agassi|Ronaldinho|Luka Modrić|Erling Haaland|Mohamed Salah|Franck Ribéry|Hugo Lloris|Olivier Giroud|Marcel Desailly|Lilian Thuram|Fabien Barthez|Nikola Karabatic|Tony Estanguet|Laura Flessel|Florent Manaudou|Valentino Rossi|Max Verstappen|Ayrton Senna|Sébastien Ogier|Renaud Lavillenie|Carl Lewis|Pete Sampras`,
+  3: `Raymond Poulidor|Bernard Hinault|Eddy Merckx|Marion Bartoli|Surya Bonaly|Tadej Pogačar|Armand Duplantis|Simone Biles|Eliud Kipchoge|Marie-Amélie Le Fur|Julian Alaphilippe|Johan Cruyff`,
+}
