@@ -13,17 +13,37 @@ interface BaseProps {
   className?: string
 }
 
+/**
+ * Verrou de défilement partagé : compteur des modales ouvertes, pour qu'une
+ * modale qui se ferme (ou une navigation) ne laisse jamais la page bloquée.
+ */
+let scrollLocks = 0
+function lockScroll() {
+  scrollLocks++
+  document.body.style.overflow = 'hidden'
+}
+function unlockScroll() {
+  scrollLocks = Math.max(0, scrollLocks - 1)
+  if (scrollLocks === 0) document.body.style.overflow = ''
+}
+
+/** Filet de sécurité appelé à chaque changement de page. */
+export function releaseScrollIfIdle() {
+  if (scrollLocks === 0) document.body.style.overflow = ''
+}
+
 function useEscape(open: boolean, onClose: () => void) {
   useEffect(() => {
     if (!open) return
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', h)
-    document.body.style.overflow = 'hidden'
-    return () => {
-      window.removeEventListener('keydown', h)
-      document.body.style.overflow = ''
-    }
+    return () => window.removeEventListener('keydown', h)
   }, [open, onClose])
+  useEffect(() => {
+    if (!open) return
+    lockScroll()
+    return unlockScroll
+  }, [open])
 }
 
 function Backdrop({ onClick }: { onClick: () => void }) {

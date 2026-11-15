@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useOutlet } from 'react-router'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
 import { tabIndex } from './BottomNav'
+import { releaseScrollIfIdle } from '@/components/ui/Modal'
 
 const variants: Variants = {
   enter: (dir: number) => ({ opacity: 0, x: dir * 70, scale: 0.92, rotate: dir * 2 }),
@@ -26,6 +27,11 @@ export function AnimatedOutlet({ className }: { className?: string }) {
   useLayoutEffect(() => {
     prev.current = idx
   }, [idx])
+
+  // Une page ne doit jamais hériter d'un défilement bloqué par une modale de la page précédente.
+  useLayoutEffect(() => {
+    releaseScrollIfIdle()
+  }, [pathname])
 
   return (
     <AnimatePresence mode="wait" initial={false} custom={dir}>

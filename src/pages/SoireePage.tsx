@@ -359,12 +359,16 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soire
           {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
         </p>
       )}
-      <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
-        <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
-          C’est parti !
-        </Button>
-      </motion.div>
-      {busy && <p className="text-center text-sm text-muted">Une partie est en cours.</p>}
+      {/* Barre de lancement collée en bas de l'écran : toujours visible, même
+          si la page est longue (beaucoup de jeux / d'options / de joueurs). */}
+      <div className="pb-safe sticky bottom-0 z-30 -mx-4 bg-gradient-to-t from-paper via-paper/95 to-transparent px-4 pt-6 pb-3">
+        <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
+          <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
+            C’est parti !
+          </Button>
+        </motion.div>
+        {busy && <p className="mt-1 text-center text-sm text-muted">Une partie est en cours.</p>}
+      </div>
     </section>
   )
 }
