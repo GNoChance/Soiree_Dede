@@ -23,6 +23,7 @@ interface Row {
   slug: string
   nickname: string
   equipped_expression: ExpressionId
+  equipped_tenue: string
   wins: number
   games_played: number
   level: number
@@ -187,6 +188,7 @@ function Podium({ rows, me }: { rows: Row[]; me?: UUID }) {
                 <Avatar
                   slug={row.slug}
                   expression={podiumExpr(row.slug, row === first ? 'cool' : 'joie', 'joie')}
+                  tenue={row.equipped_tenue}
                   size={row === first ? 92 : 72}
                   selected={row.profile_id === me}
                 />
@@ -221,7 +223,7 @@ function RowCard({ row, me, game }: { row: Row; me: boolean; game: boolean }) {
       )}
     >
       <span className="w-8 text-center font-display text-2xl font-extrabold">{row.rank}</span>
-      <Avatar slug={row.slug} expression={row.equipped_expression} size={48} />
+      <Avatar slug={row.slug} expression={row.equipped_expression} tenue={row.equipped_tenue} size={48} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-display text-lg font-extrabold">
           {row.nickname}

@@ -28,6 +28,22 @@ const MESSAGES: Record<string, string> = {
   not_alive: 'Tu as été éliminé·e : tu regardes la partie.',
   invalid_target: 'Ce joueur ne peut pas être choisi.',
   cannot_vote_self: 'Pas le droit de voter pour toi-même !',
+  // Pas de bol !
+  not_your_turn: 'Ce n’est pas ton tour !',
+  card_not_in_hand: 'Tu n’as plus cette carte.',
+  card_not_playable: 'Cette carte ne peut pas être posée maintenant.',
+  invalid_color: 'Choisis une couleur.',
+  too_many_players: 'Trop de joueurs pour ce jeu.',
+  // Cerveau en fête
+  wrong_mode: 'Cette question se joue autrement.',
+  invalid_choice: 'Choix invalide.',
+  // Petit bac
+  invalid_categories: 'Catégories invalides.',
+  // Dessine & devine
+  not_drawer: 'Seul le dessinateur peut choisir le mot.',
+  drawer_cannot_guess: 'Tu dessines : pas le droit de deviner !',
+  already_found: 'Tu as déjà trouvé !',
+  not_enough_words: 'Pas assez de mots pour cette partie.',
   not_your_guess: 'Ce n’est pas à toi de deviner.',
   invalid_guess: 'Écris un mot.',
   code_generation_failed: 'Impossible de créer le code, réessaie.',

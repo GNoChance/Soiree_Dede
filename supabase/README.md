@@ -4,9 +4,9 @@
 
 1. Créer un projet sur https://supabase.com (région Europe).
 2. **Authentication > Sign In / Providers** : activer **Anonymous sign-ins** (« Allow anonymous sign-ins »).
-3. **SQL Editor > New query** : coller tout `supabase/schema.sql`, **Run**.
-4. Nouvelle requête : coller `supabase/seed.sql`, **Run**.
-   Les deux fichiers sont ré-exécutables à volonté (mise à jour du schéma) sans perte de données : le seed n'écrase jamais PIN, XP ni pseudo.
+3. **SQL Editor > New query** : coller tout `supabase/install.sql` (généré par `npm run sql` = `schema.sql` + `features/*.sql` + `games/*.sql` + `seed.sql`), **Run**.
+   (Équivalent : `schema.sql`, puis `features/tenues.sql`, les `games/*.sql`, puis `seed.sql`, dans cet ordre.)
+4. Les fichiers sont ré-exécutables à volonté (mise à jour du schéma) sans perte de données : le seed n'écrase jamais PIN, XP ni pseudo.
 5. **Project Settings > API** : copier `Project URL` et la clé `anon` `public` dans `.env.local` :
    ```
    VITE_SUPABASE_URL=https://xxxx.supabase.co
@@ -31,13 +31,14 @@ Types TypeScript : `src/types/db.ts` (`createClient<Database>(...)`).
 ### Auth / profil
 | RPC | Retour |
 |---|---|
-| `list_profiles_public()` (aussi en `anon`) | `[{id, slug, first_name, nickname, equipped_expression, expressions, has_pin}]` trié |
+| `list_profiles_public()` (aussi en `anon`) | `[{id, slug, first_name, nickname, equipped_expression, equipped_tenue, expressions, has_pin}]` trié |
 | `login_profile(p_slug, p_pin)` | `{ok:true, first_login, profile}` / `{ok:false, error:'wrong_pin', attempts_left}` / `{ok:false, error:'locked', locked_until}` / `{ok:false, error:'invalid_pin_format'\|'unknown_profile'}` |
 | `current_profile_id()` | `uuid \| null` |
 | `logout_device()` | void |
 | `admin_reset_pin(p_slug)` | void (admin seulement, déconnecte aussi les autres appareils du profil) |
 | `update_nickname(p_nickname)` | profil (1–20 caractères, espaces normalisés) |
 | `equip_expression(p_expression)` | profil (`unknown_expression` / `expression_locked`) |
+| `equip_tenue(p_tenue)` | profil (`unknown_tenue` / `tenue_locked`) — cf. section Tenues |
 
 PIN : exactement 4 chiffres. 5 échecs → blocage 15 min (par profil, tous appareils confondus). Premier login = le PIN saisi devient le PIN.
 
@@ -66,7 +67,7 @@ Un profil n'est que dans **une** soirée non terminée : `already_in_soiree`, `p
 - `game_action(p_match_id, p_action) → state` (le nouveau state public, aussi diffusé en Realtime sur `matches`).
 - `state.seq` (entier, absent avant la 1re action) : version du state, incrémentée à chaque `game_action` (et à l'annulation par `abort` / `end_soiree`). Le front ignore un state reçu avec un `seq` inférieur à celui affiché (la réponse RPC et l'évènement Realtime peuvent arriver dans le désordre).
 - Action commune : `{"type":"abort"}` (hôte) → `status:'finished'`, `state.phase:'aborted'`, `state.aborted:true`, sans résultats.
-- À la fin (`phase:'finished'`) le state contient en plus `results`, `new_unlocks` (`{profile_id: [expr]}`) et `xp_gained` (`{profile_id: xp}`).
+- À la fin (`phase:'finished'`) le state contient en plus `results`, `new_unlocks` (`{profile_id: [expr]}`), `new_tenues` (`{profile_id: [tenue_id]}`, `{}` si aucune) et `xp_gained` (`{profile_id: xp}`).
 - Le client s'abonne à `matches` (filtre `soiree_id=eq.<id>`) et lit **son** secret : `from('match_secrets').select('secret').eq('match_id', id).maybeSingle()`.
 - XP = points × 10 + 50 si victoire. Niveau = `floor(sqrt(xp/100)) + 1` (`levelForXp`).
 
@@ -136,6 +137,17 @@ Points : gagnant vivant 3, gagnant éliminé 2, perdant 0 (Mister White qui devi
 - **cool** : avoir le max de victoires (ex-aequo inclus), au moins 1.
 - **pleurs** : « dernier » = plus mauvais placement d'une partie où tout le monde n'est pas ex-aequo.
 - **colere** : 3 défaites d'affilée (série en cours ou record).
+
+### Tenues (`supabase/features/tenues.sql`)
+Skins vestimentaires : variante du chibi (`public/chibis/<slug>/<tenue>/<expr>.webp`), indépendante de l'expression équipée.
+- Tables : `tenues` (catalogue : `id, label, emoji, game_id, condition_type, threshold, sort_order, has_art`), `tenue_unlocks` (`profile_id, tenue_id, unlocked_at`). Lecture pour tout `authenticated` ; aucune écriture client. Colonne `profiles.equipped_tenue` (défaut `'default'`), exposée dans `_profile_json`, `list_profiles_public()` et les deux vues de classement.
+- Catalogue seedé (`on conflict do update` label/emoji/condition/seuil, **jamais `has_art`**) : `default` (toujours débloquée), puis une tenue par jeu, débloquée par **10 victoires** dans ce jeu : `star` (qui-de-nous), `espion` (undercover), `croupier` (pas-de-bol), `prof` (cerveau-en-fete), `ecolier` (petit-bac), `artiste` (dessine-devine).
+- `condition_type` : `'default'` ou `'game_wins'` (≥ `threshold` lignes `won` de `match_players` pour `game_id` ; `game_id` null = tous jeux). Nouveau type de condition = un `when` de plus dans `evaluate_tenues`.
+- `equip_tenue(p_tenue)` → profil ; erreurs `unknown_tenue`, `tenue_locked`. `default` toujours équipable.
+- `evaluate_tenues(p_profile_id) → text[]` (interne) : insère les déblocages manquants, renvoie les ids nouvellement débloqués. Un rattrapage tourne à chaque exécution du fichier (victoires acquises avant l'installation).
+- **Branchement fin de partie** : `schema.sql` définit un hook no-op `_after_finish_match(p_match_id, p_profile_ids) → jsonb` appelé en dernier par `finish_match` ; `tenues.sql` le redéfinit pour évaluer les tenues de tous les joueurs. `finish_match` renvoie `{new_unlocks, xp_gained, new_tenues}` et `game_action` met `new_tenues` dans le state final.
+- `has_art` est informatif ; côté front la disponibilité des illustrations vient de `src/data/tenues-art.generated.ts` (généré par `tools/slice-chibis`).
+- Ordre d'exécution : `tenues.sql` APRÈS `schema.sql` (il redéfinit `_profile_json`, `list_profiles_public`, les vues). `schema.sql` fait un `drop function list_profiles_public()` avant de la recréer pour rester ré-exécutable seul.
 
 ### Écarts au contrat (ARCHITECTURE.md)
 1. `pin_hash` n'est pas dans `profiles` mais dans une table privée `profile_credentials` (sinon `select('*')` sur profiles exposerait le hash ou échouerait). `has_pin` est exposé via `list_profiles_public()`.

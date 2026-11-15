@@ -18,18 +18,21 @@ const withLevel = (p: ProfileRow) => ({ ...p, level: levelForXp(p.xp) })
 export async function refreshProfile(id?: string): Promise<boolean> {
   const pid = id ?? useSession.getState().profile?.id
   if (!pid) return false
-  const [p, u, s] = await Promise.all([
+  const [p, u, s, tu] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', pid).maybeSingle(),
     supabase.from('unlocks').select('*').eq('profile_id', pid),
     supabase.from('player_stats').select('*').eq('profile_id', pid).maybeSingle(),
+    supabase.from('tenue_unlocks').select('*').eq('profile_id', pid),
   ])
   if (p.error) throw p.error
   if (!p.data) return false
   const unlocks: Partial<Record<ExpressionId, string>> = {}
   for (const row of u.data ?? []) unlocks[row.expression] = row.unlocked_at
+  const tenueUnlocks: Record<string, string> = {}
+  for (const row of tu.data ?? []) tenueUnlocks[row.tenue_id] = row.unlocked_at
   const st = useSession.getState()
   st.setProfile(withLevel(p.data))
-  st.setExtras({ unlocks, stats: (s.data as PlayerStatsRow | null) ?? null })
+  st.setExtras({ unlocks, tenueUnlocks, stats: (s.data as PlayerStatsRow | null) ?? null })
   return true
 }
 

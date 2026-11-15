@@ -1,4 +1,18 @@
-// Banque de questions du quiz « Cerveau en fête » (contenu rempli par l'agent contenu).
+// Banque de questions du quiz « Cerveau en fête ».
+// Les données sont réparties par thème dans ./questions/*.ts (format compact, voir _helpers.ts).
+import { CINEMA } from './questions/cinema'
+import { SERIES } from './questions/series'
+import { MUSIQUE } from './questions/musique'
+import { SPORT } from './questions/sport'
+import { GEOGRAPHIE } from './questions/geographie'
+import { HISTOIRE } from './questions/histoire'
+import { SCIENCES } from './questions/sciences'
+import { GASTRONOMIE } from './questions/gastronomie'
+import { JEUX_VIDEO } from './questions/jeux-video'
+import { ANIMAUX } from './questions/animaux'
+import { CULTURE_POP } from './questions/culture-pop'
+import { LANGUE_FRANCAISE } from './questions/langue-francaise'
+
 export type QuizTheme =
   | 'cinema' | 'series' | 'musique' | 'sport' | 'geographie' | 'histoire'
   | 'sciences' | 'gastronomie' | 'jeux-video' | 'animaux' | 'culture-pop' | 'langue-francaise'
@@ -21,4 +35,17 @@ export interface QuizQuestion {
   typeable?: boolean
 }
 
-export const QUESTIONS: QuizQuestion[] = []
+/**
+ * Questions forcées en QCM : un distracteur serait accepté par la tolérance de
+ * saisie (Louis XV/XVI, vitamine C/D, questions d'orthographe…). Liste produite
+ * par le test serveur (scratchpad test-cerveau.mjs) — à relancer si la banque change.
+ */
+const QCM_ONLY = new Set(['c0100', 'c0340', 'c0410', 'c0413', 'c0439', 'c0510', 'c0526', 'c0582', 'c0695', 'c0696', 'c0697', 'c0718'])
+
+export const QUESTIONS: QuizQuestion[] = [
+  ...CINEMA, ...SERIES, ...MUSIQUE, ...SPORT, ...GEOGRAPHIE, ...HISTOIRE,
+  ...SCIENCES, ...GASTRONOMIE, ...JEUX_VIDEO, ...ANIMAUX, ...CULTURE_POP, ...LANGUE_FRANCAISE,
+].map((q, i) => {
+  const id = `c${String(i + 1).padStart(4, '0')}`
+  return { ...q, id, ...(QCM_ONLY.has(id) ? { typeable: false } : {}) }
+})

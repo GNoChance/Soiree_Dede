@@ -8,6 +8,7 @@ import { ChibiImage } from '@/components/ui/ChibiImage'
 import { Modal } from '@/components/ui/Modal'
 import { burst, confettiRain } from '@/components/ui/confetti'
 import { getExpression } from '@/data/expressions'
+import { getTenue } from '@/data/tenues'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { PlayerInfo } from '@/games/types'
@@ -51,7 +52,7 @@ export function PlayerToken({ player, expression, size = 64, host, bounce, delay
             <Crown className="size-6 fill-sun" strokeWidth={2.5} />
           </motion.span>
         )}
-        <Avatar slug={player.slug} expression={expression ?? player.equipped} size={size} selected={selected} badge={badge} />
+        <Avatar slug={player.slug} expression={expression ?? player.equipped} tenue={player.equippedTenue} size={size} selected={selected} badge={badge} />
       </motion.div>
       <span className="max-w-[5.5rem] truncate font-display text-sm leading-tight font-extrabold">{label ?? player.nickname}</span>
     </div>
@@ -75,7 +76,7 @@ export function CheckableToken({ player, checked, locked, onToggle, size = 64 }:
       aria-label={player.nickname}
       className={cn('relative flex flex-col items-center gap-1 rounded-card p-1', !checked && 'opacity-50 grayscale')}
     >
-      <Avatar slug={player.slug} expression={checked ? player.equipped : 'dodo'} size={size} selected={checked} />
+      <Avatar slug={player.slug} expression={checked ? player.equipped : 'dodo'} tenue={player.equippedTenue} size={size} selected={checked} />
       <AnimatePresence>
         {checked && (
           <motion.span
@@ -216,7 +217,7 @@ export function LaunchCountdown({ emoji, name, color, onDone }: { emoji: string;
 /* Déblocage d'expression : carte qui se retourne                              */
 /* -------------------------------------------------------------------------- */
 
-function FlipCard({ slug, expression, delay }: { slug: string; expression: string; delay: number }) {
+function FlipCard({ slug, expression, delay, tenue }: { slug: string; expression: string; delay: number; tenue?: string }) {
   const reduce = useReducedMotion()
   const [flipped, setFlipped] = useState(Boolean(reduce))
   useEffect(() => {
@@ -227,7 +228,7 @@ function FlipCard({ slug, expression, delay }: { slug: string; expression: strin
     }, reduce ? 0 : delay)
     return () => clearTimeout(t)
   }, [delay, reduce])
-  const def = getExpression(expression)
+  const def = tenue ? getTenue(tenue) : getExpression(expression)
   return (
     <div className="h-64 w-48 [perspective:900px]">
       <motion.div
@@ -241,9 +242,9 @@ function FlipCard({ slug, expression, delay }: { slug: string; expression: strin
           </motion.span>
         </div>
         <div className="sticker absolute inset-0 flex [transform:rotateY(180deg)] flex-col items-center justify-center gap-2 bg-sun p-3 text-[#1f1b2e] [backface-visibility:hidden]">
-          <ChibiImage slug={slug} expression={expression} size={140} />
+          <ChibiImage slug={slug} expression={expression} tenue={tenue} tenueBadge={Boolean(tenue)} size={140} />
           <span className="font-display text-2xl font-extrabold">
-            {def?.emoji} {def?.label ?? expression}
+            {def?.emoji} {def?.label ?? tenue ?? expression}
           </span>
         </div>
       </motion.div>
@@ -307,6 +308,69 @@ export function UnlockReveal({
         ) : (
           <Button fullWidth onClick={onClose}>
             Trop bien !
+          </Button>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * Révèle mes nouvelles tenues (une carte à la fois) et liste celles des autres.
+ * `tenues` = new_tenues du serveur ({profile_id: [tenue_id]}).
+ */
+export function TenueUnlockReveal({
+  tenues, meId, players, onClose, delay = 600,
+}: {
+  tenues: Record<string, string[]> | null | undefined
+  meId: string
+  players: Record<string, PlayerInfo>
+  onClose: () => void
+  delay?: number
+}) {
+  const mine = tenues?.[meId] ?? []
+  const others = Object.entries(tenues ?? {}).filter(([id, list]) => id !== meId && list.length)
+  const [idx, setIdx] = useState(0)
+  const me = players[meId]
+  const open = mine.length > 0 || others.length > 0
+
+  useEffect(() => {
+    if (mine.length) confettiRain(2200)
+  }, [mine.length])
+
+  if (!open) return null
+  const current = mine[idx]
+  return (
+    <Modal open onClose={onClose} title={mine.length ? 'Nouvelle tenue débloquée !' : 'Tenues débloquées'}>
+      <div className="flex flex-col items-center gap-4">
+        {current && me && <FlipCard key={current} slug={me.slug} expression={me.equipped} tenue={current} delay={idx === 0 ? delay : 250} />}
+        {mine.length > 1 && (
+          <p className="font-display font-extrabold text-muted">
+            {idx + 1} / {mine.length}
+          </p>
+        )}
+        {others.length > 0 && (
+          <div className="w-full rounded-card border-2 border-ink/30 bg-sunk p-3">
+            <p className="mb-2 font-display font-extrabold">Chez les autres :</p>
+            <ul className="flex flex-col gap-1">
+              {others.map(([id, list]) => (
+                <li key={id} className="flex items-center gap-2">
+                  {players[id] && <Avatar slug={players[id].slug} expression={players[id].equipped} tenue={list[0]} size={32} />}
+                  <span className="font-bold">
+                    {players[id]?.nickname ?? '?'} : {list.map((t) => getTenue(t)?.label ?? t).join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {idx < mine.length - 1 ? (
+          <Button fullWidth onClick={() => setIdx((i) => i + 1)}>
+            Suivante !
+          </Button>
+        ) : (
+          <Button fullWidth onClick={onClose}>
+            Trop classe !
           </Button>
         )}
       </div>

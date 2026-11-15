@@ -20,6 +20,12 @@ export type ProfileSlug =
 /** Map profile_id -> expressions nouvellement débloquées (entrées non vides seulement). */
 export type NewUnlocks = Record<UUID, ExpressionId[]>;
 
+/** Id d'une tenue (catalogue : table `tenues`, miroir src/data/tenues.ts). 'default' = tenue de base. */
+export type TenueId = string;
+
+/** Map profile_id -> tenues nouvellement débloquées (entrées non vides seulement). */
+export type NewTenues = Record<UUID, TenueId[]>;
+
 // -----------------------------------------------------------------------------
 // Tables (lignes lisibles par le client ; aucune écriture directe : tout passe par RPC)
 // -----------------------------------------------------------------------------
@@ -31,6 +37,7 @@ export type ProfileRow = {
   nickname: string;
   is_admin: boolean;
   equipped_expression: ExpressionId;
+  equipped_tenue: TenueId;
   expressions: ExpressionId[];
   xp: number;
   sort_order: number;
@@ -108,6 +115,25 @@ export type MatchSecretRow<S = UndercoverSecret> = {
   secret: S;
 };
 
+export type TenueRow = {
+  id: TenueId;
+  label: string;
+  emoji: string;
+  /** Jeu dont il faut gagner des parties ; null = tous jeux confondus. */
+  game_id: string | null;
+  /** 'default' | 'game_wins' (extensible). */
+  condition_type: string;
+  threshold: number;
+  sort_order: number;
+  has_art: boolean;
+};
+
+export type TenueUnlockRow = {
+  profile_id: UUID;
+  tenue_id: TenueId;
+  unlocked_at: Timestamp;
+};
+
 export type UnlockRow = {
   profile_id: UUID;
   expression: ExpressionId;
@@ -138,6 +164,7 @@ export type LeaderboardGeneralRow = {
   first_name: string;
   nickname: string;
   equipped_expression: ExpressionId;
+  equipped_tenue: TenueId;
   xp: number;
   level: number;
   wins: number;
@@ -152,6 +179,7 @@ export type LeaderboardByGameRow = {
   first_name: string;
   nickname: string;
   equipped_expression: ExpressionId;
+  equipped_tenue: TenueId;
   games_played: number;
   wins: number;
   points_total: number;
@@ -164,6 +192,7 @@ export type PublicProfile = {
   first_name: string;
   nickname: string;
   equipped_expression: ExpressionId;
+  equipped_tenue: TenueId;
   expressions: ExpressionId[];
   has_pin: boolean;
 };
@@ -183,6 +212,7 @@ export type MatchResult = {
 /** Champs ajoutés par le serveur à la fin (phase 'finished'). */
 export type FinishedExtras = {
   new_unlocks?: NewUnlocks;
+  new_tenues?: NewTenues;
   xp_gained?: Record<UUID, number>;
   /** true si la partie a été annulée (action abort ou fin de soirée). */
   aborted?: boolean;
@@ -339,7 +369,7 @@ export type EndSoireeResult = {
 /** Codes d'erreur levés par les RPC (error.message côté supabase-js). */
 export type RpcErrorCode =
   | 'not_authenticated' | 'not_logged_in' | 'forbidden' | 'unknown_profile'
-  | 'invalid_nickname' | 'unknown_expression' | 'expression_locked'
+  | 'invalid_nickname' | 'unknown_expression' | 'expression_locked' | 'unknown_tenue' | 'tenue_locked'
   | 'invalid_friend' | 'no_pending_request'
   | 'already_in_soiree' | 'player_busy' | 'soiree_not_found' | 'soiree_ended' | 'not_host'
   | 'match_in_progress' | 'player_not_in_soiree' | 'unknown_game' | 'not_enough_players'
@@ -372,6 +402,8 @@ export type Database = {
       match_players: Table<MatchPlayerRow>;
       match_secrets: Table<MatchSecretRow>;
       unlocks: Table<UnlockRow>;
+      tenues: Table<TenueRow>;
+      tenue_unlocks: Table<TenueUnlockRow>;
       player_stats: Table<PlayerStatsRow>;
     };
     Views: {
@@ -386,6 +418,7 @@ export type Database = {
       admin_reset_pin: { Args: { p_slug: string }; Returns: undefined };
       update_nickname: { Args: { p_nickname: string }; Returns: ProfileJson };
       equip_expression: { Args: { p_expression: ExpressionId }; Returns: ProfileJson };
+      equip_tenue: { Args: { p_tenue: TenueId }; Returns: ProfileJson };
       level_for_xp: { Args: { p_xp: number }; Returns: number };
       is_soiree_member: { Args: { p_soiree_id: UUID }; Returns: boolean };
 

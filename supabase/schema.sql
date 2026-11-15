@@ -307,7 +307,10 @@ end $$;
 -- 4. AUTH / PROFIL
 -- =============================================================================
 
-create or replace function public.list_profiles_public()
+-- drop : tenues.sql en change les colonnes de retour (equipped_tenue) ; sans lui,
+-- ré-exécuter ce fichier sur une base déjà équipée échouerait (42P13).
+drop function if exists public.list_profiles_public();
+create function public.list_profiles_public()
 returns table (id uuid, slug text, first_name text, nickname text,
                equipped_expression text, expressions text[], has_pin boolean)
 language sql stable security definer
@@ -714,6 +717,13 @@ end $$;
 -- 7. MOTEUR : fin de partie
 -- =============================================================================
 
+-- Hook de fin de partie : no-op ici, redéfini par supabase/features/tenues.sql
+-- (évaluation des tenues). Renvoie {profile_id: [ids]} fusionné sous `new_tenues`.
+create or replace function public._after_finish_match(p_match_id uuid, p_profile_ids uuid[])
+returns jsonb language sql
+set search_path = public, extensions
+as $$ select '{}'::jsonb $$;
+
 -- p_results : [{profile_id, points, won, placement, stats?: {designated?, undercover_won_as_undercover?, undercover_first_out?}}]
 -- Écrit match_players, XP, player_stats, passe le match en 'finished',
 -- puis évalue les déblocages de tous les joueurs. Renvoie {new_unlocks, xp_gained}.
@@ -772,7 +782,8 @@ begin
 
   update public.matches set status = 'finished', finished_at = now() where id = p_match_id;
 
-  return jsonb_build_object('new_unlocks', public._unlocks_map(v_ids), 'xp_gained', v_xpmap);
+  return jsonb_build_object('new_unlocks', public._unlocks_map(v_ids), 'xp_gained', v_xpmap,
+                            'new_tenues', coalesce(public._after_finish_match(p_match_id, v_ids), '{}'::jsonb));
 end $$;
 
 -- =============================================================================
@@ -1396,7 +1407,8 @@ begin
   if jsonb_typeof(v_res->'results') = 'array' then
     v_fin := public.finish_match(p_match_id, v_res->'results');
     v_state := v_state || jsonb_build_object('new_unlocks', v_fin->'new_unlocks',
-                                             'xp_gained', v_fin->'xp_gained');
+                                             'xp_gained', v_fin->'xp_gained',
+                                             'new_tenues', coalesce(v_fin->'new_tenues', '{}'::jsonb));
     update public.matches set state = v_state, status = 'finished', finished_at = now() where id = p_match_id;
   else
     update public.matches set state = v_state where id = p_match_id;
@@ -1516,6 +1528,7 @@ revoke all on function public._gen_soiree_code() from public, anon, authenticate
 revoke all on function public._end_soiree(uuid, boolean) from public, anon, authenticated;
 revoke all on function public._cleanup_stale_soirees() from public, anon, authenticated;
 revoke all on function public.finish_match(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public._after_finish_match(uuid, uuid[]) from public, anon, authenticated;
 revoke all on function public.game_qui_de_nous_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_finish(jsonb, jsonb) from public, anon, authenticated;
@@ -1581,7 +1594,7 @@ begin
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     create publication supabase_realtime;
   end if;
-  foreach t in array array['soirees', 'soiree_players', 'matches', 'match_players', 'friendships'] loop
+  foreach t in array array['soirees', 'soiree_players', 'matches', 'match_players', 'friendships', 'match_secrets'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

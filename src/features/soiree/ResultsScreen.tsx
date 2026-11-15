@@ -10,7 +10,7 @@ import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { refreshProfile } from '@/lib/auth'
 import type { BaseGameState, GameDefinition, PlayerInfo } from '@/games/types'
-import { UnlockReveal } from './components'
+import { TenueUnlockReveal, UnlockReveal } from './components'
 import { mood, playerOrPlaceholder } from './players'
 
 function CountUp({ to, delay = 0 }: { to: number; delay?: number }) {
@@ -37,8 +37,10 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
   const results = [...(state.results ?? [])].sort((a, b) => a.placement - b.placement)
   const me = results.find((r) => r.profile_id === meId)
   const xp = state.xp_gained?.[meId] ?? 0
-  const [showUnlocks, setShowUnlocks] = useState(false)
+  // Révélations enchaînées : expressions, puis tenues.
+  const [reveal, setReveal] = useState<'none' | 'expressions' | 'tenues'>('none')
   const hasUnlocks = Object.values(state.new_unlocks ?? {}).some((l) => l.length)
+  const hasTenues = Object.values(state.new_tenues ?? {}).some((l) => l.length)
   const Summary = game?.Summary
 
   useEffect(() => {
@@ -49,7 +51,7 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
       fx.whoosh()
     }
     void refreshProfile().catch(() => undefined)
-    const t = window.setTimeout(() => setShowUnlocks(true), 2800)
+    const t = window.setTimeout(() => setReveal(hasUnlocks ? 'expressions' : hasTenues ? 'tenues' : 'none'), 2800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- une seule célébration par écran
   }, [])
@@ -87,7 +89,7 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
                 const p = playerOrPlaceholder(players, r.profile_id)
                 return (
                   <motion.div key={r.profile_id} animate={r.won ? { y: [0, -10, 0] } : undefined} transition={{ repeat: Infinity, duration: 1.2 }}>
-                    <ChibiImage slug={p.slug} expression={r.won ? mood(p, n === 1 ? 'proud' : 'happy') : mood(p, 'sad')} size={n === 1 ? 96 : 76} />
+                    <ChibiImage slug={p.slug} tenue={p.equippedTenue} tenueBadge expression={r.won ? mood(p, n === 1 ? 'proud' : 'happy') : mood(p, 'sad')} size={n === 1 ? 96 : 76} />
                   </motion.div>
                 )
               })}
@@ -135,7 +137,7 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
               className={cn('flex items-center gap-2 rounded-chip px-1 py-0.5', r.profile_id === meId && 'bg-sunk')}
             >
               <span className="w-6 text-center font-display font-extrabold">{r.placement}</span>
-              <Avatar slug={p.slug} expression={r.won ? mood(p, 'happy') : mood(p, 'sad')} size={36} />
+              <Avatar slug={p.slug} tenue={p.equippedTenue} expression={r.won ? mood(p, 'happy') : mood(p, 'sad')} size={36} />
               <span className="flex-1 font-bold">{p.nickname}</span>
               {r.won && <Badge tone="sun">Gagné</Badge>}
               <span className="w-10 text-right font-display font-extrabold">{r.points} pt</span>
@@ -155,7 +157,8 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
         Retour au salon
       </Button>
 
-      {showUnlocks && hasUnlocks && <UnlockReveal unlocks={state.new_unlocks} meId={meId} players={players} onClose={() => setShowUnlocks(false)} />}
+      {reveal === 'expressions' && <UnlockReveal unlocks={state.new_unlocks} meId={meId} players={players} onClose={() => setReveal(hasTenues ? 'tenues' : 'none')} />}
+      {reveal === 'tenues' && <TenueUnlockReveal tenues={state.new_tenues} meId={meId} players={players} onClose={() => setReveal('none')} />}
     </div>
   )
 }

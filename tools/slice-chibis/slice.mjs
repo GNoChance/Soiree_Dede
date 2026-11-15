@@ -167,13 +167,38 @@ async function render(S, g, pad = 40) {
 
 fs.mkdirSync(CHECK, { recursive: true });
 let total = 0, bytes = 0, problems = 0;
-for (const slug of SLUGS) {
+
+// Usage : node slice.mjs                -> tout (planches par defaut + tenues)
+//         node slice.mjs --tenues       -> seulement les planches de tenue
+//         node slice.mjs kevin kevin-star -> seulement ces planches (<slug> ou <slug>-<tenue>)
+const argv = process.argv.slice(2);
+const onlyTenues = argv.includes('--tenues');
+const wanted = argv.filter((a) => !a.startsWith('--'));
+const want = (key, isTenue) => (onlyTenues && !isTenue ? false : wanted.length === 0 || wanted.includes(key));
+
+// Planches a traiter : <slug>.png (tenue "default") puis <slug>-<tenue>.png
+const sheets = [];
+for (const slug of SLUGS) sheets.push({ slug, tenue: 'default', file: path.join(SRC, slug + '.png') });
+const TENUE_RE = new RegExp('^(' + SLUGS.join('|') + ')-([a-z0-9_]+)\\.png$');
+for (const f of fs.readdirSync(SRC).sort()) {
+  const m = TENUE_RE.exec(f);
+  if (m) sheets.push({ slug: m[1], tenue: m[2], file: path.join(SRC, f) });
+}
+const catalogue = fs.readFileSync(path.join(ROOT, 'src/data/tenues.ts'), 'utf8');
+
+for (const { slug, tenue, file } of sheets) {
+  const isTenue = tenue !== 'default';
+  const key = isTenue ? slug + '-' + tenue : slug;
+  if (!want(key, isTenue)) continue;
+  if (!fs.existsSync(file)) { console.log(key + ': planche absente (' + path.relative(ROOT, file) + ')'); if (!isTenue) problems++; continue; }
+  if (isTenue && !catalogue.includes("'" + tenue + "'")) console.log('  !! tenue "' + tenue + '" absente de src/data/tenues.ts (et de supabase/features/tenues.sql ?)');
+  // Meme ordre d'expressions que la planche par defaut du perso.
   const exprs = EXPR[slug] || STD;
-  const S = await findStickers(path.join(SRC, slug + '.png'));
-  console.log(`${slug}: ${S.w}x${S.h}, ${S.ncores} composantes (dilatees)`);
+  const S = await findStickers(file);
+  console.log(`${key}: ${S.w}x${S.h}, ${S.ncores} composantes (dilatees)`);
   S.log.forEach((l) => console.log(l));
   if (S.ncores < 12) { console.log(`  !! moins de 12 stickers (${S.ncores})`); problems++; continue; }
-  const dir = path.join(OUT, slug, 'default');
+  const dir = path.join(OUT, slug, tenue);
   fs.mkdirSync(dir, { recursive: true });
   const tiles = [];
   for (let i = 0; i < 12; i++) {
@@ -191,6 +216,28 @@ for (const slug of SLUGS) {
   const comps = await Promise.all(tiles.map(async (t, i) => ({ input: await sharp(t.png).resize(T, T).png().toBuffer(), left: (i % 4) * T, top: Math.floor(i / 4) * T })));
   const bg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${checker}</svg>`);
   const lb = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${labels}</svg>`);
-  await sharp(bg).composite([...comps, { input: lb }]).png().toFile(path.join(CHECK, slug + '.png'));
+  await sharp(bg).composite([...comps, { input: lb }]).png().toFile(path.join(CHECK, key + '.png'));
 }
 console.log(`\n${total} fichiers, ${(bytes / 1024).toFixed(0)} Ko, problemes: ${problems}`);
+
+// --- src/data/tenues-art.generated.ts : couples "slug/tenue" (hors default) dont les 12 images existent.
+// Le front s'en sert pour ne pas requeter d'images inexistantes (repli sur default + emoji).
+const art = [];
+for (const slug of SLUGS) {
+  const base = path.join(OUT, slug);
+  if (!fs.existsSync(base)) continue;
+  for (const tenue of fs.readdirSync(base).sort()) {
+    if (tenue === 'default' || !fs.statSync(path.join(base, tenue)).isDirectory()) continue;
+    const complete = (EXPR[slug] || STD).every((e) => fs.existsSync(path.join(base, tenue, e + '.webp')));
+    if (complete) art.push(slug + '/' + tenue);
+    else console.log('  !! tenue incomplete ignoree : ' + slug + '/' + tenue);
+  }
+}
+const GEN = path.join(ROOT, 'src/data/tenues-art.generated.ts');
+fs.writeFileSync(GEN, [
+  '// GENERE par tools/slice-chibis/slice.mjs - ne pas editer a la main.',
+  "// Couples \"slug/tenue\" dont les images existent dans public/chibis (hors 'default').",
+  'export const TENUE_ART: readonly string[] = [' + (art.length ? '\n' + art.map((a) => "  '" + a + "',").join('\n') + '\n' : '') + ']',
+  '',
+].join('\n'));
+console.log('tenues-art.generated.ts : ' + art.length + ' couple(s) slug/tenue');

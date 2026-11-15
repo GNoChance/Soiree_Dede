@@ -26,7 +26,7 @@ export const usePlayersStore = create<PlayersState>((set, get) => ({
     set({ loading: true })
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, slug, nickname, first_name, expressions, equipped_expression, sort_order')
+      .select('id, slug, nickname, first_name, expressions, equipped_expression, equipped_tenue, sort_order')
       .order('sort_order')
     if (error || !data) {
       set({ loading: false })
@@ -39,6 +39,7 @@ export const usePlayersStore = create<PlayersState>((set, get) => ({
       firstName: p.first_name,
       expressions: p.expressions?.length ? p.expressions : (getCharacter(p.slug)?.expressions ?? ['joie']),
       equipped: p.equipped_expression ?? 'joie',
+      equippedTenue: p.equipped_tenue ?? 'default',
       color: getCharacter(p.slug)?.color ?? '#FFB703',
     }))
     set({ list, byId: Object.fromEntries(list.map((p) => [p.id, p])), loaded: true, loading: false })
@@ -67,6 +68,7 @@ export function playerOrPlaceholder(byId: Record<string, PlayerInfo>, id: string
       firstName: '…',
       expressions: ['joie'],
       equipped: 'joie',
+      equippedTenue: 'default',
       color: '#cccccc',
     }
   )

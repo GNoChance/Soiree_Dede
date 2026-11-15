@@ -229,7 +229,7 @@ function PersonRow({ p, children }: { p: ProfileRow; children: ReactNode }) {
   return (
     <StaggerItem>
       <motion.div layout className="sticker flex items-center gap-3 rounded-card bg-surface p-3">
-        <Avatar slug={p.slug} expression={p.equipped_expression} size={52} />
+        <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={52} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-lg font-extrabold">{p.nickname}</p>
           <p className="truncate text-xs font-bold text-muted">{p.first_name}</p>

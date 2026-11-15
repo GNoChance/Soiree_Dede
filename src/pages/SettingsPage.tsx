@@ -73,7 +73,7 @@ export function SettingsPage() {
         <StaggerItem>
           <Card className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
-              <Avatar slug={profile.slug} expression={profile.equipped_expression} size={56} />
+              <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} size={56} />
               <div className="flex-1">
                 <p className="font-display text-xl font-extrabold">{profile.nickname}</p>
                 <p className="text-sm text-muted">{profile.first_name}</p>

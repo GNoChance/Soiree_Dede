@@ -24,7 +24,7 @@ export function HubPage() {
           <Card className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
               <motion.div key={profile.equipped_expression} initial={{ scale: 0.6, rotate: -10 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}>
-                <Avatar slug={profile.slug} expression={profile.equipped_expression} size={72} />
+                <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} size={72} />
               </motion.div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-muted">Salut,</p>

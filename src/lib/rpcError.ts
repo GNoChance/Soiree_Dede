@@ -9,6 +9,8 @@ export const RPC_ERROR_MESSAGES: Record<RpcErrorCode, string> = {
   invalid_nickname: 'Le pseudo doit faire entre 1 et 20 caractères.',
   unknown_expression: "Cette expression n'existe pas.",
   expression_locked: "Cette expression n'est pas encore débloquée.",
+  unknown_tenue: "Cette tenue n'existe pas.",
+  tenue_locked: "Cette tenue n'est pas encore débloquée.",
   invalid_friend: 'Tu ne peux pas faire ça avec ce joueur.',
   no_pending_request: "Cette demande d'ami n'existe plus.",
   already_in_soiree: 'Tu es déjà dans une soirée.',

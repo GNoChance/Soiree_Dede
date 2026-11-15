@@ -192,7 +192,7 @@ export function OnboardingPage() {
                       className="flex w-full flex-col items-center gap-0.5 rounded-card border-[3px] border-ink bg-surface px-1 py-3 shadow-sticker"
                     >
                       <motion.div layoutId={`pick-${p.slug}`}>
-                        <Avatar slug={p.slug} expression={p.equipped_expression} size={72} />
+                        <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={72} />
                       </motion.div>
                       <span className="max-w-full truncate font-display text-lg font-extrabold text-text">{p.nickname}</span>
                       <span className="max-w-full truncate text-xs font-bold text-muted">{p.first_name}</span>
@@ -214,7 +214,7 @@ export function OnboardingPage() {
                 animate={{ scale: 1, rotate: 0 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 10 }}
               >
-                <Avatar slug={chosen.slug} expression={mood ?? chosen.equipped_expression} size={140} bounce />
+                <Avatar slug={chosen.slug} expression={mood ?? chosen.equipped_expression} tenue={chosen.equipped_tenue} size={140} bounce />
               </motion.div>
             </motion.div>
             <motion.div key={step} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center">

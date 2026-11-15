@@ -60,7 +60,7 @@ export function SoireeLauncher() {
         <div className="relative flex items-center gap-3">
           {host && (
             <motion.div animate={reduce ? undefined : { rotate: [-6, 6, -6] }} transition={{ repeat: Infinity, duration: 1.6 }}>
-              <Avatar slug={host.slug} expression={host.equipped} size={72} />
+              <Avatar slug={host.slug} expression={host.equipped} tenue={host.equippedTenue} size={72} />
             </motion.div>
           )}
           <div className="min-w-0 flex-1">
@@ -68,7 +68,7 @@ export function SoireeLauncher() {
             <h2 className="truncate text-2xl">{soiree.host_id === meId ? 'Chez toi !' : `chez ${host?.nickname ?? '…'}`}</h2>
             <div className="mt-1 flex -space-x-2">
               {others.map((id) =>
-                byId[id] ? <Avatar key={id} slug={byId[id].slug} expression={byId[id].equipped} size={30} /> : null,
+                byId[id] ? <Avatar key={id} slug={byId[id].slug} expression={byId[id].equipped} tenue={byId[id].equippedTenue} size={30} /> : null,
               )}
               {soiree.player_ids.length > 7 && <span className="pl-3 font-bold">+{soiree.player_ids.length - 7}</span>}
             </div>

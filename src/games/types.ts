@@ -15,6 +15,8 @@ export interface PlayerInfo {
   /** Toutes les expressions du perso (utilisables en jeu même verrouillées). */
   expressions: string[]
   equipped: string
+  /** Tenue équipée (id du catalogue src/data/tenues.ts). */
+  equippedTenue: string
   color: string
 }
 
@@ -33,6 +35,8 @@ export interface BaseGameState {
   aborted?: boolean
   results?: Array<{ profile_id: string; points: number; won: boolean; placement: number }> | null
   new_unlocks?: Record<string, string[]>
+  /** Tenues nouvellement débloquées : {profile_id: [tenue_id]}. */
+  new_tenues?: Record<string, string[]>
   xp_gained?: Record<string, number>
 }
 

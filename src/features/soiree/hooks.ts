@@ -251,6 +251,12 @@ export function useMatch(matchId: string | undefined) {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (p) => {
         accept(p.new as MatchRow)
       })
+      // Secrets mis à jour en cours de partie (mains de cartes, mot du dessinateur…).
+      // Realtime applique la RLS : on ne reçoit que SA propre ligne.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_secrets', filter: `match_id=eq.${matchId}` }, (p) => {
+        const row = p.new as { secret?: unknown } | null
+        if (row && 'secret' in row) setSecret(row.secret ?? null)
+      })
     return subscribe(ch, () => void refetch())
   }, [matchId, refetch, accept])
 

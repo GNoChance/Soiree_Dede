@@ -7,6 +7,9 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { BottomSheet } from '@/components/ui/Modal'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { TenuesTab } from '@/features/tenues/TenuesTab'
+import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
@@ -28,6 +31,7 @@ export function InventoryPage() {
   const [selected, setSelected] = useState<ExpressionId | null>(null)
   const [friends, setFriends] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState<'expressions' | 'tenues'>('expressions')
 
   const profileId = profile?.id
   const load = useCallback(async () => {
@@ -66,6 +70,7 @@ export function InventoryPage() {
       const { data, error } = await supabase.rpc('equip_expression', { p_expression: id })
       if (error) throw error
       patchProfile(data)
+      void usePlayersStore.getState().load(true)
       fx.success()
       burst({ x: 0.5, y: 0.35 }, 50)
       toast.success('Expression équipée !')
@@ -91,17 +96,32 @@ export function InventoryPage() {
         </div>
         <AnimatePresence mode="popLayout">
           <motion.div
-            key={profile.equipped_expression}
+            key={`${profile.equipped_expression}-${profile.equipped_tenue}`}
             initial={{ scale: 0, rotate: -30 }}
             animate={{ scale: 1, rotate: 0 }}
             exit={{ scale: 0, rotate: 30 }}
             transition={{ type: 'spring', stiffness: 380, damping: 11 }}
           >
-            <Avatar slug={profile.slug} expression={profile.equipped_expression} size={84} bounce badge="✓" />
+            <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} size={84} bounce badge="✓" />
           </motion.div>
         </AnimatePresence>
       </StaggerItem>
 
+      <StaggerItem>
+        <SegmentedControl
+          ariaLabel="Inventaire"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'expressions', label: 'Expressions' },
+            { value: 'tenues', label: 'Tenues 👕' },
+          ]}
+        />
+      </StaggerItem>
+
+      {tab === 'tenues' ? (
+        <TenuesTab />
+      ) : (
       <StaggerList className="grid grid-cols-3 gap-3">
         {all.map((id) => {
           const def = EXPRESSIONS[id]
@@ -149,6 +169,7 @@ export function InventoryPage() {
           )
         })}
       </StaggerList>
+      )}
 
       <BottomSheet open={Boolean(sel)} onClose={() => setSelected(null)} title={sel && isUnlocked(sel.id) ? sel.label : 'Expression secrète'}>
         {sel && (

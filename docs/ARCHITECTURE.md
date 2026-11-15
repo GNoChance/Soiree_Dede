@@ -132,3 +132,6 @@ Variables : `.env.local` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (jama
 - Minuteurs : échéance ISO dans le state (`deadline`), front `useCountdown(deadline)` de `@/features/soiree/useServerClock`. N'importe quel joueur envoie `{"type":"tick"}` à l'échéance ; le serveur vérifie `now() >= deadline` (idempotent, ignore sinon sans erreur : renvoie le state inchangé).
 - Temps réel éphémère (ex. traits de dessin) : canal Supabase Realtime **broadcast** `match:<matchId>` (pas de BDD). L'état qui compte reste dans `matches.state`.
 - `npm run sql` génère `supabase/install.sql` (schema + features + games + seed) : c'est CE fichier que l'utilisateur colle dans Supabase.
+
+## Tenues (skins)
+Variante vestimentaire du chibi : `public/chibis/<slug>/<tenue>/<expression>.webp`. Catalogue : table `tenues` (`supabase/features/tenues.sql`) + miroir `src/data/tenues.ts`. `profiles.equipped_tenue` (défaut `default`), RPC `equip_tenue`, déblocage « 10 victoires dans un jeu » évalué en fin de partie (`new_tenues` dans le state final). `Avatar`/`ChibiImage` prennent `tenue` (sans `tenue`, `Avatar` lit l'annuaire `usePlayers`) et se replient sur `default` + emoji si l'illustration manque (`src/data/tenues-art.generated.ts`, généré par `tools/slice-chibis`). Détails : `supabase/README.md` (Tenues) et `tools/slice-chibis/README.md`.
