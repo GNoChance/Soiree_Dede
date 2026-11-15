@@ -5,3 +5,4 @@ dist
 .vercel
 tools/slice-chibis/node_modules
 *.log
+promo-video/
