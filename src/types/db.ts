@@ -142,6 +142,8 @@ export type MatchPlayerRow = {
   placement: number; // 1 = meilleur
   points: number;
   won: boolean;
+  /** Stats propres au jeu (jeux en duel : { duel_wins }). */
+  stats: { duel_wins?: number } & Record<string, unknown>;
 };
 
 export type MatchSecretRow<S = UndercoverSecret> = {
@@ -156,7 +158,7 @@ export type TenueRow = {
   emoji: string;
   /** Jeu dont il faut gagner des parties ; null = tous jeux confondus. */
   game_id: string | null;
-  /** 'default' | 'game_wins' (extensible). */
+  /** 'default' | 'game_wins' | 'duel_wins' (extensible). */
   condition_type: string;
   threshold: number;
   sort_order: number;

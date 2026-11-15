@@ -20,6 +20,8 @@ export interface TenueDef {
   condition: string
   /** « victoires à Undercover » -> « 3/10 victoires à Undercover » */
   unit?: string
+  /** true = jeu en duel : chaque duel remporté compte (condition 'duel_wins'). */
+  duel?: boolean
   /** true = débloquée d'office */
   default?: boolean
 }
@@ -33,6 +35,14 @@ const wins = (id: TenueId, label: string, emoji: string, gameId: string, gameNam
   threshold,
   condition: `${threshold} victoires à ${gameName}`,
   unit: `victoires à ${gameName}`,
+})
+
+/** Jeux en duel : chaque duel remporté compte (pas seulement la session). */
+const duels = (id: TenueId, label: string, emoji: string, gameId: string, gameName: string, threshold = 10): TenueDef => ({
+  ...wins(id, label, emoji, gameId, gameName, threshold),
+  duel: true,
+  condition: `${threshold} duels gagnés à ${gameName}`,
+  unit: `duels gagnés à ${gameName}`,
 })
 
 export const DEFAULT_TENUE: TenueId = 'default'
@@ -54,9 +64,9 @@ export const TENUES: TenueDef[] = [
   wins('archer', 'Archer', '🏹', 'le-plus-proche', 'Le plus proche'),
   wins('comedien', 'Comédien', '🎭', 'action-ou-verite', 'Action ou vérité'),
   wins('coach', 'Coach', '📣', 'devine-en-equipe', 'Devine en équipe'),
-  wins('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'),
-  wins('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'),
-  wins('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'),
+  duels('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'),
+  duels('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'),
+  duels('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'),
 ]
 
 export const TENUES_BY_ID = Object.fromEntries(TENUES.map((t) => [t.id, t])) as Record<TenueId, TenueDef>

@@ -126,6 +126,8 @@ create table if not exists public.match_players (
   won        boolean not null default false,
   primary key (match_id, profile_id)
 );
+-- Stats propres au jeu (ex. jeux en duel : {"duel_wins": n}) ; sert aux tenues.
+alter table public.match_players add column if not exists stats jsonb not null default '{}'::jsonb;
 create index if not exists match_players_profile_idx on public.match_players(profile_id);
 create index if not exists match_players_game_idx on public.match_players(game_id);
 
@@ -939,9 +941,10 @@ begin
     select * from jsonb_to_recordset(p_results)
       as x(profile_id uuid, points integer, won boolean, placement integer, stats jsonb)
   loop
-    insert into public.match_players(match_id, profile_id, game_id, placement, points, won)
+    insert into public.match_players(match_id, profile_id, game_id, placement, points, won, stats)
     values (p_match_id, r.profile_id, v_m.game_id, coalesce(r.placement, 1),
-            coalesce(r.points, 0), coalesce(r.won, false));
+            coalesce(r.points, 0), coalesce(r.won, false),
+            case when jsonb_typeof(r.stats) = 'object' then r.stats else '{}'::jsonb end);
 
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;

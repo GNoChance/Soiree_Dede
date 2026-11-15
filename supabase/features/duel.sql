@@ -625,7 +625,10 @@ begin
     v_winners := '[]'::jsonb;
   end if;
 
-  select jsonb_agg(jsonb_build_object('profile_id', p, 'points', pts, 'won', w, 'placement', pl, 'stats', '{}'::jsonb)
+  -- stats.duel_wins = duels remportés dans la session (tenues : chaque duel gagné compte).
+  select jsonb_agg(jsonb_build_object('profile_id', p, 'points', pts, 'won', w, 'placement', pl,
+                                      'stats', jsonb_build_object('duel_wins',
+                                        coalesce((v_s->'stats'->p->>'wins')::integer, 0)))
                    order by pl, p)
     into v_results
     from (select p, pts, w, (rank() over (order by w desc, pts desc))::integer as pl

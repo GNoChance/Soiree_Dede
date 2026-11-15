@@ -129,6 +129,8 @@ create table if not exists public.match_players (
   won        boolean not null default false,
   primary key (match_id, profile_id)
 );
+-- Stats propres au jeu (ex. jeux en duel : {"duel_wins": n}) ; sert aux tenues.
+alter table public.match_players add column if not exists stats jsonb not null default '{}'::jsonb;
 create index if not exists match_players_profile_idx on public.match_players(profile_id);
 create index if not exists match_players_game_idx on public.match_players(game_id);
 
@@ -942,9 +944,10 @@ begin
     select * from jsonb_to_recordset(p_results)
       as x(profile_id uuid, points integer, won boolean, placement integer, stats jsonb)
   loop
-    insert into public.match_players(match_id, profile_id, game_id, placement, points, won)
+    insert into public.match_players(match_id, profile_id, game_id, placement, points, won, stats)
     values (p_match_id, r.profile_id, v_m.game_id, coalesce(r.placement, 1),
-            coalesce(r.points, 0), coalesce(r.won, false));
+            coalesce(r.points, 0), coalesce(r.won, false),
+            case when jsonb_typeof(r.stats) = 'object' then r.stats else '{}'::jsonb end);
 
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;
@@ -2484,7 +2487,10 @@ begin
     v_winners := '[]'::jsonb;
   end if;
 
-  select jsonb_agg(jsonb_build_object('profile_id', p, 'points', pts, 'won', w, 'placement', pl, 'stats', '{}'::jsonb)
+  -- stats.duel_wins = duels remportés dans la session (tenues : chaque duel gagné compte).
+  select jsonb_agg(jsonb_build_object('profile_id', p, 'points', pts, 'won', w, 'placement', pl,
+                                      'stats', jsonb_build_object('duel_wins',
+                                        coalesce((v_s->'stats'->p->>'wins')::integer, 0)))
                    order by pl, p)
     into v_results
     from (select p, pts, w, (rank() over (order by w desc, pts desc))::integer as pl
@@ -2762,7 +2768,7 @@ create table if not exists public.tenues (
   label          text not null,
   emoji          text not null,
   game_id        text,                                  -- null = tous jeux confondus
-  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' (extensible)
+  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins'
   threshold      integer not null default 10,
   sort_order     integer not null default 100,
   has_art        boolean not null default false         -- informatif ; le front lit tenues-art.generated.ts
@@ -2797,9 +2803,9 @@ insert into public.tenues (id, label, emoji, game_id, condition_type, threshold,
   ('archer',     'Archer',        '🏹', 'le-plus-proche', 'game_wins', 10, 130),
   ('comedien',   'Comédien',      '🎭', 'action-ou-verite','game_wins', 10, 140),
   ('coach',      'Coach',         '📣', 'devine-en-equipe','game_wins', 10, 150),
-  ('stratege',   'Stratège',      '🧠', 'quatre-a-la-suite','game_wins', 10, 160),
-  ('ninja',      'Ninja',         '🥷', 'morpion',        'game_wins', 10, 170),
-  ('amiral',     'Amiral',        '⚓', 'bataille-navale','game_wins', 10, 180)
+  ('stratege',   'Stratège',      '🧠', 'quatre-a-la-suite','duel_wins', 10, 160),
+  ('ninja',      'Ninja',         '🥷', 'morpion',        'duel_wins', 10, 170),
+  ('amiral',     'Amiral',        '⚓', 'bataille-navale','duel_wins', 10, 180)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -2887,7 +2893,8 @@ grant select on table public.tenues, public.tenue_unlocks to authenticated;
 -- ---- Évaluation ---------------------------------------------------------------
 
 -- Débloque les tenues dont la condition est remplie ; renvoie les ids NOUVELLEMENT débloqués.
--- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id`
+-- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id` ;
+-- 'duel_wins' = au moins `threshold` duels remportés (somme de match_players.stats.duel_wins)
 -- (tous jeux si game_id est null). Ajouter un type = ajouter un `when` ci-dessous.
 create or replace function public.evaluate_tenues(p_profile_id uuid)
 returns text[] language plpgsql security definer
@@ -2910,6 +2917,13 @@ begin
       when 'game_wins' then
         (select count(*) from public.match_players mp
           where mp.profile_id = p_profile_id and mp.won
+            and (t.game_id is null or mp.game_id = t.game_id)) >= t.threshold
+      -- Jeux en duel : chaque DUEL remporté compte (stats.duel_wins de chaque session).
+      when 'duel_wins' then
+        (select coalesce(sum(case when mp.stats->>'duel_wins' ~ '^\d{1,6}$'
+                                  then (mp.stats->>'duel_wins')::integer else 0 end), 0)
+           from public.match_players mp
+          where mp.profile_id = p_profile_id
             and (t.game_id is null or mp.game_id = t.game_id)) >= t.threshold
       else false
     end;

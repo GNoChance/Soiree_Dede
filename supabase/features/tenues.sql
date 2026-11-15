@@ -11,7 +11,7 @@ create table if not exists public.tenues (
   label          text not null,
   emoji          text not null,
   game_id        text,                                  -- null = tous jeux confondus
-  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' (extensible)
+  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins'
   threshold      integer not null default 10,
   sort_order     integer not null default 100,
   has_art        boolean not null default false         -- informatif ; le front lit tenues-art.generated.ts
@@ -46,9 +46,9 @@ insert into public.tenues (id, label, emoji, game_id, condition_type, threshold,
   ('archer',     'Archer',        '🏹', 'le-plus-proche', 'game_wins', 10, 130),
   ('comedien',   'Comédien',      '🎭', 'action-ou-verite','game_wins', 10, 140),
   ('coach',      'Coach',         '📣', 'devine-en-equipe','game_wins', 10, 150),
-  ('stratege',   'Stratège',      '🧠', 'quatre-a-la-suite','game_wins', 10, 160),
-  ('ninja',      'Ninja',         '🥷', 'morpion',        'game_wins', 10, 170),
-  ('amiral',     'Amiral',        '⚓', 'bataille-navale','game_wins', 10, 180)
+  ('stratege',   'Stratège',      '🧠', 'quatre-a-la-suite','duel_wins', 10, 160),
+  ('ninja',      'Ninja',         '🥷', 'morpion',        'duel_wins', 10, 170),
+  ('amiral',     'Amiral',        '⚓', 'bataille-navale','duel_wins', 10, 180)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -136,7 +136,8 @@ grant select on table public.tenues, public.tenue_unlocks to authenticated;
 -- ---- Évaluation ---------------------------------------------------------------
 
 -- Débloque les tenues dont la condition est remplie ; renvoie les ids NOUVELLEMENT débloqués.
--- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id`
+-- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id` ;
+-- 'duel_wins' = au moins `threshold` duels remportés (somme de match_players.stats.duel_wins)
 -- (tous jeux si game_id est null). Ajouter un type = ajouter un `when` ci-dessous.
 create or replace function public.evaluate_tenues(p_profile_id uuid)
 returns text[] language plpgsql security definer
@@ -159,6 +160,13 @@ begin
       when 'game_wins' then
         (select count(*) from public.match_players mp
           where mp.profile_id = p_profile_id and mp.won
+            and (t.game_id is null or mp.game_id = t.game_id)) >= t.threshold
+      -- Jeux en duel : chaque DUEL remporté compte (stats.duel_wins de chaque session).
+      when 'duel_wins' then
+        (select coalesce(sum(case when mp.stats->>'duel_wins' ~ '^\d{1,6}$'
+                                  then (mp.stats->>'duel_wins')::integer else 0 end), 0)
+           from public.match_players mp
+          where mp.profile_id = p_profile_id
             and (t.game_id is null or mp.game_id = t.game_id)) >= t.threshold
       else false
     end;

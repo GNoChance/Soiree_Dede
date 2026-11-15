@@ -17,23 +17,34 @@ import { DEFAULT_TENUE, TENUES, type TenueDef } from '@/data/tenues'
 import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
 
-/** Victoires par jeu du joueur, calculées depuis match_players. */
+/** Victoires par jeu du joueur (et duels remportés pour les jeux en duel), depuis match_players. */
 function useWinsByGame(profileId: string | undefined) {
   const [wins, setWins] = useState<Record<string, number>>({})
+  const [duelWins, setDuelWins] = useState<Record<string, number>>({})
   const [total, setTotal] = useState(0)
   const load = useCallback(async () => {
     if (!profileId) return
-    const { data } = await supabase.from('match_players').select('game_id').eq('profile_id', profileId).eq('won', true)
+    const { data } = await supabase.from('match_players').select('game_id, won, stats').eq('profile_id', profileId)
     const byGame: Record<string, number> = {}
-    for (const r of data ?? []) byGame[r.game_id] = (byGame[r.game_id] ?? 0) + 1
+    const byDuel: Record<string, number> = {}
+    let n = 0
+    for (const r of (data ?? []) as { game_id: string; won: boolean; stats: { duel_wins?: unknown } | null }[]) {
+      if (r.won) {
+        byGame[r.game_id] = (byGame[r.game_id] ?? 0) + 1
+        n++
+      }
+      const d = Number(r.stats?.duel_wins ?? 0)
+      if (Number.isFinite(d) && d > 0) byDuel[r.game_id] = (byDuel[r.game_id] ?? 0) + d
+    }
     setWins(byGame)
-    setTotal(data?.length ?? 0)
+    setDuelWins(byDuel)
+    setTotal(n)
   }, [profileId])
   useEffect(() => {
     void load()
   }, [load])
   useRefetchOnFocus(() => void load())
-  return { wins, total }
+  return { wins, duelWins, total }
 }
 
 export function TenuesTab() {
@@ -41,13 +52,13 @@ export function TenuesTab() {
   const tenueUnlocks = useSession((s) => s.tenueUnlocks)
   const patchProfile = useSession((s) => s.patchProfile)
   const [busy, setBusy] = useState<string | null>(null)
-  const { wins, total } = useWinsByGame(profile?.id)
+  const { wins, duelWins, total } = useWinsByGame(profile?.id)
 
   if (!profile) return null
   const equippedTenue = profile.equipped_tenue ?? DEFAULT_TENUE
 
   const progressOf = (t: TenueDef) => {
-    const raw = t.gameId ? (wins[t.gameId] ?? 0) : total
+    const raw = t.gameId ? ((t.duel ? duelWins : wins)[t.gameId] ?? 0) : total
     return { value: Math.min(raw, t.threshold), target: t.threshold }
   }
 
