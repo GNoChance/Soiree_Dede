@@ -546,7 +546,8 @@ begin
 
   update public.matches
      set status = 'finished', finished_at = now(),
-         state = state || jsonb_build_object('phase', 'aborted', 'aborted', true)
+         state = state || jsonb_build_object('phase', 'aborted', 'aborted', true,
+                                             'seq', coalesce((state->>'seq')::integer, 0) + 1)
    where soiree_id = p_soiree_id and status <> 'finished';
 
   v_players := array(
@@ -1354,7 +1355,8 @@ begin
 
   if p_action->>'type' = 'abort' then
     if not v_is_host then raise exception 'not_host'; end if;
-    v_state := v_m.state || jsonb_build_object('phase', 'aborted', 'aborted', true);
+    v_state := v_m.state || jsonb_build_object('phase', 'aborted', 'aborted', true,
+                                               'seq', coalesce((v_m.state->>'seq')::integer, 0) + 1);
     update public.matches set state = v_state, status = 'finished', finished_at = now() where id = p_match_id;
     return v_state;
   end if;
@@ -1371,7 +1373,9 @@ begin
   end if;
 
   update public.match_server_state set data = v_res->'server' where match_id = p_match_id;
-  v_state := v_res->'state';
+  -- seq : compteur monotone de versions du state public. Le front s'en sert pour
+  -- ignorer un state plus ancien reçu en retard (réponse RPC vs évènement Realtime).
+  v_state := (v_res->'state') || jsonb_build_object('seq', coalesce((v_m.state->>'seq')::integer, 0) + 1);
 
   if jsonb_typeof(v_res->'results') = 'array' then
     v_fin := public.finish_match(p_match_id, v_res->'results');
@@ -1560,7 +1564,7 @@ begin
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     create publication supabase_realtime;
   end if;
-  foreach t in array array['soirees', 'soiree_players', 'matches', 'match_players'] loop
+  foreach t in array array['soirees', 'soiree_players', 'matches', 'match_players', 'friendships'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

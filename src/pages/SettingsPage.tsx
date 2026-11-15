@@ -1,21 +1,68 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { LogOut, RefreshCw } from 'lucide-react'
+import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
+import { CHARACTERS } from '@/data/characters'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Modal } from '@/components/ui/Modal'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { Toggle } from '@/components/ui/Toggle'
 import { usePWAUpdate } from '@/hooks/usePWAUpdate'
+import { logout } from '@/lib/auth'
+import { toastRpcError } from '@/lib/rpcError'
+import { supabase } from '@/lib/supabase'
 import { toast } from '@/store/toast'
 import { useSession } from '@/store/session'
 import { useSettings, type Theme } from '@/store/settings'
 
+const inputCls =
+  'sticker-sm min-w-0 flex-1 rounded-card border-[3px] border-ink bg-surface px-3 py-2 font-display text-lg font-extrabold text-text outline-none'
+
 export function SettingsPage() {
   const { theme, sound, haptics, setTheme, setSound, setHaptics } = useSettings()
-  const { profile, logout } = useSession()
+  const profile = useSession((s) => s.profile)
+  const patchProfile = useSession((s) => s.patchProfile)
   const navigate = useNavigate()
   const { needRefresh, applyUpdate } = usePWAUpdate()
+  const [nick, setNick] = useState<string | null>(null)
+  const [savingNick, setSavingNick] = useState(false)
+  const [resetSlug, setResetSlug] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
+
+  const saveNick = async () => {
+    if (nick === null) return
+    setSavingNick(true)
+    try {
+      const { data, error } = await supabase.rpc('update_nickname', { p_nickname: nick.trim() })
+      if (error) throw error
+      patchProfile(data)
+      toast.success('Pseudo modifié !')
+      setNick(null)
+    } catch (e) {
+      toastRpcError(e)
+    } finally {
+      setSavingNick(false)
+    }
+  }
+
+  const doReset = async () => {
+    if (!resetSlug) return
+    setResetting(true)
+    try {
+      const { error } = await supabase.rpc('admin_reset_pin', { p_slug: resetSlug })
+      if (error) throw error
+      toast.success('Code réinitialisé : le joueur en choisira un nouveau à sa prochaine connexion.')
+      setResetSlug(null)
+    } catch (e) {
+      toastRpcError(e)
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const resetTarget = CHARACTERS.find((c) => c.slug === resetSlug)
 
   return (
     <StaggerList className="flex flex-col gap-4">
@@ -24,11 +71,31 @@ export function SettingsPage() {
       </StaggerItem>
       {profile && (
         <StaggerItem>
-          <Card className="flex items-center gap-3">
-            <Avatar slug={profile.slug} expression={profile.equipped_expression} size={56} />
-            <div className="flex-1">
-              <p className="font-display text-xl font-extrabold">{profile.nickname}</p>
-              <p className="text-sm text-muted">{profile.first_name}</p>
+          <Card className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <Avatar slug={profile.slug} expression={profile.equipped_expression} size={56} />
+              <div className="flex-1">
+                <p className="font-display text-xl font-extrabold">{profile.nickname}</p>
+                <p className="text-sm text-muted">{profile.first_name}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                aria-label="Pseudo"
+                value={nick ?? profile.nickname}
+                onChange={(e) => setNick(e.target.value)}
+                maxLength={20}
+                className={inputCls}
+              />
+              <Button
+                size="sm"
+                icon={<Pencil className="size-4" />}
+                loading={savingNick}
+                disabled={nick === null || !nick.trim() || nick.trim() === profile.nickname}
+                onClick={() => void saveNick()}
+              >
+                Changer
+              </Button>
             </div>
           </Card>
         </StaggerItem>
@@ -60,6 +127,27 @@ export function SettingsPage() {
           </div>
         </Card>
       </StaggerItem>
+      {profile?.is_admin && (
+        <StaggerItem>
+          <Card className="flex flex-col gap-3">
+            <p className="flex items-center gap-2 font-display text-lg font-extrabold">
+              <KeyRound className="size-5" /> Admin : réinitialiser le code d'un joueur
+            </p>
+            <div className="grid grid-cols-4 gap-2">
+              {CHARACTERS.filter((c) => c.slug !== profile.slug).map((c) => (
+                <button
+                  key={c.slug}
+                  onClick={() => setResetSlug(c.slug)}
+                  className="flex flex-col items-center gap-0.5 rounded-card py-1 active:scale-95"
+                >
+                  <Avatar slug={c.slug} size={52} />
+                  <span className="max-w-full truncate text-xs font-bold">{c.nickname}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+        </StaggerItem>
+      )}
       <StaggerItem>
         <Button
           variant="secondary"
@@ -67,7 +155,7 @@ export function SettingsPage() {
           icon={<RefreshCw className="size-5" />}
           onClick={() => (needRefresh ? void applyUpdate() : toast.success('Tu as la dernière version !'))}
         >
-          {needRefresh ? 'Mettre à jour l\'app' : 'Rechercher une mise à jour'}
+          {needRefresh ? "Mettre à jour l'app" : 'Rechercher une mise à jour'}
         </Button>
       </StaggerItem>
       <StaggerItem>
@@ -75,14 +163,29 @@ export function SettingsPage() {
           variant="danger"
           fullWidth
           icon={<LogOut className="size-5" />}
-          onClick={() => {
-            logout()
+          onClick={async () => {
+            await logout()
             navigate('/onboarding', { replace: true })
           }}
         >
           Changer de personnage
         </Button>
       </StaggerItem>
+
+      <Modal open={Boolean(resetTarget)} onClose={() => setResetSlug(null)} title="Réinitialiser le code ?">
+        {resetTarget && (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <Avatar slug={resetTarget.slug} expression="reflexion" size={96} />
+            <p>
+              Le code de <strong>{resetTarget.nickname}</strong> sera effacé et ses appareils déconnectés. Il en choisira un nouveau à sa prochaine connexion.
+            </p>
+            <div className="flex w-full gap-3">
+              <Button variant="secondary" fullWidth onClick={() => setResetSlug(null)}>Annuler</Button>
+              <Button variant="danger" fullWidth loading={resetting} onClick={() => void doReset()}>Réinitialiser</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </StaggerList>
   )
 }

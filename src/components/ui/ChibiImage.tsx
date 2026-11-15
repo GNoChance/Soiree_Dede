@@ -12,11 +12,13 @@ export interface ChibiImageProps {
   alt?: string
   /** Fallback minimal (juste l'initiale, sans disque colore) - utilise par Avatar */
   bare?: boolean
+  /** Miniature 160px (listes) ; auto si size <= 100 */
+  thumb?: boolean
 }
 
 /** Image du chibi `/chibis/<slug>/<tenue>/<expression>.webp` ; fallback = rond colore + initiale. */
-export function ChibiImage({ slug, expression = 'joie', tenue = 'default', size = 96, className, alt, bare }: ChibiImageProps) {
-  const src = chibiUrl(slug, expression, tenue)
+export function ChibiImage({ slug, expression = 'joie', tenue = 'default', size = 96, className, alt, bare, thumb }: ChibiImageProps) {
+  const src = chibiUrl(slug, expression, tenue, thumb ?? size <= 100)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const char = getCharacter(slug)
   const failed = failedSrc === src

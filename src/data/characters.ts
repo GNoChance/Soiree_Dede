@@ -29,13 +29,13 @@ const NINI: ExpressionId[] = [
 ]
 
 export const CHARACTERS: Character[] = [
-  { slug: 'kevin', firstName: 'Kevin', nickname: 'Kevin', color: '#4CC9F0', expressions: STANDARD, isAdmin: true },
+  { slug: 'kevin', firstName: 'Kevin', nickname: 'Keke', color: '#4CC9F0', expressions: STANDARD, isAdmin: true },
   { slug: 'cycy', firstName: 'Cyrielle', nickname: 'Cycy', color: '#FF8FA3', expressions: STANDARD },
   { slug: 'dede', firstName: 'Delphine', nickname: 'Dédé', color: '#FFB703', expressions: STANDARD },
   { slug: 'manon', firstName: 'Manon', nickname: 'Manon', color: '#8B5CF6', expressions: STANDARD },
   { slug: 'mika', firstName: 'Michael', nickname: 'Mika', color: '#06D6A0', expressions: STANDARD },
   { slug: 'cecile', firstName: 'Cécile', nickname: 'Cécile', color: '#EF476F', expressions: STANDARD },
-  { slug: 'carole', firstName: 'Carole', nickname: 'Carole', color: '#FB8500', expressions: CAROLE },
+  { slug: 'carole', firstName: 'Carole', nickname: 'Karo', color: '#FB8500', expressions: CAROLE },
   { slug: 'marius', firstName: 'Marius', nickname: 'Marius', color: '#3A86FF', expressions: STANDARD },
   { slug: 'nini', firstName: 'Nicolas', nickname: 'Nini', color: '#7AE582', expressions: NINI },
 ]
@@ -47,5 +47,5 @@ export const CHARACTERS_BY_SLUG = Object.fromEntries(
 export const getCharacter = (slug: string): Character | undefined =>
   (CHARACTERS_BY_SLUG as Record<string, Character>)[slug]
 
-export const chibiUrl = (slug: string, expression: string = 'joie', tenue: string = 'default') =>
-  `/chibis/${slug}/${tenue}/${expression}.webp`
+export const chibiUrl = (slug: string, expression: string = 'joie', tenue: string = 'default', thumb = false) =>
+  `/chibis/${slug}/${tenue}/${expression}${thumb ? '@thumb' : ''}.webp`

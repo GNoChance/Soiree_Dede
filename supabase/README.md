@@ -64,6 +64,7 @@ Un profil n'est que dans **une** soirée non terminée : `already_in_soiree`, `p
 ### Moteur
 - `start_match(p_soiree_id, p_game_id, p_options) → uuid` (hôte). Erreur `match_in_progress` s'il y a déjà une partie `playing`. `p_options.player_ids` (optionnel) = sous-ensemble des joueurs de la soirée.
 - `game_action(p_match_id, p_action) → state` (le nouveau state public, aussi diffusé en Realtime sur `matches`).
+- `state.seq` (entier, absent avant la 1re action) : version du state, incrémentée à chaque `game_action` (et à l'annulation par `abort` / `end_soiree`). Le front ignore un state reçu avec un `seq` inférieur à celui affiché (la réponse RPC et l'évènement Realtime peuvent arriver dans le désordre).
 - Action commune : `{"type":"abort"}` (hôte) → `status:'finished'`, `state.phase:'aborted'`, `state.aborted:true`, sans résultats.
 - À la fin (`phase:'finished'`) le state contient en plus `results`, `new_unlocks` (`{profile_id: [expr]}`) et `xp_gained` (`{profile_id: xp}`).
 - Le client s'abonne à `matches` (filtre `soiree_id=eq.<id>`) et lit **son** secret : `from('match_secrets').select('secret').eq('match_id', id).maybeSingle()`.
@@ -143,3 +144,4 @@ Points : gagnant vivant 3, gagnant éliminé 2, perdant 0 (Mister White qui devi
 4. RPC ajoutée : `my_active_soiree()`. Fonction `level_for_xp(xp)`. Action commune `abort`. Option `player_ids` de `start_match`.
 5. `finish_match(p_match_id, p_results)` est interne : `results` = `[{profile_id, points, won, placement, stats}]`, appelée par `game_action`.
 6. `matches.status = 'lobby'` n'est jamais utilisé (une partie est créée directement en `playing`).
+7. (Phase 2) `state.seq` ajouté par `game_action` / `abort` / `_end_soiree` : version monotone du state public (anti-régression d'affichage côté front). **Re-coller `schema.sql`** pour l'activer ; sans lui le front fonctionne quand même (il accepte alors tout state reçu).

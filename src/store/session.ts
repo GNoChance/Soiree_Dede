@@ -1,35 +1,41 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { CharacterSlug } from '@/data/characters'
-import type { ExpressionId } from '@/data/expressions'
+import type { ExpressionId, PlayerStatsRow, ProfileJson } from '@/types/db'
 
-/** Forme minimale du profil connecte cote front (phase 2 : alimente par login_profile / profiles). */
-export interface SessionProfile {
-  id: string
-  slug: CharacterSlug
-  first_name: string
-  nickname: string
-  is_admin: boolean
-  equipped_expression: ExpressionId
-  xp: number
-}
+/** Profil connecté côté front = ligne profiles + niveau calculé. */
+export type SessionProfile = ProfileJson
 
 interface SessionState {
   profile: SessionProfile | null
+  /** expression -> date de déblocage (ISO) */
+  unlocks: Partial<Record<ExpressionId, string>>
+  stats: PlayerStatsRow | null
+  /** true une fois la vérification de session de démarrage terminée */
+  booted: boolean
   setProfile: (p: SessionProfile | null) => void
   patchProfile: (p: Partial<SessionProfile>) => void
-  logout: () => void
+  setExtras: (e: { unlocks?: SessionState['unlocks']; stats?: PlayerStatsRow | null }) => void
+  setBooted: (b: boolean) => void
+  /** Reset local uniquement (la session anonyme Supabase est conservée). Voir lib/auth.logout pour l'appel RPC. */
+  reset: () => void
 }
 
 export const useSession = create<SessionState>()(
   persist(
     (set) => ({
       profile: null,
+      unlocks: {},
+      stats: null,
+      booted: false,
       setProfile: (profile) => set({ profile }),
       patchProfile: (p) => set((s) => (s.profile ? { profile: { ...s.profile, ...p } } : s)),
-      // Phase 2 : appeler aussi supabase.auth.signOut() si besoin
-      logout: () => set({ profile: null }),
+      setExtras: (e) => set(e),
+      setBooted: (booted) => set({ booted }),
+      reset: () => set({ profile: null, unlocks: {}, stats: null }),
     }),
-    { name: 'dede-session' },
+    {
+      name: 'dede-session-v2',
+      partialize: (s) => ({ profile: s.profile }),
+    },
   ),
 )

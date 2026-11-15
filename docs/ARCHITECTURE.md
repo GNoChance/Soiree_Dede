@@ -12,13 +12,13 @@ Source de vérité partagée entre tous les agents. Toute divergence = bug.
 ## Personnages (slug → prénom / pseudo par défaut)
 | slug | prénom | pseudo |
 |---|---|---|
-| kevin | Kevin | Kevin |
+| kevin | Kevin | Keke |
 | cycy | Cyrielle | Cycy |
 | dede | Delphine | Dédé |
 | manon | Manon | Manon |
 | mika | Michael | Mika |
 | cecile | Cécile | Cécile |
-| carole | Carole | Carole |
+| carole | Carole | Karo |
 | marius | Marius | Marius |
 | nini | Nicolas | Nini |
 

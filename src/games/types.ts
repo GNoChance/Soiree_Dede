@@ -1,22 +1,81 @@
 import type { ComponentType } from 'react'
 
-/** Props passees au composant Play d'un jeu. Phase 2 pourra les enrichir (state, secret, players...). */
+/**
+ * Contrat d'un module de jeu. Ajouter un jeu = un dossier `src/games/<id>/`
+ * + une entrée dans `registry.ts` + les fonctions SQL `game_<id>_start/_action`.
+ */
+
+/** Joueur tel que vu par les jeux (annuaire des profils). */
+export interface PlayerInfo {
+  id: string
+  slug: string
+  nickname: string
+  firstName: string
+  /** Toutes les expressions du perso (utilisables en jeu même verrouillées). */
+  expressions: string[]
+  equipped: string
+  color: string
+}
+
+/** Action envoyée à `game_action` (toujours un objet avec `type`). */
+export type GameActionPayload = { type: string } & Record<string, unknown>
+
+/** État public commun minimal (chaque jeu a le sien, cf. src/types/db.ts). */
+export interface BaseGameState {
+  game: string
+  phase: string
+  round?: number
+  total_rounds?: number
+  players: string[]
+  /** Version monotone du state (ajoutée par game_action). */
+  seq?: number
+  aborted?: boolean
+  results?: Array<{ profile_id: string; points: number; won: boolean; placement: number }> | null
+  new_unlocks?: Record<string, string[]>
+  xp_gained?: Record<string, number>
+}
+
+/** Props passées au composant Play d'un jeu par MatchPage. */
 export interface GamePlayProps {
   matchId: string
-  soireeId?: string
-  /** Quitter la partie / retour au salon */
+  soireeId: string
+  /** State public (à caster vers le type du jeu). */
+  state: BaseGameState
+  /** Mon secret (`match_secrets.secret`) ou null. */
+  secret: unknown
+  meId: string
+  isHost: boolean
+  /** Annuaire id -> joueur. */
+  players: Record<string, PlayerInfo>
+  /** Envoie une action ; renvoie le nouveau state ou null en cas d'erreur (déjà toastée). */
+  act: (action: GameActionPayload) => Promise<BaseGameState | null>
+  /** Une action est en cours d'envoi. */
+  pending: boolean
+  /** Retour au salon. */
   onExit?: () => void
 }
 
-/** Props passees au composant d'options (ecran de lancement par l'hote). */
+/** Props passées au composant d'options (écran de lancement par l'hôte). */
 export interface GameOptionsProps {
   options: Record<string, unknown>
   onChange: (options: Record<string, unknown>) => void
   playerCount: number
 }
 
+/** Bloc spécifique au jeu affiché sur l'écran de résultats commun. */
+export interface GameSummaryProps {
+  state: BaseGameState
+  meId: string
+  players: Record<string, PlayerInfo>
+}
+
+export interface StartContext {
+  /** Joueurs qui vont jouer (sous-sélection éventuelle). */
+  playerIds: string[]
+}
+
 export interface GameDefinition {
-  /** 'qui-de-nous' | 'undercover' */
+  /** 'qui-de-nous' | 'undercover' (= p_game_id de start_match) */
   id: string
   name: string
   tagline: string
@@ -25,6 +84,17 @@ export interface GameDefinition {
   color: string
   minPlayers: number
   maxPlayers: number
+  /** Règles en 2-3 phrases (salon). */
+  rules?: string
   Play: ComponentType<GamePlayProps>
   Options?: ComponentType<GameOptionsProps>
+  Summary?: ComponentType<GameSummaryProps>
+  defaultOptions?: Record<string, unknown>
+  /**
+   * Construit `p_options` de start_match à partir des options de l'écran de
+   * lancement (tirage des questions, des mots…). `player_ids` est ajouté ensuite.
+   */
+  prepareStart?: (options: Record<string, unknown>, ctx: StartContext) => Promise<Record<string, unknown>>
+  /** Libellé de la manche dans l'en-tête (défaut : « Manche n/total »). */
+  roundLabel?: (state: BaseGameState) => string | null
 }

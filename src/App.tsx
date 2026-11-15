@@ -3,7 +3,11 @@ import { FullLayout, RequireProfile, Root, TabsLayout } from '@/components/layou
 import { HubPage } from '@/pages/HubPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 import { SettingsPage } from '@/pages/SettingsPage'
-import { FriendsPage, InventoryPage, LeaderboardPage, MatchPage, SoireePage } from '@/pages/Placeholders'
+import { FriendsPage } from '@/pages/FriendsPage'
+import { InventoryPage } from '@/pages/InventoryPage'
+import { LeaderboardPage } from '@/pages/LeaderboardPage'
+import { SoireePage } from '@/pages/SoireePage'
+import { MatchPage } from '@/pages/MatchPage'
 
 const router = createBrowserRouter([
   {

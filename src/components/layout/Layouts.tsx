@@ -1,7 +1,10 @@
+import { useEffect } from 'react'
 import { Navigate, Outlet } from 'react-router'
-import { MotionConfig } from 'framer-motion'
+import { MotionConfig, motion } from 'framer-motion'
 import { AlertTriangle } from 'lucide-react'
 import { useSession } from '@/store/session'
+import { bootSession, refreshProfile } from '@/lib/auth'
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus'
 import { ToastHost } from '@/components/ui/Toast'
 import { isSupabaseConfigured, SUPABASE_MISSING_MESSAGE } from '@/lib/supabase'
 import { AnimatedOutlet } from './AnimatedOutlet'
@@ -10,6 +13,9 @@ import { UpdatePrompt } from './UpdatePrompt'
 
 /** Racine : MotionConfig (respect prefers-reduced-motion), toasts, MAJ PWA, banniere Supabase. */
 export function Root() {
+  useEffect(() => {
+    void bootSession()
+  }, [])
   return (
     <MotionConfig reducedMotion="user">
       {!isSupabaseConfigured && (
@@ -28,8 +34,33 @@ export function Root() {
 /** Garde : pas de profil connecte => /onboarding. */
 export function RequireProfile() {
   const profile = useSession((s) => s.profile)
+  const booted = useSession((s) => s.booted)
+  useSessionLifecycle()
+  if (!booted) return <Splash />
   if (!profile) return <Navigate to="/onboarding" replace />
   return <Outlet />
+}
+
+function Splash() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
+      <motion.div
+        animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.1, 1] }}
+        transition={{ repeat: Infinity, duration: 1.2 }}
+        className="text-6xl"
+      >
+        🎉
+      </motion.div>
+      <p className="font-display text-xl font-extrabold text-muted">Chargement…</p>
+    </div>
+  )
+}
+
+/** Garde le profil à jour : refetch quand l'app reprend le focus. */
+function useSessionLifecycle() {
+  useRefetchOnFocus(() => {
+    if (useSession.getState().profile) void refreshProfile().catch(() => undefined)
+  })
 }
 
 /** Layout des 5 onglets, avec barre de navigation inferieure. */
