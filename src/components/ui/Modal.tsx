@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { fx } from '@/lib/feedback'
@@ -101,8 +101,15 @@ export function Modal({ open, onClose, title, children, className }: BaseProps) 
 }
 
 /** Feuille qui monte du bas, fermable par glissement vers le bas. */
-export function BottomSheet({ open, onClose, title, children, className }: BaseProps) {
+/**
+ * Feuille qui monte du bas. Le CONTENU défile normalement au doigt ; seule la
+ * poignée / l'en-tête permet de tirer la feuille vers le bas pour la fermer
+ * (avant, toute la feuille captait le glissement et empêchait de défiler).
+ * `footer` reste toujours visible en bas de la feuille (bouton d'action).
+ */
+export function BottomSheet({ open, onClose, title, children, className, footer }: BaseProps & { footer?: ReactNode }) {
   useEscape(open, onClose)
+  const controls = useDragControls()
   return createPortal(
     <AnimatePresence>
       {open && (
@@ -110,7 +117,7 @@ export function BottomSheet({ open, onClose, title, children, className }: BaseP
           <Backdrop onClick={onClose} />
           <motion.div
             className={cn(
-              'sticker pb-safe relative max-h-[88dvh] w-full overflow-auto rounded-b-none rounded-t-bubble border-b-0 bg-surface p-5 text-text',
+              'sticker relative flex max-h-[88dvh] w-full flex-col rounded-b-none rounded-t-bubble border-b-0 bg-surface text-text',
               className,
             )}
             initial={{ y: '100%' }}
@@ -118,15 +125,25 @@ export function BottomSheet({ open, onClose, title, children, className }: BaseP
             exit={{ y: '100%', transition: { duration: 0.2 } }}
             transition={{ type: 'spring', stiffness: 380, damping: 32 }}
             drag="y"
+            dragControls={controls}
+            dragListener={false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.6 }}
             onDragEnd={(_, info) => {
               if (info.offset.y > 120 || info.velocity.y > 600) onClose()
             }}
           >
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-ink/40" />
-            <Header title={title} onClose={onClose} />
-            {children}
+            <div
+              className="shrink-0 cursor-grab touch-none px-5 pt-3"
+              onPointerDown={(e) => controls.start(e)}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-ink/40" />
+              <Header title={title} onClose={onClose} />
+            </div>
+            <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-5', footer ? 'pb-3' : 'pb-safe pb-5')}>
+              {children}
+            </div>
+            {footer && <div className="pb-safe shrink-0 border-t-2 border-ink/10 px-5 pt-3 pb-4">{footer}</div>}
           </motion.div>
         </div>
       )}

@@ -158,7 +158,16 @@ function PickPlayersSheet({ open, onClose, meId, onCreated, onAlready }: { open:
 
   const allIds = list.map((p) => p.id)
   return (
-    <BottomSheet open={open} onClose={onClose} title="Qui est là ce soir ?">
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title="Qui est là ce soir ?"
+      footer={
+        <Button ref={btnRef} size="lg" fullWidth loading={busy} onClick={create}>
+          C’est parti ! ({selected.size})
+        </Button>
+      }
+    >
       <p className="mb-3 text-muted">Touche les copains présents. Ils verront la soirée apparaître sur leur téléphone.</p>
       {!loaded ? (
         <div className="grid grid-cols-3 gap-3">
@@ -187,9 +196,6 @@ function PickPlayersSheet({ open, onClose, meId, onCreated, onAlready }: { open:
           <Users className="size-5" /> {selected.size}
         </span>
       </div>
-      <Button ref={btnRef} size="lg" fullWidth className="mt-4" loading={busy} onClick={create}>
-        C’est parti !
-      </Button>
     </BottomSheet>
   )
 }
