@@ -122,3 +122,13 @@ public/chibis/**             ← généré par tools/slice-chibis
 reste du front               ← Sonnet
 ```
 Variables : `.env.local` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (jamais commitées).
+
+## Ajouter un jeu (convention depuis la phase 3)
+- Front : dossier `src/games/<id>/` avec `index.ts` exportant `definition: GameDefinition` (auto-découvert par `registry.ts`, champ `order` pour l'ordre du hub). Play/Summary en `lazy`. Types du jeu dans `src/games/<id>/types.ts` (ne pas toucher `src/types/db.ts`).
+- SQL : fichier `supabase/games/<id>.sql` (idempotent, `create or replace`) avec
+  `game_<id_underscore>_start(p_players uuid[], p_options jsonb) returns jsonb` → `{state, server, secrets}` et
+  `game_<id_underscore>_action(p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb) returns jsonb` → `{state, server, results?, secrets?}`.
+  Dispatch dynamique dans `start_match`/`game_action`. `secrets` renvoyé par une action = upsert des secrets (mains de cartes…). `results` (tableau) = fin de partie → `finish_match`. Terminer le fichier par les `revoke all ... from public, anon, authenticated` de ses fonctions.
+- Minuteurs : échéance ISO dans le state (`deadline`), front `useCountdown(deadline)` de `@/features/soiree/useServerClock`. N'importe quel joueur envoie `{"type":"tick"}` à l'échéance ; le serveur vérifie `now() >= deadline` (idempotent, ignore sinon sans erreur : renvoie le state inchangé).
+- Temps réel éphémère (ex. traits de dessin) : canal Supabase Realtime **broadcast** `match:<matchId>` (pas de BDD). L'état qui compte reste dans `matches.state`.
+- `npm run sql` génère `supabase/install.sql` (schema + features + games + seed) : c'est CE fichier que l'utilisateur colle dans Supabase.

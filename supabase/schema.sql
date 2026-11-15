@@ -1272,6 +1272,22 @@ end $$;
 -- 10. MOTEUR : démarrage + action générique
 -- =============================================================================
 
+-- Résout le nom de la fonction d'un jeu et vérifie qu'elle existe.
+-- p_game_id 'petit-bac' + 'action' -> 'game_petit_bac_action'.
+create or replace function public._game_fn(p_game_id text, p_suffix text, p_args text)
+returns text language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_fn text;
+begin
+  if p_game_id is null or p_game_id !~ '^[a-z0-9-]{1,40}$' then raise exception 'unknown_game'; end if;
+  v_fn := 'game_' || replace(p_game_id, '-', '_') || '_' || p_suffix;
+  if to_regprocedure(format('public.%I(%s)', v_fn, p_args)) is null then
+    raise exception 'unknown_game';
+  end if;
+  return v_fn;
+end $$;
+
 -- p_options peut contenir "player_ids": [uuid] pour ne faire jouer qu'une partie
 -- des joueurs de la soirée (par défaut : tous les joueurs de la soirée).
 create or replace function public.start_match(p_soiree_id uuid, p_game_id text, p_options jsonb)
@@ -1306,13 +1322,9 @@ begin
                         order by o);
   end if;
 
-  if p_game_id = 'qui-de-nous' then
-    v_start := public.game_qui_de_nous_start(v_players, v_opts);
-  elsif p_game_id = 'undercover' then
-    v_start := public.game_undercover_start(v_players, v_opts);
-  else
-    raise exception 'unknown_game';
-  end if;
+  -- Dispatch dynamique : game_<id>_start(uuid[], jsonb) (tirets -> underscores).
+  execute format('select public.%I($1, $2)', public._game_fn(p_game_id, 'start', 'uuid[], jsonb'))
+     into v_start using v_players, v_opts;
 
   insert into public.matches(id, soiree_id, game_id, status, state)
   values (v_id, p_soiree_id, p_game_id, 'playing', v_start->'state');
@@ -1364,15 +1376,19 @@ begin
   select data into v_server from public.match_server_state where match_id = p_match_id for update;
   v_server := coalesce(v_server, '{}'::jsonb);
 
-  if v_m.game_id = 'qui-de-nous' then
-    v_res := public.game_qui_de_nous_action(v_m.state, v_server, v_me, v_is_host, p_action);
-  elsif v_m.game_id = 'undercover' then
-    v_res := public.game_undercover_action(v_m.state, v_server, v_me, v_is_host, p_action);
-  else
-    raise exception 'unknown_game';
-  end if;
+  -- Dispatch dynamique : game_<id>_action(jsonb, jsonb, uuid, boolean, jsonb).
+  execute format('select public.%I($1, $2, $3, $4, $5)',
+                 public._game_fn(v_m.game_id, 'action', 'jsonb, jsonb, uuid, boolean, jsonb'))
+     into v_res using v_m.state, v_server, v_me, v_is_host, p_action;
 
   update public.match_server_state set data = v_res->'server' where match_id = p_match_id;
+  -- Un jeu peut mettre à jour des secrets en cours de partie (mains de cartes,
+  -- mot du dessinateur…) : clé "secrets" = {"<profile_id>": <secret>} (upsert).
+  if jsonb_typeof(v_res->'secrets') = 'object' then
+    insert into public.match_secrets(match_id, profile_id, secret)
+    select p_match_id, key::uuid, value from jsonb_each(v_res->'secrets')
+    on conflict (match_id, profile_id) do update set secret = excluded.secret;
+  end if;
   -- seq : compteur monotone de versions du state public. Le front s'en sert pour
   -- ignorer un state plus ancien reçu en retard (réponse RPC vs évènement Realtime).
   v_state := (v_res->'state') || jsonb_build_object('seq', coalesce((v_m.state->>'seq')::integer, 0) + 1);
@@ -1508,6 +1524,7 @@ revoke all on function public.game_undercover_start(uuid[], jsonb) from public, 
 revoke all on function public._uc_finish(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._uc_tally(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_undercover_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+revoke all on function public._game_fn(text, text, text) from public, anon, authenticated;
 
 -- RPC publiques.
 revoke all on function public.list_profiles_public() from public;
@@ -1571,3 +1588,17 @@ begin
     end if;
   end loop;
 end $$;
+
+-- =============================================================================
+-- 15. HORLOGE SERVEUR (minuteurs des jeux)
+-- =============================================================================
+-- Les jeux à minuteur stockent des échéances ISO dans leur state (ex. "deadline").
+-- Le front calcule son décalage d'horloge avec server_now() (hook useServerClock).
+-- Convention : n'importe quel joueur peut envoyer {"type":"tick"} ; le jeu vérifie
+-- côté serveur que l'échéance est dépassée (idempotent) et fait avancer la phase.
+create or replace function public.server_now()
+returns timestamptz language sql stable
+set search_path = public, extensions
+as $$ select now() $$;
+revoke all on function public.server_now() from public, anon;
+grant execute on function public.server_now() to authenticated;

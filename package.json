@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "sql": "node scripts/build-sql.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

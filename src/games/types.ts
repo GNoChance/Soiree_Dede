@@ -2,7 +2,8 @@ import type { ComponentType } from 'react'
 
 /**
  * Contrat d'un module de jeu. Ajouter un jeu = un dossier `src/games/<id>/`
- * + une entrée dans `registry.ts` + les fonctions SQL `game_<id>_start/_action`.
+ * avec un `index.ts` qui exporte `definition` (auto-découvert par registry.ts)
+ * + un fichier `supabase/games/<id>.sql` avec `game_<id_underscore>_start/_action`.
  */
 
 /** Joueur tel que vu par les jeux (annuaire des profils). */
@@ -77,6 +78,8 @@ export interface StartContext {
 export interface GameDefinition {
   /** 'qui-de-nous' | 'undercover' (= p_game_id de start_match) */
   id: string
+  /** Ordre d'affichage dans le hub (petit = en premier). */
+  order?: number
   name: string
   tagline: string
   emoji: string
