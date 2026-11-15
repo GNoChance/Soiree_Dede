@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, Users } from 'lucide-react'
@@ -303,32 +304,35 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soire
   return (
     <section className="flex flex-col gap-4">
       <h2 className="text-2xl">On joue à quoi ?</h2>
-      <div className="grid grid-cols-2 gap-3">
-        {GAMES.map((g) => {
-          const sel = g.id === gameId
-          return (
-            <motion.button
-              key={g.id}
-              type="button"
-              onClick={() => {
-                fx.pop()
-                setGameId(g.id)
-              }}
-              animate={{ scale: sel ? 1.03 : 0.96, rotate: sel ? -1.5 : 0 }}
-              whileTap={{ scale: 0.92 }}
-              transition={{ type: 'spring', stiffness: 420, damping: 15 }}
-              aria-pressed={sel}
-              className={cn('sticker flex flex-col items-center gap-1 p-3 text-center text-[#1f1b2e]', !sel && 'opacity-60 saturate-50')}
-              style={{ backgroundColor: g.color }}
-            >
-              <span className="text-5xl">{g.emoji}</span>
-              <span className="font-display text-lg leading-tight font-extrabold">{g.name}</span>
-              <span className="text-xs font-bold">
-                {g.minPlayers}–{g.maxPlayers} joueurs
-              </span>
-            </motion.button>
-          )
-        })}
+      {/* Carrousel horizontal compact : la page reste courte même avec beaucoup de jeux. */}
+      <div className="-mx-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex w-max gap-2.5">
+          {GAMES.map((g) => {
+            const sel = g.id === gameId
+            return (
+              <motion.button
+                key={g.id}
+                type="button"
+                onClick={() => {
+                  fx.pop()
+                  setGameId(g.id)
+                }}
+                animate={{ scale: sel ? 1.06 : 0.95, rotate: sel ? -2 : 0 }}
+                whileTap={{ scale: 0.9 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 15 }}
+                aria-pressed={sel}
+                className={cn('sticker flex w-24 shrink-0 flex-col items-center gap-0.5 p-2 text-center text-[#1f1b2e]', !sel && 'opacity-60 saturate-50')}
+                style={{ backgroundColor: g.color }}
+              >
+                <span className="text-3xl leading-none">{g.emoji}</span>
+                <span className="font-display text-[0.8rem] leading-tight font-extrabold">{g.name}</span>
+                <span className="text-[0.65rem] font-bold">
+                  {g.minPlayers}–{g.maxPlayers} j.
+                </span>
+              </motion.button>
+            )
+          })}
+        </div>
       </div>
 
       <AnimatePresence mode="wait">
@@ -359,16 +363,28 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soire
           {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
         </p>
       )}
-      {/* Barre de lancement collée en bas de l'écran : toujours visible, même
-          si la page est longue (beaucoup de jeux / d'options / de joueurs). */}
-      <div className="pb-safe sticky bottom-0 z-30 -mx-4 bg-gradient-to-t from-paper via-paper/95 to-transparent px-4 pt-6 pb-3">
-        <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
-          <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
-            C’est parti !
-          </Button>
-        </motion.div>
-        {busy && <p className="mt-1 text-center text-sm text-muted">Une partie est en cours.</p>}
-      </div>
+      {/* Espace réservé pour ne pas masquer la fin de la page sous la barre fixe. */}
+      <div aria-hidden className="h-28" />
+      {/* Barre de lancement FIXÉE à l'écran (portail vers <body>) : toujours visible,
+          quels que soient la longueur de la page, le défilement ou le zoom. */}
+      {createPortal(
+        <div className="pb-safe fixed inset-x-0 bottom-0 z-40 bg-gradient-to-t from-paper via-paper/95 to-transparent px-4 pt-6 pb-3">
+          <div className="mx-auto max-w-md">
+            <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
+              <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
+                C’est parti ! <span className="text-base opacity-80">{game.emoji}</span>
+              </Button>
+            </motion.div>
+            {(tooFew || tooMany) && (
+              <p className="mt-1 text-center text-sm font-bold text-tomato">
+                {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
+              </p>
+            )}
+            {busy && <p className="mt-1 text-center text-sm text-muted">Une partie est en cours.</p>}
+          </div>
+        </div>,
+        document.body,
+      )}
     </section>
   )
 }
