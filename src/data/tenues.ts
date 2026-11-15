@@ -4,7 +4,7 @@
  * Pour ajouter une tenue : une ligne ici + une ligne dans tenues.sql (+ la planche, cf. tools/slice-chibis/README.md).
  */
 
-export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste'
+export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe'
 
 export interface TenueDef {
   id: TenueId
@@ -45,6 +45,11 @@ export const TENUES: TenueDef[] = [
   wins('prof', 'Prof', '🎓', 'cerveau-en-fete', 'Cerveau en fête'),
   wins('ecolier', 'Écolier', '🎒', 'petit-bac', 'Petit bac'),
   wins('artiste', 'Artiste', '🎨', 'dessine-devine', 'Dessine & devine'),
+  wins('loup', 'Loup', '🐺', 'loup-garou', 'Loup-garou'),
+  wins('artificier', 'Artificier', '💣', 'bombe-a-mots', 'Bombe à mots'),
+  wins('pirate', 'Pirate', '🏴‍☠️', 'menteur', 'Menteur'),
+  wins('bowler', 'Bowler', '🎳', 'bowling', 'Bowling'),
+  wins('philosophe', 'Philosophe', '🤔', 'tu-preferes', 'Tu préfères ?'),
 ]
 
 export const TENUES_BY_ID = Object.fromEntries(TENUES.map((t) => [t.id, t])) as Record<TenueId, TenueDef>

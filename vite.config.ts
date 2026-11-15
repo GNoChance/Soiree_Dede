@@ -34,6 +34,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,ico}'],
+        // Le moteur 3D du bowling (≈ 635 kB) n'est pas pré-téléchargé à l'installation :
+        // il est mis en cache au premier lancement (règle runtime ci-dessous).
+        globIgnores: ['**/BowlingScene-*.js'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
         runtimeCaching: [
@@ -45,6 +48,17 @@ export default defineConfig({
               expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 90 },
               cacheableResponse: { statuses: [0, 200] },
             },
+          },
+          {
+            // Dictionnaire de la Bombe à mots (~1 Mo) : téléchargé une fois puis gardé.
+            urlPattern: ({ url }: { url: URL }) => url.pathname.startsWith('/dicts/'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'dicts', expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 180 }, cacheableResponse: { statuses: [0, 200] } },
+          },
+          {
+            urlPattern: ({ url }: { url: URL }) => url.pathname.startsWith('/assets/BowlingScene-'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'bowling-engine', expiration: { maxEntries: 2 }, cacheableResponse: { statuses: [0, 200] } },
           },
           {
             urlPattern: ({ url }: { url: URL }) =>

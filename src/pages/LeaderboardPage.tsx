@@ -13,9 +13,11 @@ import { rpcErrorMessage } from '@/lib/rpcError'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/store/session'
+import { GAMES } from '@/games/registry'
+import { fx } from '@/lib/feedback'
 import type { ExpressionId, GameId, UUID } from '@/types/db'
 
-type Board = 'general' | GameId
+type Board = 'general' | GameId | (string & {})
 type Scope = 'all' | 'friends'
 
 interface Row {
@@ -65,7 +67,7 @@ export function LeaderboardPage() {
           .or(`requester_id.eq.${me},addressee_id.eq.${me}`),
         board === 'general'
           ? Promise.resolve(null)
-          : supabase.from('leaderboard_by_game').select('*').eq('game_id', board).order('rank', { ascending: true }),
+          : supabase.from('leaderboard_by_game').select('*').eq('game_id', board as GameId).order('rank', { ascending: true }),
       ])
       if (gen.error) throw gen.error
       if (fr.error) throw fr.error
@@ -102,16 +104,7 @@ export function LeaderboardPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-4xl">Classement</h1>
-      <SegmentedControl<Board>
-        ariaLabel="Jeu"
-        value={board}
-        onChange={changeBoard}
-        options={[
-          { value: 'general', label: 'Général' },
-          { value: 'qui-de-nous', label: 'Qui de nous ?' },
-          { value: 'undercover', label: 'Undercover' },
-        ]}
-      />
+      <BoardPicker value={board} onChange={changeBoard} />
       <SegmentedControl<Scope>
         ariaLabel="Portée"
         value={scope}
@@ -239,6 +232,49 @@ function RowCard({ row, me, game }: { row: Row; me: boolean; game: boolean }) {
           <AnimatedNumber value={row.wins} /> 🏆
         </p>
         <Badge tone="grape" tilted={false}>Niv. {row.level}</Badge>
+      </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/** Barre défilante de pastilles : Général + un classement par jeu (registre auto). */
+function BoardPicker({ value, onChange }: { value: Board; onChange: (b: Board) => void }) {
+  const items: { id: Board; emoji: string; label: string; color: string }[] = [
+    { id: 'general', emoji: '🏆', label: 'Général', color: '#FFB703' },
+    ...GAMES.map((g) => ({ id: g.id as Board, emoji: g.emoji, label: g.name, color: g.color })),
+  ]
+  return (
+    <div className="-mx-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Jeu">
+      <div className="flex w-max gap-2">
+        {items.map((it) => {
+          const sel = it.id === value
+          return (
+            <motion.button
+              key={it.id}
+              type="button"
+              role="tab"
+              aria-selected={sel}
+              onClick={() => {
+                if (sel) return
+                fx.pop()
+                onChange(it.id)
+              }}
+              animate={{ scale: sel ? 1.06 : 1, rotate: sel ? -2 : 0 }}
+              whileTap={{ scale: 0.92 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 16 }}
+              className={cn(
+                'sticker-sm flex shrink-0 items-center gap-1.5 rounded-chip px-3 py-2 font-display text-sm font-extrabold whitespace-nowrap text-[#1f1b2e]',
+                !sel && 'bg-surface !text-text opacity-80',
+              )}
+              style={{ backgroundColor: sel ? it.color : undefined }}
+            >
+              <span className="text-lg leading-none">{it.emoji}</span>
+              {it.label}
+            </motion.button>
+          )
+        })}
       </div>
     </div>
   )

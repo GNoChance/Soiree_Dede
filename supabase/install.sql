@@ -1659,7 +1659,12 @@ insert into public.tenues (id, label, emoji, game_id, condition_type, threshold,
   ('croupier', 'Croupier',        '🃏', 'pas-de-bol',     'game_wins', 10, 30),
   ('prof',     'Prof',            '🎓', 'cerveau-en-fete','game_wins', 10, 40),
   ('ecolier',  'Écolier',         '🎒', 'petit-bac',      'game_wins', 10, 50),
-  ('artiste',  'Artiste',         '🎨', 'dessine-devine', 'game_wins', 10, 60)
+  ('artiste',  'Artiste',         '🎨', 'dessine-devine', 'game_wins', 10, 60),
+  ('loup',       'Loup',          '🐺', 'loup-garou',     'game_wins', 10, 70),
+  ('artificier', 'Artificier',    '💣', 'bombe-a-mots',   'game_wins', 10, 80),
+  ('pirate',     'Pirate',        '🏴‍☠️', 'menteur',        'game_wins', 10, 90),
+  ('bowler',     'Bowler',        '🎳', 'bowling',        'game_wins', 10, 100),
+  ('philosophe', 'Philosophe',    '🤔', 'tu-preferes',    'game_wins', 10, 110)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -1833,6 +1838,769 @@ grant execute on function public.equip_tenue(text) to authenticated;
 
 -- Rattrapage (idempotent) : victoires déjà acquises avant l'installation des tenues.
 select public.evaluate_tenues(id) from public.profiles;
+
+
+-- ===== games\bombe-a-mots.sql =====
+-- =============================================================================
+-- JEU « Bombe à mots » (id bombe-a-mots) : syllabe imposée + bombe qui tourne
+-- Idempotent (create or replace). Dispatché par start_match / game_action.
+-- Contrat complet (state public, actions, options) : src/games/bombe-a-mots/types.ts.
+--
+-- p_options : {"lives": 3, "start_level": 1,
+--              "syllables": [{"s":"ou","level":1}, ...]}   -- tirées par l'hôte (front),
+--              triées par difficulté croissante, mélangées à niveau égal (10..400 entrées).
+--
+-- MÈCHE GLOBALE (variante retenue) : une mèche de 5 à 12 s (tirée au hasard par le
+-- serveur, JAMAIS publiée : server.explode_at) brûle en continu pendant que la bombe
+-- passe de joueur en joueur ; elle n'est retirée qu'après une explosion. Pour éviter
+-- une explosion « injuste » juste après une passe, le joueur qui reçoit la bombe a
+-- toujours au moins BAM_GRACE_MS (1,5 s) devant lui (explode_at repoussé si besoin).
+-- Après une explosion (et au lancement) : pause de BAM_PAUSE_S (3 s, state.resume_at),
+-- puis nouvelle mèche à partir de resume_at (state.fuse_started_at).
+--
+-- Échéance cachée => le front ne sait pas quand envoyer le tick. Il « sonde » :
+-- {"type":"tick","quiet":true} à partir de fuse_started_at + 5 s ; si la bombe n'a pas
+-- encore explosé, le serveur LÈVE 'bomb_not_ready' (transaction annulée : aucune
+-- écriture, aucun évènement Realtime, aucun seq consommé). {"type":"tick"} sans quiet
+-- respecte la convention commune (state renvoyé inchangé, sans erreur).
+--
+-- Dictionnaire : vérifié CÔTÉ CLIENT uniquement (~300 000 formes, impossible à charger
+-- dans une fonction SQL à chaque coup). Le serveur vérifie tout le reste.
+-- =============================================================================
+
+-- Normalisation d'un mot joué : minuscules, sans accents ni ligatures. Le tiret est
+-- conservé (mots composés). Le résultat doit ensuite matcher ^[a-z]+(-[a-z]+)*$.
+create or replace function public._bam_norm(p text)
+returns text language sql immutable
+set search_path = public, extensions
+as $$
+  select lower(translate(
+    replace(replace(replace(replace(btrim(left(coalesce(p, ''), 60)), 'œ', 'oe'), 'Œ', 'OE'), 'æ', 'ae'), 'Æ', 'AE'),
+    'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ',
+    'aaaaaaceeeeiiiinooooouuuuyyAAAAAACEEEEIIIINOOOOOUUUUYY'))
+$$;
+
+-- Nouvelle mèche aléatoire (5 000 à 12 000 ms) à partir de p_from.
+create or replace function public._bam_fuse(p_from timestamptz)
+returns timestamptz language sql volatile
+set search_path = public, extensions
+as $$ select p_from + make_interval(secs => (5000 + floor(random() * 7001)) / 1000.0) $$;
+
+-- Joueur vivant suivant p_from dans l'ordre de table (p_from peut être éliminé).
+create or replace function public._bam_next(p_state jsonb, p_from text)
+returns text language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_order text[] := array(select jsonb_array_elements_text(p_state->'players'));
+  v_n     integer := cardinality(v_order);
+  v_i     integer := coalesce(array_position(v_order, p_from), 0);
+  k       integer;
+  v_c     text;
+begin
+  for k in 1 .. v_n loop
+    v_c := v_order[((v_i - 1 + k) % v_n) + 1];
+    if (p_state->'alive') ? v_c then return v_c; end if;
+  end loop;
+  return null;
+end $$;
+
+-- Tire la syllabe suivante (niveau visé = start_level + mots validés / level_every, plafonné à 5).
+-- Préfère une syllabe inutilisée du niveau visé (dans l'ordre fourni), sinon le niveau le
+-- plus proche (plus facile d'abord) ; liste épuisée => on recycle (sauf la syllabe courante).
+create or replace function public._bam_pick(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_target integer := least(5, (p_state->>'start_level')::integer
+                              + (p_state->>'words_count')::integer / greatest(1, (p_state->>'level_every')::integer));
+  v_cur    text := p_state->>'syllable';
+  v_used   jsonb := coalesce(p_server->'used', '[]'::jsonb);
+  v_idx    integer;
+  v_s      text;
+  v_lvl    integer;
+begin
+  for k in 1 .. 2 loop
+    select (o - 1)::integer, e->>'s', (e->>'level')::integer into v_idx, v_s, v_lvl
+      from jsonb_array_elements(p_server->'syllables') with ordinality t(e, o)
+     where not (v_used @> to_jsonb((o - 1)::integer))
+       and (v_cur is null or e->>'s' <> v_cur)
+     order by abs((e->>'level')::integer - v_target), (e->>'level')::integer, o
+     limit 1;
+    exit when v_idx is not null;
+    v_used := '[]'::jsonb;  -- tout a servi : on recycle
+  end loop;
+  if v_idx is null then  -- liste d'une seule syllabe (impossible via start) : on garde la courante
+    v_s := v_cur; v_lvl := coalesce((p_state->>'level')::integer, 1);
+  else
+    v_used := v_used || to_jsonb(v_idx);
+  end if;
+  p_state := p_state || jsonb_build_object('syllable', v_s, 'level', v_lvl, 'target_level', v_target);
+  p_server := p_server || jsonb_build_object('used', v_used);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Fin de partie : survivant 1er, puis ordre d'élimination inverse.
+-- points = mots validés (plafonnés à 25 => XP max 250 + 50 de victoire).
+create or replace function public._bam_finish(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_winner  text := p_state->'alive'->>0;
+  v_ranked  jsonb;
+  v_results jsonb;
+begin
+  -- Ordre de classement : vivant(s) puis éliminés du dernier au premier.
+  select jsonb_agg(x order by r) into v_ranked from (
+    select value as x, 0 as r from jsonb_array_elements_text(p_state->'alive')
+    union all
+    select value, (100000 - o)::integer from jsonb_array_elements_text(p_state->'eliminated') with ordinality t(value, o)
+  ) z;
+
+  select jsonb_agg(jsonb_build_object(
+           'profile_id', pid,
+           'points', least(25, coalesce((p_state->'word_counts'->>pid)::integer, 0)),
+           'won', pid = v_winner,
+           'placement', o::integer,
+           'stats', '{}'::jsonb) order by o)
+    into v_results
+    from jsonb_array_elements_text(v_ranked) with ordinality t(pid, o);
+
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'winner', v_winner, 'turn', null,
+                                           'resume_at', null, 'results', v_results,
+                                           'ranking', v_ranked);
+  return jsonb_build_object('state', p_state, 'server', p_server - 'explode_at', 'results', v_results);
+end $$;
+
+-- Démarre une nouvelle mèche après une pause de 3 s (lancement / après explosion).
+create or replace function public._bam_rearm(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_resume timestamptz := now() + interval '3 seconds';
+begin
+  p_state := p_state || jsonb_build_object('resume_at', to_jsonb(v_resume), 'fuse_started_at', to_jsonb(v_resume));
+  p_server := p_server || jsonb_build_object('explode_at', to_jsonb(public._bam_fuse(v_resume)));
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- BOUM : le joueur actif perd une vie (éliminé à 0), la bombe passe au suivant.
+create or replace function public._bam_explode(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_victim text := p_state->>'turn';
+  v_lives  integer := greatest(0, coalesce((p_state->'lives'->>v_victim)::integer, 1) - 1);
+  v_out    boolean := v_lives = 0;
+  v_n      integer := (p_state->>'turn_n')::integer + 1;
+  v_r      jsonb;
+begin
+  p_state := jsonb_set(p_state, array['lives', v_victim], to_jsonb(v_lives));
+  if v_out then
+    p_state := p_state || jsonb_build_object(
+      'alive', (p_state->'alive') - v_victim,
+      'eliminated', coalesce(p_state->'eliminated', '[]'::jsonb) || to_jsonb(v_victim));
+  end if;
+  p_state := p_state || jsonb_build_object(
+    'explosions', coalesce(p_state->'explosions', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+      'p', v_victim, 's', p_state->>'syllable', 'n', p_state->'turn_n', 'eliminated', v_out)),
+    'last_event', jsonb_build_object('kind', 'explosion', 'n', p_state->'turn_n', 'p', v_victim,
+                                     's', p_state->>'syllable', 'lives', v_lives, 'eliminated', v_out,
+                                     'at', to_jsonb(now())));
+
+  if jsonb_array_length(p_state->'alive') <= 1 then
+    return public._bam_finish(p_state, p_server);
+  end if;
+
+  p_state := p_state || jsonb_build_object('turn', public._bam_next(p_state, v_victim), 'turn_n', v_n,
+                                           'turn_started_at', to_jsonb(now() + interval '3 seconds'));
+  v_r := public._bam_pick(p_state, p_server);
+  return public._bam_rearm(v_r->'state', v_r->'server');
+end $$;
+
+create or replace function public.game_bombe_a_mots_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_in     jsonb := p_options->'syllables';
+  v_syl    jsonb;
+  v_lives  integer;
+  v_level  integer;
+  v_order  jsonb;
+  v_st     jsonb;
+  v_r      jsonb;
+begin
+  if cardinality(p_players) < 2 then raise exception 'not_enough_players'; end if;
+  if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
+  if v_in is null or jsonb_typeof(v_in) <> 'array' or jsonb_array_length(v_in) < 10
+     or jsonb_array_length(v_in) > 400 then
+    raise exception 'invalid_syllables';
+  end if;
+  if exists (select 1 from jsonb_array_elements(v_in) e
+              where jsonb_typeof(e) <> 'object' or coalesce(e->>'s', '') !~ '^[a-z]{2,3}$'
+                 or coalesce(e->>'level', '') !~ '^[1-5]$') then
+    raise exception 'invalid_syllables';
+  end if;
+  select jsonb_agg(jsonb_build_object('s', e->>'s', 'level', (e->>'level')::integer) order by o)
+    into v_syl from jsonb_array_elements(v_in) with ordinality t(e, o);
+
+  begin
+    v_lives := coalesce(nullif(p_options->>'lives', '')::integer, 3);
+    v_level := coalesce(nullif(p_options->>'start_level', '')::integer, 1);
+  exception when others then
+    v_lives := 3; v_level := 1;
+  end;
+  v_lives := least(greatest(v_lives, 1), 5);
+  v_level := least(greatest(v_level, 1), 5);
+
+  -- Ordre de table aléatoire.
+  select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
+
+  v_st := jsonb_build_object(
+    'game', 'bombe-a-mots',
+    'phase', 'playing',
+    'players', v_order,
+    'alive', v_order,
+    'eliminated', '[]'::jsonb,
+    'turn', v_order->>0,
+    'turn_n', 1,
+    'turn_started_at', to_jsonb(now() + interval '3 seconds'),
+    'syllable', null,
+    'level', v_level,
+    'target_level', v_level,
+    'start_level', v_level,
+    'level_every', 8,
+    'max_lives', v_lives,
+    'lives', (select jsonb_object_agg(value, v_lives) from jsonb_array_elements_text(v_order)),
+    'letters', (select jsonb_object_agg(value, '') from jsonb_array_elements_text(v_order)),
+    'bonus_alphabet', 'abcdefghijlmnopqrstuv',
+    'word_counts', (select jsonb_object_agg(value, 0) from jsonb_array_elements_text(v_order)),
+    'words_count', 0,
+    'words', '[]'::jsonb,
+    'explosions', '[]'::jsonb,
+    'bonuses', '[]'::jsonb,
+    'last_event', null,
+    'min_fuse_ms', 5000,
+    'max_fuse_ms', 12000,
+    'grace_ms', 1500,
+    'winner', null,
+    'results', null);
+  v_r := public._bam_pick(v_st, jsonb_build_object('syllables', v_syl, 'used', '[]'::jsonb));
+  v_r := public._bam_rearm(v_r->'state', v_r->'server');
+  return v_r || jsonb_build_object('secrets', '{}'::jsonb);
+end $$;
+
+create or replace function public.game_bombe_a_mots_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type    text := p_action->>'type';
+  v_me      text := p_actor::text;
+  v_same    jsonb := jsonb_build_object('state', p_state, 'server', p_server);
+  v_explode timestamptz := (p_server->>'explode_at')::timestamptz;
+  v_resume  timestamptz := (p_state->>'resume_at')::timestamptz;
+  v_syl     text := p_state->>'syllable';
+  v_w       text;
+  v_letters text;
+  v_alpha   text := p_state->>'bonus_alphabet';
+  v_lives   integer;
+  v_bonus   boolean := false;
+  v_full    boolean := false;
+  v_next    text;
+  v_n       integer := (p_state->>'turn_n')::integer;
+  v_r       jsonb;
+begin
+  if v_type not in ('word', 'tick') then raise exception 'unknown_action'; end if;
+
+  if v_type = 'tick' then
+    -- Tick d'un tour passé ou partie finie : ignoré.
+    if p_state->>'phase' <> 'playing'
+       or (p_action ? 'n' and (p_action->>'n') is distinct from (p_state->>'turn_n')) then
+      if coalesce((p_action->>'quiet')::boolean, false) then raise exception 'bomb_not_ready'; end if;
+      return v_same;
+    end if;
+    if v_explode is null or now() < v_explode then
+      if coalesce((p_action->>'quiet')::boolean, false) then raise exception 'bomb_not_ready'; end if;
+      return v_same;
+    end if;
+    return public._bam_explode(p_state, p_server);
+  end if;
+
+  -- word
+  if p_state->>'phase' <> 'playing' then raise exception 'wrong_phase'; end if;
+  if not (p_state->'players' ? v_me) then raise exception 'not_a_player'; end if;
+  if not (p_state->'alive' ? v_me) then raise exception 'not_alive'; end if;
+  if p_state->>'turn' <> v_me then raise exception 'not_your_turn'; end if;
+  if p_action ? 'n' and (p_action->>'n') is distinct from (p_state->>'turn_n') then
+    raise exception 'too_late';
+  end if;
+  if v_resume is not null and now() < v_resume then raise exception 'bomb_paused'; end if;
+  -- Trop tard : la bombe a explosé avant le mot (même si personne n'a encore « tické »).
+  if v_explode is not null and now() >= v_explode then
+    return public._bam_explode(p_state, p_server);
+  end if;
+
+  v_w := public._bam_norm(p_action->>'word');
+  if v_w !~ '^[a-z]+(-[a-z]+)*$' or char_length(v_w) > 40 then raise exception 'invalid_word'; end if;
+  if strpos(v_w, v_syl) = 0 then raise exception 'word_missing_syllable'; end if;
+  if char_length(replace(v_w, '-', '')) <= char_length(v_syl) then raise exception 'word_too_short'; end if;
+  if exists (select 1 from jsonb_array_elements(p_state->'words') x where x->>'w' = v_w) then
+    raise exception 'word_already_played';
+  end if;
+
+  -- Alphabet bonus : lettres (hors k w x y z) déjà utilisées dans les mots validés du joueur.
+  select string_agg(c, '' order by c) into v_letters
+    from (select distinct c from regexp_split_to_table(coalesce(p_state->'letters'->>v_me, '') || v_w, '') c
+           where strpos(v_alpha, c) > 0) z;
+  v_letters := coalesce(v_letters, '');
+  v_lives := (p_state->'lives'->>v_me)::integer;
+  if char_length(v_letters) >= char_length(v_alpha) then
+    v_full := true;
+    v_letters := '';
+    if v_lives < (p_state->>'max_lives')::integer then
+      v_lives := v_lives + 1;
+      v_bonus := true;
+    end if;
+    p_state := p_state || jsonb_build_object('bonuses', coalesce(p_state->'bonuses', '[]'::jsonb)
+      || jsonb_build_array(jsonb_build_object('p', v_me, 'n', v_n, 'life', v_bonus)));
+  end if;
+
+  v_next := public._bam_next(p_state, v_me);
+  p_state := jsonb_set(p_state, array['letters', v_me], to_jsonb(v_letters));
+  p_state := jsonb_set(p_state, array['lives', v_me], to_jsonb(v_lives));
+  p_state := jsonb_set(p_state, array['word_counts', v_me],
+                       to_jsonb(coalesce((p_state->'word_counts'->>v_me)::integer, 0) + 1));
+  p_state := p_state || jsonb_build_object(
+    'words', (p_state->'words') || jsonb_build_array(jsonb_build_object('p', v_me, 'w', v_w, 's', v_syl, 'n', v_n)),
+    'words_count', (p_state->>'words_count')::integer + 1,
+    'last_event', jsonb_build_object('kind', 'word', 'n', v_n, 'p', v_me, 'w', v_w, 's', v_syl,
+                                     'to', v_next, 'alphabet_full', v_full, 'bonus_life', v_bonus,
+                                     'at', to_jsonb(now())),
+    'turn', v_next,
+    'turn_n', v_n + 1,
+    'turn_started_at', to_jsonb(now()));
+
+  -- Mèche globale : elle continue ; délai minimal de grâce pour le receveur.
+  if v_explode < now() + make_interval(secs => coalesce((p_state->>'grace_ms')::integer, 1500) / 1000.0) then
+    p_server := p_server || jsonb_build_object('explode_at',
+      to_jsonb(now() + make_interval(secs => coalesce((p_state->>'grace_ms')::integer, 1500) / 1000.0)));
+  end if;
+
+  v_r := public._bam_pick(p_state, p_server);
+  return v_r;
+end $$;
+
+revoke all on function public._bam_norm(text) from public, anon, authenticated;
+revoke all on function public._bam_fuse(timestamptz) from public, anon, authenticated;
+revoke all on function public._bam_next(jsonb, text) from public, anon, authenticated;
+revoke all on function public._bam_pick(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._bam_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._bam_rearm(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._bam_explode(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public.game_bombe_a_mots_start(uuid[], jsonb) from public, anon, authenticated;
+revoke all on function public.game_bombe_a_mots_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+
+
+-- ===== games\bowling.sql =====
+-- =============================================================================
+-- JEU « bowling » (Bowling 3D, tout le monde joue en même temps) — idempotent.
+-- Dépend de schema.sql (game_action, start_match, finish_match).
+--
+-- Chaque joueur joue SA partie sur son téléphone (physique 3D côté client),
+-- puis envoie le résultat de chaque lancer : {"type":"roll","frame":f,"roll":r,
+-- "pins_down_mask":m}. Le masque m (0..1023, bit i = quille n° i+1) liste les
+-- quilles tombées PENDANT ce lancer. Le serveur vérifie la cohérence (ordre des
+-- lancers, m ⊆ quilles debout, 10 max) et calcule LUI-MÊME le score officiel
+-- (même logique que src/games/bowling/scoring.ts).
+--
+-- Anti-triche : minimal (jeu entre amis). Le serveur ne peut pas vérifier la
+-- physique : un client modifié peut envoyer des strikes à volonté. Il garantit
+-- seulement une feuille de score légale et un score correctement calculé.
+--
+-- Phases : playing -> finished (tous ont fini, échéance globale atteinte, ou
+-- l'hôte termine : lancers manquants = 0).
+-- =============================================================================
+
+-- Nombre de quilles d'un masque (bits 0..9).
+create or replace function public._bw_count(p_mask integer)
+returns integer language sql immutable
+set search_path = public, extensions
+as $$ select count(*)::integer from generate_series(0, 9) b where (coalesce(p_mask, 0) >> b) & 1 = 1 $$;
+
+-- Frame terminée ? (p_last : dernière frame = règles de la 10e)
+create or replace function public._bw_frame_complete(p_frame jsonb, p_last boolean)
+returns boolean language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_len integer := coalesce(jsonb_array_length(p_frame), 0);
+  c1 integer;
+  c2 integer;
+begin
+  if v_len = 0 then return false; end if;
+  c1 := public._bw_count((p_frame->>0)::integer);
+  if not p_last then return v_len >= 2 or c1 = 10; end if;
+  if v_len < 2 then return false; end if;
+  if v_len >= 3 then return true; end if;
+  c2 := public._bw_count((p_frame->>1)::integer);
+  return c1 + c2 < 10;
+end $$;
+
+-- Quilles debout avant le prochain lancer d'une frame non terminée.
+create or replace function public._bw_standing(p_frame jsonb, p_last boolean)
+returns integer language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_len integer := coalesce(jsonb_array_length(p_frame), 0);
+  m1 integer;
+  m2 integer;
+begin
+  if v_len = 0 then return 1023; end if;
+  m1 := (p_frame->>0)::integer;
+  if not p_last then return 1023 & ~m1; end if;
+  if v_len = 1 then
+    return case when public._bw_count(m1) = 10 then 1023 else 1023 & ~m1 end;
+  end if;
+  m2 := (p_frame->>1)::integer;
+  if public._bw_count(m1) = 10 then
+    return case when public._bw_count(m2) = 10 then 1023 else 1023 & ~m2 end;
+  end if;
+  return 1023;  -- spare : quilles relevées
+end $$;
+
+-- Prochain lancer attendu {frame, roll, standing} (1-based) ou null si fini.
+create or replace function public._bw_next(p_sheet jsonb, p_n integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  f integer;
+  v_frame jsonb;
+begin
+  for f in 0 .. p_n - 1 loop
+    v_frame := coalesce(p_sheet->f, '[]'::jsonb);
+    if not public._bw_frame_complete(v_frame, f = p_n - 1) then
+      return jsonb_build_object('frame', f + 1, 'roll', jsonb_array_length(v_frame) + 1,
+                                'standing', public._bw_standing(v_frame, f = p_n - 1));
+    end if;
+  end loop;
+  return null;
+end $$;
+
+-- Ajoute le masque p_mask à la frame p_frame (1-based).
+create or replace function public._bw_add(p_sheet jsonb, p_frame integer, p_mask integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_sheet jsonb := coalesce(p_sheet, '[]'::jsonb);
+begin
+  while jsonb_array_length(v_sheet) < p_frame loop
+    v_sheet := v_sheet || '[[]]'::jsonb;
+  end loop;
+  return jsonb_set(v_sheet, array[(p_frame - 1)::text],
+                   (v_sheet->(p_frame - 1)) || to_jsonb(p_mask));
+end $$;
+
+-- Complète une feuille avec des lancers à 0 (fin forcée).
+create or replace function public._bw_fill(p_sheet jsonb, p_n integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_sheet jsonb := coalesce(p_sheet, '[]'::jsonb);
+  v_next jsonb;
+begin
+  loop
+    v_next := public._bw_next(v_sheet, p_n);
+    exit when v_next is null;
+    v_sheet := public._bw_add(v_sheet, (v_next->>'frame')::integer, 0);
+  end loop;
+  return v_sheet;
+end $$;
+
+-- Score officiel : {total (bonus non joués = 0), cum: [cumul | null par frame]}.
+create or replace function public._bw_score(p_sheet jsonb, p_n integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_flat    integer[] := '{}';
+  v_start   integer[] := '{}';
+  v_counts  integer[];
+  v_frame   jsonb;
+  f         integer;
+  i         integer;
+  v_len     integer;
+  v_score   integer;
+  v_partial integer;
+  v_running integer := 0;
+  v_total   integer := 0;
+  v_broken  boolean := false;
+  v_cum     jsonb := '[]'::jsonb;
+  m         jsonb;
+begin
+  for f in 0 .. p_n - 1 loop
+    v_start := v_start || (cardinality(v_flat) + 1);  -- index 1-based dans v_flat
+    for m in select value from jsonb_array_elements(coalesce(p_sheet->f, '[]'::jsonb)) loop
+      v_flat := v_flat || public._bw_count((m #>> '{}')::integer);
+    end loop;
+  end loop;
+
+  for f in 0 .. p_n - 1 loop
+    v_frame := coalesce(p_sheet->f, '[]'::jsonb);
+    v_len := jsonb_array_length(v_frame);
+    i := v_start[f + 1];
+    v_counts := v_flat[i : i + v_len - 1];
+    v_partial := coalesce((select sum(x) from unnest(v_counts) x), 0);
+    v_score := null;
+    if f < p_n - 1 then
+      if v_len >= 1 and v_counts[1] = 10 then
+        v_partial := 10 + coalesce(v_flat[i + 1], 0) + coalesce(v_flat[i + 2], 0);
+        if v_flat[i + 1] is not null and v_flat[i + 2] is not null then v_score := v_partial; end if;
+      elsif v_len >= 2 and v_counts[1] + v_counts[2] = 10 then
+        v_partial := 10 + coalesce(v_flat[i + 2], 0);
+        if v_flat[i + 2] is not null then v_score := v_partial; end if;
+      elsif v_len >= 2 then
+        v_score := v_partial;
+      end if;
+    elsif public._bw_frame_complete(v_frame, true) then
+      v_score := v_partial;
+    end if;
+    v_total := v_total + v_partial;
+    if v_score is null then v_broken := true; end if;
+    if not v_broken then
+      v_running := v_running + v_score;
+      v_cum := v_cum || to_jsonb(v_running);
+    else
+      v_cum := v_cum || 'null'::jsonb;
+    end if;
+  end loop;
+  return jsonb_build_object('total', v_total, 'cum', v_cum);
+end $$;
+
+-- Recalcule scores / cumuls / prochain lancer / joueurs finis.
+create or replace function public._bw_refresh(p_state jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_n      integer := (p_state->>'frames')::integer;
+  pl       text;
+  v_sheet  jsonb;
+  v_sc     jsonb;
+  v_next   jsonb;
+  v_scores jsonb := '{}'::jsonb;
+  v_cum    jsonb := '{}'::jsonb;
+  v_nexts  jsonb := '{}'::jsonb;
+  v_done   jsonb := '[]'::jsonb;
+begin
+  for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
+    v_sheet := coalesce(p_state->'sheets'->pl, '[]'::jsonb);
+    v_sc := public._bw_score(v_sheet, v_n);
+    v_next := public._bw_next(v_sheet, v_n);
+    v_scores := v_scores || jsonb_build_object(pl, v_sc->'total');
+    v_cum := v_cum || jsonb_build_object(pl, v_sc->'cum');
+    v_nexts := v_nexts || jsonb_build_object(pl, coalesce(v_next, 'null'::jsonb));
+    if v_next is null then v_done := v_done || to_jsonb(pl); end if;
+  end loop;
+  return p_state || jsonb_build_object('scores', v_scores, 'cum', v_cum, 'next', v_nexts, 'done', v_done);
+end $$;
+
+-- Fin de partie : feuilles complétées par des 0, classement, résultats.
+-- points = round(score / 30) (300 -> 10 pts -> 100 XP) ; gagnant(s) = meilleur
+-- score (ex-aequo inclus), à condition d'avoir marqué au moins 1 quille.
+create or replace function public._bw_finish(p_state jsonb, p_server jsonb, p_forced boolean)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_n       integer := (p_state->>'frames')::integer;
+  v_sheets  jsonb := '{}'::jsonb;
+  pl        text;
+  v_max     integer;
+  v_results jsonb;
+  v_winners jsonb;
+begin
+  for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
+    v_sheets := v_sheets || jsonb_build_object(pl, public._bw_fill(p_state->'sheets'->pl, v_n));
+  end loop;
+  p_state := public._bw_refresh(p_state || jsonb_build_object('sheets', v_sheets));
+
+  select coalesce(max(value::integer), 0) into v_max from jsonb_each_text(p_state->'scores');
+
+  select jsonb_agg(jsonb_build_object(
+           'profile_id', t.key,
+           'points', round(t.value::integer / 30.0)::integer,
+           'won', v_max > 0 and t.value::integer = v_max,
+           'placement', t.r,
+           'stats', '{}'::jsonb)
+         order by t.r, t.key)
+    into v_results
+    from (select key, value, rank() over (order by value::integer desc) as r
+            from jsonb_each_text(p_state->'scores')) t;
+
+  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
+    from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
+
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'forced', p_forced,
+                                           'winners', v_winners, 'results', v_results);
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
+-- Options : {"frames": 3|5|10 (défaut 5), "time_limit": 0|5|10|15|20 minutes (0 = sans limite)}
+create or replace function public.game_bowling_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_frames integer;
+  v_limit  integer;
+  v_empty  jsonb;
+  v_state  jsonb;
+begin
+  if coalesce(cardinality(p_players), 0) < 1 then raise exception 'not_enough_players'; end if;
+  if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
+
+  v_frames := case when coalesce(p_options->>'frames', '') ~ '^\d{1,2}$'
+                   then (p_options->>'frames')::integer else 5 end;
+  if v_frames not in (3, 5, 10) then v_frames := 5; end if;
+  v_limit := case when coalesce(p_options->>'time_limit', '') ~ '^\d{1,2}$'
+                  then (p_options->>'time_limit')::integer else 0 end;
+  if v_limit not in (0, 5, 10, 15, 20) then v_limit := 0; end if;
+
+  select jsonb_object_agg(p::text, '[]'::jsonb) into v_empty from unnest(p_players) p;
+
+  v_state := jsonb_build_object(
+    'game', 'bowling',
+    'phase', 'playing',
+    'players', to_jsonb(p_players),
+    'frames', v_frames,
+    'time_limit', v_limit,
+    'started_at', now(),
+    'deadline', case when v_limit > 0 then to_jsonb(now() + make_interval(mins => v_limit)) else 'null'::jsonb end,
+    'sheets', v_empty,
+    'last_roll', null,
+    'forced', false,
+    'winners', null,
+    'results', null);
+
+  return jsonb_build_object('state', public._bw_refresh(v_state), 'server', '{}'::jsonb, 'secrets', '{}'::jsonb);
+end $$;
+
+create or replace function public.game_bowling_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type    text := p_action->>'type';
+  v_phase   text := p_state->>'phase';
+  v_me      text := p_actor::text;
+  v_n       integer := (p_state->>'frames')::integer;
+  v_frame   integer;
+  v_roll    integer;
+  v_mask    integer;
+  v_sheet   jsonb;
+  v_prev    jsonb;
+  v_next    jsonb;
+  v_stand   integer;
+  v_cnt     integer;
+  v_kind    text;
+  v_late    boolean := p_state->>'deadline' is not null
+                       and now() >= (p_state->>'deadline')::timestamptz;
+begin
+  -- ---------------------------------------------------------------- roll
+  if v_type = 'roll' then
+    if v_phase <> 'playing' then raise exception 'wrong_phase'; end if;
+    if not ((p_state->'players') ? v_me) then raise exception 'not_a_player'; end if;
+    if jsonb_typeof(p_action->'frame') is distinct from 'number'
+       or jsonb_typeof(p_action->'roll') is distinct from 'number'
+       or jsonb_typeof(p_action->'pins_down_mask') is distinct from 'number'
+       or (p_action->>'frame') !~ '^\d{1,2}$' or (p_action->>'roll') !~ '^\d$' then
+      raise exception 'invalid_action';
+    end if;
+    if (p_action->>'pins_down_mask') !~ '^\d{1,4}$' then raise exception 'invalid_roll'; end if;
+    v_frame := (p_action->>'frame')::integer;
+    v_roll  := (p_action->>'roll')::integer;
+    v_mask  := (p_action->>'pins_down_mask')::integer;
+    if v_mask > 1023 then raise exception 'invalid_roll'; end if;
+
+    -- Échéance globale dépassée (tolérance réseau 3 s) : fin de partie, lancer ignoré.
+    if v_late and now() > (p_state->>'deadline')::timestamptz + interval '3 seconds' then
+      return public._bw_finish(p_state, p_server, true);
+    end if;
+
+    v_sheet := coalesce(p_state->'sheets'->v_me, '[]'::jsonb);
+    v_prev := v_sheet->(v_frame - 1)->(v_roll - 1);
+    if v_frame >= 1 and v_roll >= 1 and v_prev is not null then
+      -- Renvoi du même lancer (réseau) : idempotent ; sinon réécriture interdite.
+      if (v_prev #>> '{}')::integer = v_mask then
+        return jsonb_build_object('state', p_state, 'server', p_server);
+      end if;
+      raise exception 'wrong_roll';
+    end if;
+    v_next := public._bw_next(v_sheet, v_n);
+    if v_next is null then raise exception 'already_done'; end if;
+    if (v_next->>'frame')::integer <> v_frame or (v_next->>'roll')::integer <> v_roll then
+      raise exception 'wrong_roll';
+    end if;
+    v_stand := (v_next->>'standing')::integer;
+    if (v_mask & ~v_stand & 1023) <> 0 then raise exception 'invalid_roll'; end if;
+
+    v_cnt := public._bw_count(v_mask);
+    v_kind := case when v_cnt = 0 then 'zero'
+                   when v_stand = 1023 and v_cnt = 10 then 'strike'
+                   when v_stand <> 1023 and v_mask = v_stand then 'spare'
+                   else 'normal' end;
+
+    p_state := jsonb_set(p_state, array['sheets', v_me], public._bw_add(v_sheet, v_frame, v_mask), true);
+    p_state := public._bw_refresh(p_state) || jsonb_build_object('last_roll', jsonb_build_object(
+      'player', v_me, 'frame', v_frame, 'roll', v_roll, 'mask', v_mask, 'pins', v_cnt,
+      'kind', v_kind, 'at', now()));
+
+    if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') then
+      return public._bw_finish(p_state, p_server, false);
+    end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- tick
+  elsif v_type = 'tick' then
+    if v_phase = 'playing' and v_late then
+      return public._bw_finish(p_state, p_server, true);
+    end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- end_game
+  elsif v_type = 'end_game' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'playing' then raise exception 'wrong_phase'; end if;
+    return public._bw_finish(p_state, p_server, true);
+
+  else
+    raise exception 'unknown_action';
+  end if;
+end $$;
+
+revoke all on function public._bw_count(integer) from public, anon, authenticated;
+revoke all on function public._bw_frame_complete(jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._bw_standing(jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._bw_next(jsonb, integer) from public, anon, authenticated;
+revoke all on function public._bw_add(jsonb, integer, integer) from public, anon, authenticated;
+revoke all on function public._bw_fill(jsonb, integer) from public, anon, authenticated;
+revoke all on function public._bw_score(jsonb, integer) from public, anon, authenticated;
+revoke all on function public._bw_refresh(jsonb) from public, anon, authenticated;
+revoke all on function public._bw_finish(jsonb, jsonb, boolean) from public, anon, authenticated;
+revoke all on function public.game_bowling_start(uuid[], jsonb) from public, anon, authenticated;
+revoke all on function public.game_bowling_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 
 
 -- ===== games\cerveau-en-fete.sql =====
@@ -2781,6 +3549,1270 @@ revoke all on function public._dd_end_turn(jsonb, jsonb, boolean) from public, a
 revoke all on function public._dd_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_dessine_devine_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_dessine_devine_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+
+
+-- ===== games\loup-garou.sql =====
+-- =============================================================================
+-- JEU « Loup-garou » (id loup-garou) — jeu de rôles caché multi-écrans
+-- Idempotent (create or replace). Dispatché par start_match / game_action.
+-- Contrat complet (state public, secrets, actions, choix de règles) :
+--   src/games/loup-garou/types.ts
+--
+-- Rôles : loup, villageois, voyante, sorciere, cupidon, chasseur, protecteur.
+-- Phases : roles -> night(step) -> reveal(dawn) -> [hunter -> reveal(hunter)]
+--          -> day -> vote -> reveal(vote) -> [hunter…] -> night … -> finished
+-- Étapes de nuit (ordre) : cupidon, amoureux (nuit 1 seulement) -> voyante ->
+--   protecteur -> loups -> sorciere. Une étape existe si le rôle est dans la
+--   composition (publique), qu'il soit vivant ou non : durée minimale + aléa
+--   pour ne pas trahir qui est mort.
+-- Rien de secret dans le state public : rôles, votes des loups, résultats de la
+-- voyante, potions, amoureux et cible des loups vivent dans `server` + secrets.
+-- =============================================================================
+
+create or replace function public._lg_iso(p_ts timestamptz)
+returns text language sql stable
+set search_path = public, extensions
+as $$
+  select to_char(p_ts at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+$$;
+
+-- Composition suggérée selon le nombre de joueurs (miroir de suggestComposition
+-- dans src/games/loup-garou/types.ts). Les villageois complètent.
+create or replace function public._lg_suggest(p_n integer)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select (case
+    when p_n <= 5 then '{"loup":1,"voyante":1,"sorciere":1,"chasseur":0,"cupidon":0,"protecteur":0}'
+    when p_n = 6  then '{"loup":2,"voyante":1,"sorciere":1,"chasseur":1,"cupidon":0,"protecteur":0}'
+    when p_n = 7  then '{"loup":2,"voyante":1,"sorciere":1,"chasseur":1,"cupidon":1,"protecteur":0}'
+    when p_n = 8  then '{"loup":2,"voyante":1,"sorciere":1,"chasseur":1,"cupidon":1,"protecteur":1}'
+    else               '{"loup":2,"voyante":1,"sorciere":1,"chasseur":1,"cupidon":1,"protecteur":1}'
+  end)::jsonb;
+$$;
+
+-- Durées des étapes de nuit (secondes) : minimum (même si le rôle est mort) et maximum.
+create or replace function public._lg_step_min(p_step text)
+returns integer language sql immutable
+set search_path = public, extensions
+as $$
+  select case p_step when 'cupidon' then 15 when 'amoureux' then 10 when 'voyante' then 12
+                     when 'protecteur' then 10 when 'loups' then 18 when 'sorciere' then 12 else 10 end;
+$$;
+
+create or replace function public._lg_step_max(p_step text)
+returns integer language sql immutable
+set search_path = public, extensions
+as $$
+  select case p_step when 'cupidon' then 45 when 'amoureux' then 10 when 'voyante' then 40
+                     when 'protecteur' then 35 when 'loups' then 75 when 'sorciere' then 45 else 30 end;
+$$;
+
+-- Joueurs vivants ayant le rôle p_role (ordre de `alive`).
+create or replace function public._lg_alive_role(p_state jsonb, p_server jsonb, p_role text)
+returns text[] language sql immutable
+set search_path = public, extensions
+as $$
+  select coalesce(array_agg(a order by o), '{}'::text[])
+    from jsonb_array_elements_text(p_state->'alive') with ordinality as t(a, o)
+   where p_server->'roles'->>a = p_role;
+$$;
+
+-- Étapes de la nuit courante (state.night), selon la composition publique.
+create or replace function public._lg_steps(p_state jsonb)
+returns text[] language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v text[] := '{}';
+  c jsonb  := p_state->'composition';
+begin
+  if coalesce((p_state->>'night')::integer, 1) = 1 and coalesce((c->>'cupidon')::integer, 0) > 0 then
+    v := array_append(v, 'cupidon');
+    v := array_append(v, 'amoureux');
+  end if;
+  if coalesce((c->>'voyante')::integer, 0) > 0 then v := array_append(v, 'voyante'); end if;
+  if coalesce((c->>'protecteur')::integer, 0) > 0 then v := array_append(v, 'protecteur'); end if;
+  v := array_append(v, 'loups');
+  if coalesce((c->>'sorciere')::integer, 0) > 0 then v := array_append(v, 'sorciere'); end if;
+  return v;
+end $$;
+
+-- Joueurs qui doivent agir pendant l'étape (vivants avec le rôle).
+create or replace function public._lg_actors(p_state jsonb, p_server jsonb, p_step text)
+returns text[] language plpgsql immutable
+set search_path = public, extensions
+as $$
+begin
+  return case p_step
+    when 'cupidon'    then public._lg_alive_role(p_state, p_server, 'cupidon')
+    when 'voyante'    then public._lg_alive_role(p_state, p_server, 'voyante')
+    when 'protecteur' then public._lg_alive_role(p_state, p_server, 'protecteur')
+    when 'loups'      then public._lg_alive_role(p_state, p_server, 'loup')
+    when 'sorciere'   then case
+      when coalesce((p_server->'potions'->>'life')::boolean, false)
+        or coalesce((p_server->'potions'->>'death')::boolean, false)
+      then public._lg_alive_role(p_state, p_server, 'sorciere') else '{}'::text[] end
+    else '{}'::text[] end;
+end $$;
+
+create or replace function public._lg_pair(p_state jsonb, p_server jsonb)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select jsonb_build_object('state', p_state, 'server', p_server); $$;
+
+-- Début d'une étape de nuit. Échéance : max si un acteur vivant doit agir,
+-- sinon min + aléa (0-6 s) pour simuler une hésitation.
+create or replace function public._lg_begin_step(p_state jsonb, p_server jsonb, p_step text)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_min    integer := public._lg_step_min(p_step);
+  v_max    integer := public._lg_step_max(p_step);
+  v_actors text[];
+  v_secs   double precision;
+begin
+  p_server := p_server || jsonb_build_object('done', false);
+  if p_step = 'loups' then p_server := p_server || jsonb_build_object('wolf_votes', '{}'::jsonb); end if;
+  if p_step = 'amoureux' then p_server := p_server || jsonb_build_object('lovers_known', true); end if;
+  v_actors := public._lg_actors(p_state, p_server, p_step);
+  v_secs := case when p_step = 'amoureux' then v_max
+                 when cardinality(v_actors) = 0 then v_min + random() * 6
+                 else v_max end;
+  p_state := p_state || jsonb_build_object(
+    'phase', 'night', 'step', p_step,
+    'step_started', public._lg_iso(now()), 'step_max', v_max,
+    'deadline', public._lg_iso(now() + make_interval(secs => v_secs)));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- L'acteur a fini : l'étape se termine au plus tôt à début + min (+ aléa 0-3 s).
+create or replace function public._lg_mark_done(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_min_end timestamptz := (p_state->>'step_started')::timestamptz
+                           + make_interval(secs => public._lg_step_min(p_state->>'step'));
+begin
+  p_server := p_server || jsonb_build_object('done', true);
+  p_state := p_state || jsonb_build_object('deadline',
+    public._lg_iso(greatest(now(), v_min_end) + make_interval(secs => random() * 3)));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+create or replace function public._lg_cur(p_server jsonb, p_key text, p_val jsonb)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select p_server || jsonb_build_object('cur', coalesce(p_server->'cur', '{}'::jsonb) || jsonb_build_object(p_key, p_val));
+$$;
+
+-- Tue un joueur (si vivant) : rôle révélé, chasseur en attente, chagrin de l'amoureux.
+create or replace function public._lg_kill(p_state jsonb, p_server jsonb, p_id text, p_cause text)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_role  text := p_server->'roles'->>p_id;
+  v_entry jsonb;
+  v_other text;
+begin
+  if p_id is null or not coalesce((p_state->'alive') ? p_id, false) then
+    return public._lg_pair(p_state, p_server);
+  end if;
+  p_state := p_state || jsonb_build_object('alive',
+    (select coalesce(jsonb_agg(a order by o), '[]'::jsonb)
+       from jsonb_array_elements_text(p_state->'alive') with ordinality as t(a, o) where a <> p_id));
+  v_entry := jsonb_build_object('id', p_id, 'role', v_role, 'cause', p_cause,
+                                'night', coalesce((p_state->>'night')::integer, 0),
+                                'when', coalesce(p_state->'reveal'->>'kind', 'dawn'));
+  p_state := p_state || jsonb_build_object('dead', coalesce(p_state->'dead', '[]'::jsonb) || jsonb_build_array(v_entry));
+  if jsonb_typeof(p_state->'reveal') = 'object' then
+    p_state := jsonb_set(p_state, '{reveal,deaths}',
+                         coalesce(p_state->'reveal'->'deaths', '[]'::jsonb) || jsonb_build_array(v_entry));
+  end if;
+  if v_role = 'chasseur' then
+    p_state := p_state || jsonb_build_object('hunter_pending', p_id);
+  end if;
+  if coalesce(p_server->'lovers', '[]'::jsonb) ? p_id then
+    select x into v_other from jsonb_array_elements_text(p_server->'lovers') x where x <> p_id limit 1;
+    return public._lg_kill(p_state, p_server, v_other, 'chagrin');
+  end if;
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- Camp d'un joueur : 'amoureux' (couple mixte loup + non-loup), 'loups' ou 'village'.
+create or replace function public._lg_camp(p_server jsonb, p_id text)
+returns text language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_l jsonb := coalesce(p_server->'lovers', '[]'::jsonb);
+begin
+  if jsonb_array_length(v_l) = 2 and v_l ? p_id
+     and ((p_server->'roles'->>(v_l->>0)) = 'loup') <> ((p_server->'roles'->>(v_l->>1)) = 'loup') then
+    return 'amoureux';
+  end if;
+  return case when p_server->'roles'->>p_id = 'loup' then 'loups' else 'village' end;
+end $$;
+
+-- Vainqueur ou null.
+--  * amoureux mixtes vivants : gagnent s'ils sont les 2 derniers ; les loups
+--    « purs » gagnent s'ils sont au moins aussi nombreux que les autres vivants.
+--  * sinon : village si plus aucun loup vivant ; loups si loups >= autres vivants.
+create or replace function public._lg_winner(p_state jsonb, p_server jsonb)
+returns text language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_alive  text[] := array(select jsonb_array_elements_text(p_state->'alive'));
+  v_n      integer := cardinality(v_alive);
+  v_wolves integer := cardinality(public._lg_alive_role(p_state, p_server, 'loup'));
+  v_l      jsonb := coalesce(p_server->'lovers', '[]'::jsonb);
+  v_pure   integer;
+begin
+  if jsonb_array_length(v_l) = 2 and public._lg_camp(p_server, v_l->>0) = 'amoureux'
+     and (v_l->>0) = any(v_alive) and (v_l->>1) = any(v_alive) then
+    if v_n = 2 then return 'amoureux'; end if;
+    v_pure := v_wolves - 1;
+    if v_pure > 0 and v_pure >= v_n - v_pure then return 'loups'; end if;
+    return null;
+  end if;
+  if v_wolves = 0 then return 'village'; end if;
+  if v_wolves >= v_n - v_wolves then return 'loups'; end if;
+  return null;
+end $$;
+
+-- Fin de partie : rôles, amoureux et chronique des nuits rendus publics.
+create or replace function public._lg_finish(p_state jsonb, p_server jsonb, p_winner text)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_results jsonb := '[]'::jsonb;
+  p         text;
+  v_won     boolean;
+  v_alive   boolean;
+begin
+  for p in select jsonb_array_elements_text(p_state->'players') loop
+    v_won := public._lg_camp(p_server, p) = p_winner;
+    v_alive := (p_state->'alive') ? p;
+    v_results := v_results || jsonb_build_array(jsonb_build_object(
+      'profile_id', p, 'won', v_won,
+      'points', case when v_won and v_alive then 3 when v_won then 2 else 0 end,
+      'placement', case when v_won then 1 else 2 end));
+  end loop;
+  p_state := p_state || jsonb_build_object(
+    'phase', 'finished', 'winner', p_winner, 'step', null, 'deadline', null, 'hunter', null,
+    'roles', p_server->'roles', 'lovers', coalesce(p_server->'lovers', '[]'::jsonb),
+    'chronicle', coalesce(p_server->'nights', '[]'::jsonb), 'results', v_results);
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+create or replace function public._lg_begin_night(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'night', coalesce((p_state->>'night')::integer, 0) + 1,
+    'reveal', null, 'votes', '{}'::jsonb, 'candidates', '[]'::jsonb, 'revote', false, 'first_vote', null);
+  p_server := p_server || jsonb_build_object(
+    'cur', jsonb_build_object('night', (p_state->>'night')::integer),
+    'victim', null, 'protected', null, 'saved', false, 'poison', null);
+  return public._lg_begin_step(p_state, p_server, (public._lg_steps(p_state))[1]);
+end $$;
+
+-- Fin de la nuit : morts (victime des loups sauf protégée/sauvée, empoisonné).
+create or replace function public._lg_resolve_night(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_victim text := p_server->>'victim';
+  v_r      jsonb;
+  v_n      integer;
+  v_cur    jsonb;
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'reveal', 'step', null, 'after', 'day',
+    'reveal', jsonb_build_object('kind', 'dawn', 'night', (p_state->>'night')::integer, 'deaths', '[]'::jsonb));
+  if v_victim is not null and v_victim is distinct from p_server->>'protected'
+     and not coalesce((p_server->>'saved')::boolean, false) then
+    v_r := public._lg_kill(p_state, p_server, v_victim, 'night');
+    p_state := v_r->'state'; p_server := v_r->'server';
+  end if;
+  if p_server->>'poison' is not null then
+    v_r := public._lg_kill(p_state, p_server, p_server->>'poison', 'night');
+    p_state := v_r->'state'; p_server := v_r->'server';
+  end if;
+  v_cur := coalesce(p_server->'cur', '{}'::jsonb) || jsonb_build_object(
+    'night', (p_state->>'night')::integer,
+    'deaths', (select coalesce(jsonb_agg(d->'id'), '[]'::jsonb) from jsonb_array_elements(p_state->'reveal'->'deaths') d));
+  p_server := p_server || jsonb_build_object(
+    'nights', coalesce(p_server->'nights', '[]'::jsonb) || jsonb_build_array(v_cur),
+    'cur', null, 'last_protected', p_server->'protected', 'protected', null,
+    'victim', null, 'saved', false, 'poison', null, 'wolf_votes', '{}'::jsonb, 'done', false);
+  v_n := jsonb_array_length(p_state->'reveal'->'deaths');
+  p_state := p_state || jsonb_build_object('deadline', public._lg_iso(now() + make_interval(secs => 10 + 4 * v_n)));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- Fin d'une étape de nuit (échéance) : choix par défaut puis étape suivante.
+create or replace function public._lg_end_step(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_step   text := p_state->>'step';
+  v_steps  text[] := public._lg_steps(p_state);
+  v_idx    integer;
+  v_wolves text[];
+  v_target text;
+begin
+  if v_step = 'loups' then
+    v_wolves := public._lg_alive_role(p_state, p_server, 'loup');
+    -- Majorité des loups vivants ; égalité -> tirage parmi les ex-aequo ; aucun vote -> personne.
+    select t into v_target from (
+      select value as t, count(*) as c
+        from jsonb_each_text(coalesce(p_server->'wolf_votes', '{}'::jsonb))
+       where key = any(v_wolves) and (p_state->'alive') ? value
+       group by value) x
+     order by c desc, random() limit 1;
+    p_server := p_server || jsonb_build_object('victim', v_target);
+    p_server := public._lg_cur(p_server, 'wolves', to_jsonb(v_target));
+  end if;
+  v_idx := array_position(v_steps, v_step);
+  if v_idx is not null and v_idx < cardinality(v_steps) then
+    return public._lg_begin_step(p_state, p_server, v_steps[v_idx + 1]);
+  end if;
+  return public._lg_resolve_night(p_state, p_server);
+end $$;
+
+create or replace function public._lg_begin_vote(p_state jsonb, p_server jsonb, p_candidates jsonb, p_revote boolean)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'vote', 'votes', '{}'::jsonb, 'candidates', p_candidates, 'revote', p_revote,
+    'deadline', public._lg_iso(now() + interval '75 seconds'));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- Dépouillement : majorité relative ; 1re égalité -> revote entre ex-aequo ;
+-- 2e égalité -> personne n'est éliminé ; aucun vote -> personne.
+create or replace function public._lg_tally(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_counts  jsonb;
+  v_max     integer;
+  v_tied    jsonb;
+  v_elim    text;
+  v_outcome text;
+  v_r       jsonb;
+begin
+  select coalesce(jsonb_object_agg(t, c), '{}'::jsonb), max(c) into v_counts, v_max from (
+    select value as t, count(*)::integer as c
+      from jsonb_each_text(coalesce(p_state->'votes', '{}'::jsonb))
+     where (p_state->'alive') ? key and (p_state->'alive') ? value
+     group by value) x;
+  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_tied
+    from jsonb_each_text(v_counts) where value::integer = v_max;
+
+  if v_max is null then
+    v_outcome := 'none';
+  elsif jsonb_array_length(v_tied) = 1 then
+    v_outcome := 'majority';
+    v_elim := v_tied->>0;
+  elsif not coalesce((p_state->>'revote')::boolean, false) then
+    p_state := p_state || jsonb_build_object('first_vote',
+      jsonb_build_object('votes', p_state->'votes', 'counts', v_counts, 'tied', v_tied));
+    return public._lg_begin_vote(p_state, p_server, v_tied, true);
+  else
+    v_outcome := 'tie';
+  end if;
+
+  p_state := p_state || jsonb_build_object(
+    'phase', 'reveal', 'after', 'night',
+    'reveal', jsonb_build_object('kind', 'vote', 'night', (p_state->>'night')::integer,
+                                 'votes', p_state->'votes', 'counts', v_counts, 'tied', v_tied,
+                                 'outcome', v_outcome, 'eliminated', v_elim,
+                                 'revote', coalesce((p_state->>'revote')::boolean, false),
+                                 'deaths', '[]'::jsonb));
+  if v_elim is not null then
+    v_r := public._lg_kill(p_state, p_server, v_elim, 'vote');
+    p_state := v_r->'state'; p_server := v_r->'server';
+  end if;
+  p_state := p_state || jsonb_build_object('deadline', public._lg_iso(now() + make_interval(
+    secs => 10 + 4 * jsonb_array_length(p_state->'reveal'->'deaths'))));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- Tir du chasseur (p_target null = pas de tir).
+create or replace function public._lg_hunter_done(p_state jsonb, p_server jsonb, p_target text)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_r jsonb;
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'reveal',
+    'reveal', jsonb_build_object('kind', 'hunter', 'night', (p_state->>'night')::integer,
+                                 'hunter', p_state->'hunter', 'target', p_target, 'deaths', '[]'::jsonb),
+    'hunter', null);
+  if p_target is not null then
+    v_r := public._lg_kill(p_state, p_server, p_target, 'chasseur');
+    p_state := v_r->'state'; p_server := v_r->'server';
+  end if;
+  p_state := p_state || jsonb_build_object('deadline', public._lg_iso(now() + make_interval(
+    secs => 8 + 4 * jsonb_array_length(p_state->'reveal'->'deaths'))));
+  return public._lg_pair(p_state, p_server);
+end $$;
+
+-- Après une révélation : chasseur en attente, sinon victoire, sinon jour / nuit.
+create or replace function public._lg_after_reveal(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_w text;
+begin
+  if jsonb_typeof(p_state->'reveal') = 'object' then
+    p_state := p_state || jsonb_build_object('history',
+      coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(p_state->'reveal'));
+  end if;
+  if p_state->>'hunter_pending' is not null then
+    p_state := p_state || jsonb_build_object(
+      'phase', 'hunter', 'hunter', p_state->'hunter_pending', 'hunter_pending', null,
+      'deadline', public._lg_iso(now() + interval '40 seconds'));
+    return public._lg_pair(p_state, p_server);
+  end if;
+  v_w := public._lg_winner(p_state, p_server);
+  if v_w is not null then
+    return public._lg_finish(p_state, p_server, v_w);
+  end if;
+  if p_state->>'after' = 'day' then
+    p_state := p_state || jsonb_build_object(
+      'phase', 'day', 'reveal', null, 'votes', '{}'::jsonb, 'candidates', '[]'::jsonb, 'revote', false,
+      'first_vote', null,
+      'deadline', public._lg_iso(now() + make_interval(secs => coalesce((p_state->>'debate_seconds')::integer, 180))));
+    return public._lg_pair(p_state, p_server);
+  end if;
+  return public._lg_begin_night(p_state, p_server);
+end $$;
+
+-- Secrets de tous les joueurs (+ meneur non joueur), recalculés à chaque action.
+create or replace function public._lg_secrets(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_out    jsonb := '{}'::jsonb;
+  p        text;
+  r        text;
+  s        jsonb;
+  v_step   text := case when p_state->>'phase' = 'night' then p_state->>'step' end;
+  v_actors text[] := case when p_state->>'phase' = 'night'
+                          then public._lg_actors(p_state, p_server, p_state->>'step') else '{}'::text[] end;
+  v_known  boolean := coalesce((p_server->>'lovers_known')::boolean, false);
+  v_lovers jsonb := coalesce(p_server->'lovers', '[]'::jsonb);
+  v_wolves jsonb;
+  v_other  text;
+begin
+  select coalesce(jsonb_agg(a order by o), '[]'::jsonb) into v_wolves
+    from jsonb_array_elements_text(p_state->'players') with ordinality as t(a, o)
+   where p_server->'roles'->>a = 'loup';
+  for p in select jsonb_array_elements_text(p_state->'players') loop
+    r := p_server->'roles'->>p;
+    s := jsonb_build_object('role', r, 'night', coalesce((p_state->>'night')::integer, 0),
+                            'step', v_step, 'acting', p = any(v_actors),
+                            'done', p = any(v_actors) and coalesce((p_server->>'done')::boolean, false));
+    if r = 'loup' then
+      s := s || jsonb_build_object('wolves', v_wolves,
+        'wolf_votes', case when v_step = 'loups' then coalesce(p_server->'wolf_votes', '{}'::jsonb) else '{}'::jsonb end);
+    elsif r = 'voyante' then
+      s := s || jsonb_build_object('seer', coalesce(p_server->'seer', '[]'::jsonb));
+    elsif r = 'sorciere' then
+      s := s || jsonb_build_object('potions', p_server->'potions',
+        'victim', case when v_step = 'sorciere' then p_server->'victim' else 'null'::jsonb end);
+    elsif r = 'protecteur' then
+      s := s || jsonb_build_object('last_protected', coalesce(p_server->'last_protected', 'null'::jsonb));
+    end if;
+    if v_known and v_lovers ? p then
+      select x into v_other from jsonb_array_elements_text(v_lovers) x where x <> p limit 1;
+      s := s || jsonb_build_object('lover', jsonb_build_object(
+        'id', v_other, 'role', p_server->'roles'->>v_other,
+        'mixed', public._lg_camp(p_server, p) = 'amoureux'));
+    end if;
+    v_out := v_out || jsonb_build_object(p, s);
+  end loop;
+  if p_state->>'narrator' is not null then
+    v_out := v_out || jsonb_build_object(p_state->>'narrator', jsonb_build_object(
+      'narrator', true, 'roles', p_server->'roles', 'step', v_step,
+      'lovers', case when v_known then v_lovers else '[]'::jsonb end));
+  end if;
+  return v_out;
+end $$;
+
+create or replace function public._lg_out(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+begin
+  if p_state->>'phase' = 'finished' then
+    return jsonb_build_object('state', p_state, 'server', p_server,
+                              'secrets', public._lg_secrets(p_state, p_server), 'results', p_state->'results');
+  end if;
+  return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', public._lg_secrets(p_state, p_server));
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Démarrage
+-- Options : {"composition": {"loup":2,"voyante":1,"sorciere":1,"chasseur":1,
+--            "cupidon":1,"protecteur":1}, "debate_seconds": 180, "host_plays": true}
+-- Composition absente -> suggestion automatique. host_plays=false : l'hôte (appelant
+-- de start_match) est retiré des joueurs et devient meneur (secret : tous les rôles).
+-- -----------------------------------------------------------------------------
+create or replace function public.game_loup_garou_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_opts    jsonb := coalesce(p_options, '{}'::jsonb);
+  v_host    text := public.current_profile_id()::text;
+  v_players text[] := array(select x::text from unnest(p_players) x);
+  v_narr    text;
+  v_n       integer;
+  v_comp    jsonb;
+  v_l       integer;
+  v_sum     integer;
+  v_k       text;
+  v_v       integer;
+  v_deck    text[] := '{}';
+  v_roles   jsonb := '{}'::jsonb;
+  v_debate  integer := coalesce((v_opts->>'debate_seconds')::integer, 180);
+  v_state   jsonb;
+  v_server  jsonb;
+  i         integer;
+begin
+  if v_host is not null and coalesce((v_opts->>'host_plays')::boolean, true) = false then
+    v_players := array_remove(v_players, v_host);
+  end if;
+  if v_host is not null and not (v_host = any(v_players)) then v_narr := v_host; end if;
+  v_n := cardinality(v_players);
+  if v_n < 5 then raise exception 'not_enough_players'; end if;
+  if v_n > 9 then raise exception 'too_many_players'; end if;
+
+  v_comp := case when jsonb_typeof(v_opts->'composition') = 'object' then v_opts->'composition'
+                 else public._lg_suggest(v_n) end;
+  begin
+    v_l := coalesce((v_comp->>'loup')::integer, 0);
+    v_sum := v_l;
+    foreach v_k in array array['voyante', 'sorciere', 'chasseur', 'cupidon', 'protecteur'] loop
+      v_v := coalesce((v_comp->>v_k)::integer, 0);
+      if v_v not in (0, 1) then raise exception 'invalid_composition'; end if;
+      v_sum := v_sum + v_v;
+      if v_v = 1 then v_deck := array_append(v_deck, v_k); end if;
+    end loop;
+  exception when invalid_text_representation or numeric_value_out_of_range then
+    raise exception 'invalid_composition';
+  end;
+  if v_l < 1 or v_l * 2 >= v_n or v_sum > v_n then raise exception 'invalid_composition'; end if;
+  for i in 1 .. v_l loop v_deck := array_append(v_deck, 'loup'); end loop;
+  for i in 1 .. v_n - v_sum loop v_deck := array_append(v_deck, 'villageois'); end loop;
+
+  select jsonb_object_agg(p, r) into v_roles
+    from (select p, row_number() over () as k from unnest(v_players) as p) a
+    join (select r, row_number() over () as k from (select r from unnest(v_deck) as r order by random()) z) b
+      using (k);
+
+  if v_debate < 30 or v_debate > 900 then v_debate := 180; end if;
+
+  v_state := jsonb_build_object(
+    'game', 'loup-garou', 'phase', 'roles',
+    'players', to_jsonb(v_players), 'alive', to_jsonb(v_players), 'narrator', v_narr,
+    'composition', jsonb_build_object(
+      'loup', v_l, 'villageois', v_n - v_sum,
+      'voyante', coalesce((v_comp->>'voyante')::integer, 0),
+      'sorciere', coalesce((v_comp->>'sorciere')::integer, 0),
+      'chasseur', coalesce((v_comp->>'chasseur')::integer, 0),
+      'cupidon', coalesce((v_comp->>'cupidon')::integer, 0),
+      'protecteur', coalesce((v_comp->>'protecteur')::integer, 0)),
+    'debate_seconds', v_debate,
+    'night', 0, 'step', null, 'step_started', null, 'step_max', null,
+    'deadline', public._lg_iso(now() + interval '120 seconds'),
+    'votes', '{}'::jsonb, 'candidates', '[]'::jsonb, 'revote', false, 'first_vote', null,
+    'reveal', null, 'after', null, 'hunter', null, 'hunter_pending', null,
+    'dead', '[]'::jsonb, 'history', '[]'::jsonb,
+    'winner', null, 'roles', null, 'lovers', null, 'chronicle', null, 'results', null);
+  v_server := jsonb_build_object(
+    'roles', v_roles, 'lovers', '[]'::jsonb, 'lovers_known', false,
+    'potions', jsonb_build_object('life', true, 'death', true),
+    'seer', '[]'::jsonb, 'wolf_votes', '{}'::jsonb, 'done', false,
+    'victim', null, 'protected', null, 'last_protected', null, 'saved', false, 'poison', null,
+    'cur', null, 'nights', '[]'::jsonb);
+  return jsonb_build_object('state', v_state, 'server', v_server,
+                            'secrets', public._lg_secrets(v_state, v_server));
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Actions
+--   {"type":"tick"}                       tous : échéance dépassée -> suite (sinon inchangé)
+--   {"type":"next"}                       hôte : roles -> nuit 1 ; reveal -> suite
+--   {"type":"night_action", ...}          acteur de l'étape de nuit :
+--       cupidon    {"targets":[a,b]}
+--       voyante    {"target":x}
+--       protecteur {"target":x}             (pas le même que la nuit précédente)
+--       loups      {"target":x|null}        (vote modifiable, visible des autres loups)
+--       sorciere   {"save":bool,"target":x|null}  (ou "potion":"life"|"death"|"none")
+--   {"type":"end_debate"}                 hôte : jour -> vote
+--   {"type":"day_vote","target":x}        vivant : vote public, modifiable
+--   {"type":"close_vote"}                 hôte : dépouille maintenant
+--   {"type":"hunter_shot","target":x|null}  chasseur mort
+-- -----------------------------------------------------------------------------
+create or replace function public.game_loup_garou_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type   text := p_action->>'type';
+  v_me     text := p_actor::text;
+  v_phase  text := p_state->>'phase';
+  v_step   text := p_state->>'step';
+  v_target text := nullif(p_action->>'target', '');
+  v_alive  boolean := coalesce((p_state->'alive') ? v_me, false);
+  v_player boolean := coalesce((p_state->'players') ? v_me, false);
+  v_r      jsonb;
+  v_a      text;
+  v_b      text;
+  v_save   boolean;
+  v_wolves text[];
+  v_n      integer;
+  v_pot    text;
+begin
+  if v_phase not in ('roles', 'night', 'reveal', 'hunter', 'day', 'vote') then
+    raise exception 'wrong_phase';
+  end if;
+
+  -- ------------------------------------------------------------------ tick
+  if v_type = 'tick' then
+    if p_state->>'deadline' is null or now() < (p_state->>'deadline')::timestamptz then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    v_r := case v_phase
+      when 'roles'  then public._lg_begin_night(p_state, p_server)
+      when 'night'  then public._lg_end_step(p_state, p_server)
+      when 'reveal' then public._lg_after_reveal(p_state, p_server)
+      when 'hunter' then public._lg_hunter_done(p_state, p_server, null)
+      when 'day'    then public._lg_begin_vote(p_state, p_server, p_state->'alive', false)
+      when 'vote'   then public._lg_tally(p_state, p_server)
+    end;
+    return public._lg_out(v_r->'state', v_r->'server');
+  end if;
+
+  -- ------------------------------------------------------------------ hôte
+  if v_type in ('next', 'end_debate', 'close_vote') then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_type = 'next' and v_phase = 'roles' then
+      v_r := public._lg_begin_night(p_state, p_server);
+    elsif v_type = 'next' and v_phase = 'reveal' then
+      v_r := public._lg_after_reveal(p_state, p_server);
+    elsif v_type = 'end_debate' and v_phase = 'day' then
+      v_r := public._lg_begin_vote(p_state, p_server, p_state->'alive', false);
+    elsif v_type = 'close_vote' and v_phase = 'vote' then
+      v_r := public._lg_tally(p_state, p_server);
+    else
+      raise exception 'wrong_phase';
+    end if;
+    return public._lg_out(v_r->'state', v_r->'server');
+  end if;
+
+  if v_type not in ('night_action', 'day_vote', 'hunter_shot') then raise exception 'unknown_action'; end if;
+  if not v_player then raise exception 'not_a_player'; end if;
+
+  -- ------------------------------------------------------------------ chasseur
+  if v_type = 'hunter_shot' then
+    if v_phase <> 'hunter' then raise exception 'wrong_phase'; end if;
+    if p_state->>'hunter' is distinct from v_me then raise exception 'not_your_turn'; end if;
+    if v_target is not null and (v_target = v_me or not ((p_state->'alive') ? v_target)) then
+      raise exception 'invalid_target';
+    end if;
+    v_r := public._lg_hunter_done(p_state, p_server, v_target);
+    return public._lg_out(v_r->'state', v_r->'server');
+  end if;
+
+  if not v_alive then raise exception 'not_alive'; end if;
+
+  -- ------------------------------------------------------------------ vote du jour
+  if v_type = 'day_vote' then
+    if v_phase <> 'vote' then raise exception 'wrong_phase'; end if;
+    if v_target is null or not ((p_state->'candidates') ? v_target) or not ((p_state->'alive') ? v_target) then
+      raise exception 'invalid_target';
+    end if;
+    if v_target = v_me then raise exception 'cannot_vote_self'; end if;
+    p_state := jsonb_set(p_state, array['votes', v_me], to_jsonb(v_target), true);
+    select count(*) into v_n from jsonb_object_keys(p_state->'votes') k where (p_state->'alive') ? k;
+    if v_n >= jsonb_array_length(p_state->'alive') then
+      v_r := public._lg_tally(p_state, p_server);
+      return public._lg_out(v_r->'state', v_r->'server');
+    end if;
+    return public._lg_out(p_state, p_server);
+  end if;
+
+  -- ------------------------------------------------------------------ actions de nuit
+  if v_phase <> 'night' then raise exception 'wrong_phase'; end if;
+  if not (v_me = any(public._lg_actors(p_state, p_server, v_step))) then raise exception 'not_your_turn'; end if;
+  if v_step <> 'loups' and coalesce((p_server->>'done')::boolean, false) then raise exception 'already_acted'; end if;
+
+  if v_step = 'cupidon' then
+    v_a := p_action->'targets'->>0;
+    v_b := p_action->'targets'->>1;
+    if jsonb_typeof(p_action->'targets') <> 'array' or jsonb_array_length(p_action->'targets') <> 2
+       or v_a is null or v_b is null or v_a = v_b
+       or not ((p_state->'alive') ? v_a) or not ((p_state->'alive') ? v_b) then
+      raise exception 'invalid_target';
+    end if;
+    p_server := p_server || jsonb_build_object('lovers', jsonb_build_array(v_a, v_b));
+    p_server := public._lg_cur(p_server, 'lovers', jsonb_build_array(v_a, v_b));
+    v_r := public._lg_mark_done(p_state, p_server);
+
+  elsif v_step = 'voyante' then
+    if v_target is null or v_target = v_me or not ((p_state->'alive') ? v_target) then
+      raise exception 'invalid_target';
+    end if;
+    p_server := p_server || jsonb_build_object('seer', coalesce(p_server->'seer', '[]'::jsonb) || jsonb_build_array(
+      jsonb_build_object('night', (p_state->>'night')::integer, 'target', v_target,
+                         'role', p_server->'roles'->>v_target)));
+    p_server := public._lg_cur(p_server, 'seer', to_jsonb(v_target));
+    v_r := public._lg_mark_done(p_state, p_server);
+
+  elsif v_step = 'protecteur' then
+    if v_target is null or not ((p_state->'alive') ? v_target)
+       or v_target is not distinct from p_server->>'last_protected' then
+      raise exception 'invalid_target';
+    end if;
+    p_server := p_server || jsonb_build_object('protected', v_target);
+    p_server := public._lg_cur(p_server, 'protect', to_jsonb(v_target));
+    v_r := public._lg_mark_done(p_state, p_server);
+
+  elsif v_step = 'loups' then
+    if v_target is not null and (not ((p_state->'alive') ? v_target) or p_server->'roles'->>v_target = 'loup') then
+      raise exception 'invalid_target';
+    end if;
+    if v_target is null then
+      p_server := p_server || jsonb_build_object('wolf_votes', coalesce(p_server->'wolf_votes', '{}'::jsonb) - v_me);
+    else
+      p_server := p_server || jsonb_build_object('wolf_votes',
+        coalesce(p_server->'wolf_votes', '{}'::jsonb) || jsonb_build_object(v_me, v_target));
+    end if;
+    v_wolves := public._lg_alive_role(p_state, p_server, 'loup');
+    if (select count(*) from unnest(v_wolves) w where p_server->'wolf_votes' ? w) = cardinality(v_wolves)
+       and (select count(distinct p_server->'wolf_votes'->>w) from unnest(v_wolves) w) = 1 then
+      -- Unanimité : l'étape se termine (après le minimum).
+      v_r := public._lg_mark_done(p_state, p_server);
+    elsif coalesce((p_server->>'done')::boolean, false) then
+      -- Un loup change d'avis : l'unanimité est rompue, retour à l'échéance max.
+      p_server := p_server || jsonb_build_object('done', false);
+      p_state := p_state || jsonb_build_object('deadline', public._lg_iso(greatest(
+        (p_state->>'step_started')::timestamptz + make_interval(secs => public._lg_step_max('loups')),
+        now() + interval '5 seconds')));
+      v_r := public._lg_pair(p_state, p_server);
+    else
+      v_r := public._lg_pair(p_state, p_server);
+    end if;
+
+  elsif v_step = 'sorciere' then
+    v_pot := p_action->>'potion';
+    v_save := coalesce((p_action->>'save')::boolean, false) or v_pot in ('life', 'both');
+    if v_pot = 'none' or v_pot = 'life' then v_target := null; end if;
+    if v_save then
+      if not coalesce((p_server->'potions'->>'life')::boolean, false) then raise exception 'no_potion'; end if;
+      if p_server->>'victim' is null then raise exception 'invalid_target'; end if;
+    end if;
+    if v_target is not null then
+      if not coalesce((p_server->'potions'->>'death')::boolean, false) then raise exception 'no_potion'; end if;
+      if v_target = v_me or not ((p_state->'alive') ? v_target) then raise exception 'invalid_target'; end if;
+    end if;
+    if v_save then
+      p_server := p_server || jsonb_build_object('saved', true,
+        'potions', p_server->'potions' || '{"life":false}'::jsonb);
+      p_server := public._lg_cur(p_server, 'saved', to_jsonb(p_server->>'victim'));
+    end if;
+    if v_target is not null then
+      p_server := p_server || jsonb_build_object('poison', v_target,
+        'potions', p_server->'potions' || '{"death":false}'::jsonb);
+      p_server := public._lg_cur(p_server, 'poison', to_jsonb(v_target));
+    end if;
+    v_r := public._lg_mark_done(p_state, p_server);
+
+  else
+    raise exception 'wrong_phase';
+  end if;
+
+  return public._lg_out(v_r->'state', v_r->'server');
+end $$;
+
+revoke all on function public._lg_iso(timestamptz) from public, anon, authenticated;
+revoke all on function public._lg_suggest(integer) from public, anon, authenticated;
+revoke all on function public._lg_step_min(text) from public, anon, authenticated;
+revoke all on function public._lg_step_max(text) from public, anon, authenticated;
+revoke all on function public._lg_alive_role(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_steps(jsonb) from public, anon, authenticated;
+revoke all on function public._lg_actors(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_pair(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_begin_step(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_mark_done(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_cur(jsonb, text, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_kill(jsonb, jsonb, text, text) from public, anon, authenticated;
+revoke all on function public._lg_camp(jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_winner(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_finish(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_begin_night(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_resolve_night(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_end_step(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_begin_vote(jsonb, jsonb, jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._lg_tally(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_hunter_done(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_after_reveal(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_secrets(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lg_out(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public.game_loup_garou_start(uuid[], jsonb) from public, anon, authenticated;
+revoke all on function public.game_loup_garou_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+
+
+-- ===== games\menteur.sql =====
+-- =============================================================================
+-- JEU « Menteur » (id menteur) — dés de bluff (famille des « dés menteurs »)
+-- Idempotent (create or replace). Dispatché par start_match / game_action.
+--
+-- Chaque joueur a 5 dés cachés (match_secrets). À chaque manche tout le monde
+-- relance (tirage serveur random()). À tour de rôle : monter l'enchère
+-- « N dés de valeur V » sur l'ensemble des dés de la table, ou crier « Menteur ! »
+-- (ou « Pile ! » si la variante est active). Le perdant de la vérification perd
+-- un dé ; à 0 dé on est éliminé ; le dernier joueur avec des dés gagne.
+--
+-- RÈGLES DES 1 (« Paco ») — les 1 sont JOKERS : ils comptent pour toutes les
+-- valeurs, sauf quand l'enchère porte justement sur les 1.
+--   * enchère normale -> normale : quantité supérieure, ou même quantité et
+--     valeur supérieure ;
+--   * normale (q, v) -> Paco : quantité >= ceil(q / 2) ;
+--   * Paco (q) -> Paco : quantité > q ;
+--   * Paco (q) -> normale : quantité >= 2q + 1 ;
+--   * l'enchère d'OUVERTURE d'une manche ne peut pas porter sur les 1 ;
+--   * une quantité ne peut jamais dépasser le nombre total de dés en jeu.
+--   (Pas de manche « palifico » : variante non retenue.)
+--
+-- « Menteur ! » (joueur dont c'est le tour, une enchère existe) : on compte les
+-- dés de la valeur annoncée + les 1 (sauf enchère Paco). Total >= quantité ->
+-- celui qui a crié perd un dé ; sinon l'enchérisseur perd un dé. Le perdant
+-- commence la manche suivante (s'il est éliminé : le joueur vivant suivant).
+-- « Pile ! » (option, défaut off ; joueur dont c'est le tour) : total exactement
+-- égal -> le crieur regagne un dé (plafonné à 5, sinon rien) ; sinon il en perd
+-- un. Le crieur commence la manche suivante (ou le vivant suivant s'il est sorti).
+--
+-- MINUTEUR (deadline + {"type":"tick"}) :
+--   * phase bidding : à l'échéance, enchère minimale automatique pour le joueur
+--     dont c'est le tour = même valeur, quantité + 1 ; en ouverture : 1 dé de la
+--     valeur (hors 1) la plus fréquente dans SES dés (égalité -> la plus haute).
+--     Si cette enchère dépasse le nombre de dés en jeu -> « Menteur ! » automatique.
+--   * phase reveal : à l'échéance, manche suivante (ou fin de partie si c'était
+--     la dernière vérification). L'hôte peut accélérer avec {"type":"next"}.
+--
+-- server : {"dice": {"<uid>": [1..6, ...]}}  (dés de la manche en cours)
+-- secret d'un joueur : {"round": n, "dice": [..]}  ([] une fois éliminé)
+-- Contrat complet (state public, actions) : src/games/menteur/types.ts.
+-- =============================================================================
+
+create or replace function public._mtr_iso(p_ts timestamptz)
+returns text language sql stable
+set search_path = public, extensions
+as $$
+  select to_char(p_ts at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+$$;
+
+-- p_n dés tirés au sort.
+create or replace function public._mtr_roll(p_n integer)
+returns jsonb language sql volatile
+set search_path = public, extensions
+as $$
+  select coalesce(jsonb_agg(1 + floor(random() * 6)::integer), '[]'::jsonb)
+    from generate_series(1, greatest(p_n, 0));
+$$;
+
+-- Joueur vivant suivant p_from dans l'ordre de la table (p_from peut être éliminé).
+create or replace function public._mtr_next(p_state jsonb, p_from text)
+returns text language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_order text[] := array(select jsonb_array_elements_text(p_state->'order'));
+  v_n     integer := cardinality(v_order);
+  v_cur   integer := coalesce(array_position(v_order, p_from), 1);
+  i       integer;
+begin
+  for i in 1 .. v_n loop
+    v_cur := v_cur % v_n + 1;
+    if (p_state->'alive') ? v_order[v_cur] then return v_order[v_cur]; end if;
+  end loop;
+  return null;
+end $$;
+
+-- L'enchère (p_q, p_f) est-elle valide après p_bid (null = ouverture) ?
+create or replace function public._mtr_valid(p_q integer, p_f integer, p_bid jsonb, p_total integer)
+returns boolean language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  cq integer;
+  cf integer;
+begin
+  if p_q is null or p_f is null or p_f < 1 or p_f > 6 or p_q < 1 or p_q > p_total then return false; end if;
+  if p_bid is null or jsonb_typeof(p_bid) <> 'object' then
+    return p_f <> 1;  -- ouverture : pas sur les Paco
+  end if;
+  cq := (p_bid->>'qty')::integer;
+  cf := (p_bid->>'face')::integer;
+  if cf = 1 then
+    if p_f = 1 then return p_q > cq; end if;
+    return p_q >= 2 * cq + 1;
+  end if;
+  if p_f = 1 then return p_q >= ceil(cq / 2.0)::integer; end if;
+  return p_q > cq or (p_q = cq and p_f > cf);
+end $$;
+
+-- Nouvelle manche : tout le monde relance. Renvoie {state, server, secrets}.
+create or replace function public._mtr_new_round(p_state jsonb, p_server jsonb, p_starter text, p_grace integer)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_round   integer := coalesce((p_state->>'round')::integer, 0) + 1;
+  v_dice    jsonb := '{}'::jsonb;
+  v_secrets jsonb := '{}'::jsonb;
+  v_total   integer := 0;
+  v_d       jsonb;
+  p         text;
+begin
+  for p in select jsonb_array_elements_text(p_state->'players') loop
+    if (p_state->'alive') ? p then
+      v_d := public._mtr_roll((p_state->'dice_count'->>p)::integer);
+      v_dice := v_dice || jsonb_build_object(p, v_d);
+      v_total := v_total + jsonb_array_length(v_d);
+    else
+      v_d := '[]'::jsonb;
+    end if;
+    v_secrets := v_secrets || jsonb_build_object(p, jsonb_build_object('round', v_round, 'dice', v_d));
+  end loop;
+  p_server := p_server || jsonb_build_object('dice', v_dice);
+  p_state := p_state || jsonb_build_object(
+    'phase', 'bidding',
+    'round', v_round,
+    'starter', p_starter,
+    'turn', p_starter,
+    'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
+    'bid', null,
+    'bids', '[]'::jsonb,
+    'total_dice', v_total,
+    'reveal', null,
+    'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer + p_grace)));
+  return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
+end $$;
+
+-- Fin de partie : vainqueur = dernier vivant, puis ordre d'élimination inverse.
+create or replace function public._mtr_finish(p_state jsonb)
+returns jsonb language plpgsql stable
+set search_path = public, extensions
+as $$
+declare
+  v_n       integer := jsonb_array_length(p_state->'players');
+  v_ranked  text[] := array(select jsonb_array_elements_text(p_state->'alive'))
+                      || array(select e from jsonb_array_elements_text(p_state->'eliminated') with ordinality as t(e, o)
+                                order by o desc);
+  v_results jsonb := '[]'::jsonb;
+  i         integer;
+begin
+  for i in 1 .. cardinality(v_ranked) loop
+    v_results := v_results || jsonb_build_array(jsonb_build_object(
+      'profile_id', v_ranked[i],
+      'placement', i,
+      'points', v_n - i,
+      'won', i = 1,
+      'stats', '{}'::jsonb));
+  end loop;
+  return p_state || jsonb_build_object(
+    'phase', 'finished',
+    'deadline', null,
+    'turn', null,
+    'winner', v_ranked[1],
+    'results', v_results);
+end $$;
+
+-- Vérification (« Menteur ! » ou « Pile ! ») -> phase reveal.
+create or replace function public._mtr_resolve(p_state jsonb, p_server jsonb, p_caller text, p_kind text, p_auto boolean)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_bid     jsonb := p_state->'bid';
+  v_q       integer := (v_bid->>'qty')::integer;
+  v_f       integer := (v_bid->>'face')::integer;
+  v_by      text := v_bid->>'by';
+  v_count   integer;
+  v_loser   text := null;
+  v_gainer  text := null;
+  v_elim    text := null;
+  v_next    text;
+  v_n       integer;
+  v_secs    numeric;
+  v_entry   jsonb;
+begin
+  select count(*)::integer into v_count
+    from jsonb_each(coalesce(p_server->'dice', '{}'::jsonb)) as t(k, v),
+         jsonb_array_elements_text(v) as d(x)
+   where x::integer = v_f or (v_f <> 1 and x::integer = 1);
+
+  if p_kind = 'liar' then
+    v_loser := case when v_count >= v_q then p_caller else v_by end;
+  elsif v_count = v_q then
+    if (p_state->'dice_count'->>p_caller)::integer < 5 then v_gainer := p_caller; end if;
+  else
+    v_loser := p_caller;
+  end if;
+
+  if v_loser is not null then
+    v_n := (p_state->'dice_count'->>v_loser)::integer - 1;
+    p_state := jsonb_set(p_state, array['dice_count', v_loser], to_jsonb(v_n));
+    if v_n <= 0 then
+      v_elim := v_loser;
+      p_state := p_state || jsonb_build_object('alive', (p_state->'alive') - v_loser,
+                                               'eliminated', (p_state->'eliminated') || to_jsonb(v_loser));
+    end if;
+  end if;
+  if v_gainer is not null then
+    p_state := jsonb_set(p_state, array['dice_count', v_gainer],
+                         to_jsonb((p_state->'dice_count'->>v_gainer)::integer + 1));
+  end if;
+
+  -- Qui commence la manche suivante : le perdant (Menteur) / le crieur (Pile).
+  v_next := case when p_kind = 'liar' then v_loser else p_caller end;
+  if not ((p_state->'alive') ? v_next) then v_next := public._mtr_next(p_state, v_next); end if;
+
+  -- Durée de la révélation (le front illumine les dés comptés un par un, 0,4 s chacun).
+  v_secs := least(20, 7 + 0.4 * v_count);
+  v_entry := jsonb_build_object(
+    'round', p_state->'round',
+    'kind', p_kind,
+    'caller', p_caller,
+    'auto', p_auto,
+    'bid', v_bid,
+    'dice', coalesce(p_server->'dice', '{}'::jsonb),
+    'count', v_count,
+    'exact', v_count = v_q,
+    'loser', v_loser,
+    'gainer', v_gainer,
+    'eliminated', v_elim,
+    'next_starter', v_next,
+    'final', jsonb_array_length(p_state->'alive') <= 1);
+
+  return p_state || jsonb_build_object(
+    'phase', 'reveal',
+    'turn', null,
+    'reveal', v_entry,
+    'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(
+      jsonb_build_object('round', p_state->'round', 'kind', p_kind, 'caller', p_caller, 'bid', v_bid,
+                         'count', v_count, 'loser', v_loser, 'gainer', v_gainer, 'eliminated', v_elim)),
+    'deadline', public._mtr_iso(now() + make_interval(secs => v_secs::double precision)));
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Démarrage. Options : {"turn_seconds": 30|45|60 (défaut 45), "pile": bool (défaut false)}
+-- -----------------------------------------------------------------------------
+create or replace function public.game_menteur_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_n      integer := cardinality(p_players);
+  v_secs   integer := case when coalesce(p_options->>'turn_seconds', '') in ('30', '45', '60')
+                           then (p_options->>'turn_seconds')::integer else 45 end;
+  v_pile   boolean := coalesce(p_options->>'pile', 'false') = 'true';
+  v_order  text[];
+  v_counts jsonb := '{}'::jsonb;
+  v_state  jsonb;
+  v_r      jsonb;
+  p        text;
+begin
+  if v_n < 2 then raise exception 'not_enough_players'; end if;
+  if v_n > 9 then raise exception 'too_many_players'; end if;
+  v_order := array(select x::text from unnest(p_players) as t(x) order by random());
+  foreach p in array v_order loop
+    v_counts := v_counts || jsonb_build_object(p, 5);
+  end loop;
+
+  v_state := jsonb_build_object(
+    'game', 'menteur',
+    'phase', 'bidding',
+    'players', to_jsonb(p_players),
+    'order', to_jsonb(v_order),
+    'alive', to_jsonb(v_order),
+    'eliminated', '[]'::jsonb,
+    'dice_count', v_counts,
+    'total_dice', 5 * v_n,
+    'round', 0,
+    'starter', null,
+    'turn', null,
+    'turn_seq', 0,
+    'turn_seconds', v_secs,
+    'pile_enabled', v_pile,
+    'bid', null,
+    'bids', '[]'::jsonb,
+    'reveal', null,
+    'history', '[]'::jsonb,
+    'deadline', null,
+    'winner', null,
+    'results', null);
+  -- 10 s de grâce au premier tour (le temps que tout le monde arrive et secoue).
+  v_r := public._mtr_new_round(v_state, '{}'::jsonb, v_order[1], 10);
+  return v_r;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Actions :
+--   {"type":"bid","qty":n,"face":1..6}   {"type":"liar"}   {"type":"pile"}
+--   {"type":"next"} (hôte, phase reveal)   {"type":"tick"}
+-- -----------------------------------------------------------------------------
+create or replace function public.game_menteur_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type    text := p_action->>'type';
+  v_me      text := p_actor::text;
+  v_turn    text := p_state->>'turn';
+  v_phase   text := p_state->>'phase';
+  v_total   integer := coalesce((p_state->>'total_dice')::integer, 0);
+  v_bid     jsonb := p_state->'bid';
+  v_q       integer;
+  v_f       integer;
+  v_auto    boolean := false;
+  v_kind    text;
+  v_r       jsonb;
+  v_secrets jsonb := null;
+  v_bids    jsonb;
+begin
+  if v_phase not in ('bidding', 'reveal') then raise exception 'wrong_phase'; end if;
+  if jsonb_typeof(v_bid) <> 'object' then v_bid := null; end if;
+
+  -- ---------------------------------------------------------------- tick
+  if v_type = 'tick' then
+    if p_state->>'deadline' is null or now() < (p_state->>'deadline')::timestamptz then
+      return jsonb_build_object('state', p_state, 'server', p_server);  -- trop tôt / déjà traité
+    end if;
+    if v_phase = 'reveal' then
+      v_type := 'advance';
+    else
+      v_auto := true;
+      v_me := v_turn;
+      if v_bid is null then
+        -- Ouverture : 1 dé de la valeur (hors 1) la plus fréquente dans mes dés.
+        select x::integer into v_f
+          from jsonb_array_elements_text(coalesce(p_server->'dice'->v_turn, '[]'::jsonb)) as d(x)
+         where x::integer <> 1
+         group by x order by count(*) desc, x::integer desc limit 1;
+        v_q := 1;
+        v_f := coalesce(v_f, 6);
+        v_type := 'bid';
+      else
+        v_q := (v_bid->>'qty')::integer + 1;
+        v_f := (v_bid->>'face')::integer;
+        v_type := case when v_q <= v_total then 'bid' else 'liar' end;
+      end if;
+    end if;
+  elsif v_type = 'next' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'reveal' then raise exception 'wrong_phase'; end if;
+    v_type := 'advance';
+  elsif v_type in ('bid', 'liar', 'pile') then
+    if not ((p_state->'players') ? v_me) then raise exception 'not_a_player'; end if;
+    if not ((p_state->'alive') ? v_me) then raise exception 'not_alive'; end if;
+    if v_phase <> 'bidding' then raise exception 'wrong_phase'; end if;
+    if v_turn is distinct from v_me then raise exception 'not_your_turn'; end if;
+    if v_type = 'bid' then
+      if jsonb_typeof(p_action->'qty') <> 'number' or jsonb_typeof(p_action->'face') <> 'number' then
+        raise exception 'invalid_bid';
+      end if;
+      v_q := floor((p_action->>'qty')::numeric)::integer;
+      v_f := floor((p_action->>'face')::numeric)::integer;
+      if v_q::numeric <> (p_action->>'qty')::numeric or v_f::numeric <> (p_action->>'face')::numeric
+         or v_f < 1 or v_f > 6 or v_q < 1 or v_q > v_total then
+        raise exception 'invalid_bid';
+      end if;
+      if v_bid is null and v_f = 1 then raise exception 'paco_opening'; end if;
+    else
+      if v_bid is null then raise exception 'no_bid_yet'; end if;
+      if v_type = 'pile' and not coalesce((p_state->>'pile_enabled')::boolean, false) then
+        raise exception 'pile_disabled';
+      end if;
+    end if;
+  else
+    raise exception 'unknown_action';
+  end if;
+
+  -- ---------------------------------------------------------------- application
+  if v_type = 'bid' then
+    if not public._mtr_valid(v_q, v_f, v_bid, v_total) then raise exception 'bid_too_low'; end if;
+    v_bids := coalesce(p_state->'bids', '[]'::jsonb);
+    select coalesce(jsonb_agg(e order by o), '[]'::jsonb) into v_bids
+      from jsonb_array_elements(v_bids) with ordinality as t(e, o)
+     where o > jsonb_array_length(v_bids) - 29;
+    v_bid := jsonb_build_object('qty', v_q, 'face', v_f, 'by', v_me, 'auto', v_auto);
+    p_state := p_state || jsonb_build_object(
+      'bid', v_bid,
+      'bids', v_bids || jsonb_build_array(v_bid),
+      'turn', public._mtr_next(p_state, v_me),
+      'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
+      'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer)));
+
+  elsif v_type in ('liar', 'pile') then
+    p_state := public._mtr_resolve(p_state, p_server, v_me, v_type, v_auto);
+
+  elsif v_type = 'advance' then
+    if coalesce((p_state->'reveal'->>'final')::boolean, false) then
+      p_state := public._mtr_finish(p_state);
+    else
+      v_r := public._mtr_new_round(p_state, p_server, p_state->'reveal'->>'next_starter', 6);
+      p_state := v_r->'state';
+      p_server := v_r->'server';
+      v_secrets := v_r->'secrets';
+    end if;
+  end if;
+
+  if p_state->>'phase' = 'finished' then
+    return jsonb_build_object('state', p_state, 'server', p_server, 'results', p_state->'results');
+  end if;
+  if v_secrets is not null then
+    return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
+  end if;
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+revoke all on function public._mtr_iso(timestamptz) from public, anon, authenticated;
+revoke all on function public._mtr_roll(integer) from public, anon, authenticated;
+revoke all on function public._mtr_next(jsonb, text) from public, anon, authenticated;
+revoke all on function public._mtr_valid(integer, integer, jsonb, integer) from public, anon, authenticated;
+revoke all on function public._mtr_new_round(jsonb, jsonb, text, integer) from public, anon, authenticated;
+revoke all on function public._mtr_finish(jsonb) from public, anon, authenticated;
+revoke all on function public._mtr_resolve(jsonb, jsonb, text, text, boolean) from public, anon, authenticated;
+revoke all on function public.game_menteur_start(uuid[], jsonb) from public, anon, authenticated;
+revoke all on function public.game_menteur_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 
 
 -- ===== games\pas-de-bol.sql =====
@@ -3813,6 +5845,321 @@ revoke all on function public._pb_score(jsonb, jsonb) from public, anon, authent
 revoke all on function public._pb_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_petit_bac_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_petit_bac_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+
+
+-- ===== games\tu-preferes.sql =====
+-- =============================================================================
+-- JEU « tu-preferes » (Tu préfères ? multi-écrans) — idempotent (create or replace).
+-- Dépend de schema.sql (game_action, start_match, finish_match).
+--
+-- Chaque manche : un dilemme « A ou B ? ». Chaque joueur envoie DEUX choix secrets :
+-- son propre choix (`choice`) et son pari sur le choix de la majorité (`bet`).
+-- Les réponses restent dans `server.answers` (privé) jusqu'à la révélation ; le state
+-- public n'expose que `answered` (qui a répondu). Le joueur retrouve SA réponse dans
+-- match_secrets ({round, choice, bet}) après un rechargement.
+--
+-- Phases : answering -> reveal -> (answering …) -> finished.
+-- Révélation : quand tous ont répondu, à l'échéance (`deadline` + {"type":"tick"}),
+-- ou forcée par l'hôte ({"type":"reveal"}).
+--
+-- Points (calculés sur les joueurs ayant répondu) :
+--   * +1 si le pari = le choix majoritaire. Égalité parfaite (ou personne n'a
+--     répondu) : PAS de majorité, personne ne marque le point de pari.
+--   * Rebelle (+1 si p_options.rebel, défaut true) : le SEUL joueur de son camp
+--     alors que l'autre camp compte au moins 2 joueurs (donc ≥ 3 réponses ; une
+--     égalité 1 contre 1 ne fait pas de rebelle). Le statut est toujours compté
+--     dans les stats, le point seulement si l'option est active.
+-- Gagnant(s) = max de points (ex-aequo inclus), personne si tout le monde a 0.
+-- =============================================================================
+
+-- Ouvre la manche p_round (1-based) : dilemme public, réponses vidées, échéance.
+create or replace function public._tp_open_round(p_state jsonb, p_server jsonb, p_round integer)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'answering',
+    'round', p_round,
+    'dilemma', p_server->'dilemmas'->(p_round - 1),
+    'answered', '[]'::jsonb,
+    'deadline', to_jsonb(now() + make_interval(secs => (p_state->>'timer')::integer)));
+  p_server := jsonb_set(p_server, '{answers}', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+create or replace function public.game_tu_preferes_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_d      jsonb := p_options->'dilemmas';
+  v_rounds integer;
+  v_timer  integer;
+  v_rebel  boolean;
+  v_zero   jsonb;
+  v_stats  jsonb;
+  v_state  jsonb;
+  v_server jsonb;
+begin
+  if cardinality(p_players) < 2 then raise exception 'not_enough_players'; end if;
+  if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
+  if v_d is null or jsonb_typeof(v_d) <> 'array' or jsonb_array_length(v_d) = 0 then
+    raise exception 'missing_dilemmas';
+  end if;
+  if exists (select 1 from jsonb_array_elements(v_d) e
+              where jsonb_typeof(e) <> 'object'
+                 or jsonb_typeof(e->'a') is distinct from 'string'
+                 or jsonb_typeof(e->'b') is distinct from 'string'
+                 or char_length(btrim(e->>'a')) = 0 or char_length(btrim(e->>'b')) = 0
+                 or char_length(e->>'a') > 200 or char_length(e->>'b') > 200) then
+    raise exception 'invalid_dilemmas';
+  end if;
+
+  begin
+    v_rounds := coalesce(nullif(p_options->>'rounds', '')::integer, 15);
+  exception when others then v_rounds := 15;
+  end;
+  v_rounds := least(greatest(v_rounds, 1), 50, jsonb_array_length(v_d));
+
+  begin
+    v_timer := coalesce(nullif(p_options->>'timer', '')::integer, 30);
+  exception when others then v_timer := 30;
+  end;
+  v_timer := least(greatest(v_timer, 10), 120);
+
+  v_rebel := coalesce(p_options->'rebel', 'true'::jsonb) <> 'false'::jsonb;
+
+  select jsonb_agg(jsonb_build_object(
+           'id', left(coalesce(nullif(e->>'id', ''), 'd' || o), 40),
+           'a', btrim(e->>'a'),
+           'b', btrim(e->>'b'),
+           'theme', case when jsonb_typeof(e->'theme') = 'string' then left(e->>'theme', 30) end)
+         order by o)
+    into v_d
+    from jsonb_array_elements(v_d) with ordinality as t(e, o) where o <= v_rounds;
+
+  select jsonb_object_agg(p::text, 0),
+         jsonb_object_agg(p::text, jsonb_build_object('bets_ok', 0, 'rebel', 0, 'norm', 0, 'answered', 0))
+    into v_zero, v_stats
+    from unnest(p_players) p;
+
+  v_state := jsonb_build_object(
+    'game', 'tu-preferes',
+    'phase', 'answering',
+    'round', 1,
+    'total_rounds', v_rounds,
+    'timer', v_timer,
+    'rebel_bonus', v_rebel,
+    'deadline', null,
+    'dilemma', null,
+    'players', to_jsonb(p_players),
+    'answered', '[]'::jsonb,
+    'scores', v_zero,
+    'stats', v_stats,
+    'last_reveal', null,
+    'history', '[]'::jsonb,
+    'winners', null,
+    'results', null);
+  v_server := jsonb_build_object('dilemmas', v_d, 'answers', '{}'::jsonb);
+
+  return public._tp_open_round(v_state, v_server, 1) || jsonb_build_object('secrets', '{}'::jsonb);
+end $$;
+
+-- Révélation de la manche en cours : choix publics, majorité, points.
+create or replace function public._tp_reveal(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_ans     jsonb := coalesce(p_server->'answers', '{}'::jsonb);
+  v_choices jsonb := '{}'::jsonb;
+  v_bets    jsonb := '{}'::jsonb;
+  v_ca      integer := 0;
+  v_cb      integer := 0;
+  v_maj     text;
+  v_min     text;
+  v_rebel   text;
+  v_ok      text[] := '{}';
+  v_rebels  text[] := '{}';
+  v_gains   jsonb := '{}'::jsonb;
+  v_scores  jsonb := p_state->'scores';
+  v_stats   jsonb := p_state->'stats';
+  v_bonus   boolean := coalesce((p_state->>'rebel_bonus')::boolean, true);
+  v_pl      text;
+  v_choice  text;
+  v_bet     text;
+  v_g       integer;
+  v_st      jsonb;
+begin
+  -- Ordre stable = ordre des joueurs.
+  for v_pl in select pl from jsonb_array_elements_text(p_state->'players') with ordinality as t(pl, o) order by o loop
+    if v_ans ? v_pl then
+      v_choices := v_choices || jsonb_build_object(v_pl, v_ans->v_pl->>'choice');
+      v_bets    := v_bets    || jsonb_build_object(v_pl, v_ans->v_pl->>'bet');
+      if v_ans->v_pl->>'choice' = 'a' then v_ca := v_ca + 1; else v_cb := v_cb + 1; end if;
+    end if;
+  end loop;
+
+  v_maj := case when v_ca > v_cb then 'a' when v_cb > v_ca then 'b' end;
+  v_min := case v_maj when 'a' then 'b' when 'b' then 'a' end;
+  -- Rebelle : seul de son camp face à au moins 2 joueurs.
+  if v_maj is not null and least(v_ca, v_cb) = 1 and greatest(v_ca, v_cb) >= 2 then
+    select key into v_rebel from jsonb_each_text(v_choices) where value = v_min;
+    v_rebels := array[v_rebel];
+  end if;
+
+  for v_pl in select pl from jsonb_array_elements_text(p_state->'players') with ordinality as t(pl, o) order by o loop
+    v_g := 0;
+    v_st := coalesce(v_stats->v_pl, jsonb_build_object('bets_ok', 0, 'rebel', 0, 'norm', 0, 'answered', 0));
+    if v_choices ? v_pl then
+      v_choice := v_choices->>v_pl;
+      v_bet    := v_bets->>v_pl;
+      v_st := jsonb_set(v_st, '{answered}', to_jsonb((v_st->>'answered')::integer + 1));
+      if v_maj is not null and v_bet = v_maj then
+        v_g := v_g + 1;
+        v_ok := v_ok || v_pl;
+        v_st := jsonb_set(v_st, '{bets_ok}', to_jsonb((v_st->>'bets_ok')::integer + 1));
+      end if;
+      if v_maj is not null and v_choice = v_maj then
+        v_st := jsonb_set(v_st, '{norm}', to_jsonb((v_st->>'norm')::integer + 1));
+      end if;
+      if v_pl = any(v_rebels) then
+        if v_bonus then v_g := v_g + 1; end if;
+        v_st := jsonb_set(v_st, '{rebel}', to_jsonb((v_st->>'rebel')::integer + 1));
+      end if;
+    end if;
+    v_gains  := v_gains || jsonb_build_object(v_pl, v_g);
+    v_scores := jsonb_set(v_scores, array[v_pl], to_jsonb(coalesce((v_scores->>v_pl)::integer, 0) + v_g), true);
+    v_stats  := jsonb_set(v_stats, array[v_pl], v_st, true);
+  end loop;
+
+  p_state := p_state || jsonb_build_object(
+    'phase', 'reveal',
+    'deadline', null,
+    'scores', v_scores,
+    'stats', v_stats,
+    'last_reveal', jsonb_build_object(
+        'round', p_state->'round', 'dilemma', p_state->'dilemma',
+        'choices', v_choices, 'bets', v_bets,
+        'counts', jsonb_build_object('a', v_ca, 'b', v_cb),
+        'majority', v_maj,
+        'bettors_ok', to_jsonb(v_ok), 'rebels', to_jsonb(v_rebels),
+        'gains', v_gains),
+    'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+        'round', p_state->'round', 'dilemma', p_state->'dilemma',
+        'counts', jsonb_build_object('a', v_ca, 'b', v_cb),
+        'majority', v_maj, 'rebels', to_jsonb(v_rebels))));
+
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+create or replace function public._tp_finish(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_max     integer;
+  v_results jsonb;
+  v_winners jsonb;
+begin
+  select coalesce(max(value::integer), 0) into v_max from jsonb_each_text(p_state->'scores');
+
+  select jsonb_agg(jsonb_build_object(
+           'profile_id', t.key,
+           'points', t.value::integer,
+           'won', v_max > 0 and t.value::integer = v_max,
+           'placement', t.r,
+           'stats', coalesce(p_state->'stats'->t.key, '{}'::jsonb))
+         order by t.r, t.key)
+    into v_results
+    from (select key, value, rank() over (order by value::integer desc) as r
+            from jsonb_each_text(p_state->'scores')) t;
+
+  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
+    from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
+
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null,
+                                           'winners', v_winners, 'results', v_results);
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
+create or replace function public.game_tu_preferes_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type     text := p_action->>'type';
+  v_phase    text := p_state->>'phase';
+  v_round    integer := (p_state->>'round')::integer;
+  v_total    integer := (p_state->>'total_rounds')::integer;
+  v_deadline timestamptz := nullif(p_state->>'deadline', '')::timestamptz;
+  v_choice   text;
+  v_bet      text;
+  v_answered jsonb;
+  v_res      jsonb;
+begin
+  if v_type = 'tick' then
+    -- Idempotent : ignoré sans erreur si trop tôt ou hors phase de réponse.
+    if v_phase <> 'answering' or v_deadline is null or now() < v_deadline then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    return public._tp_reveal(p_state, p_server);
+
+  elsif v_type = 'answer' then
+    if v_phase <> 'answering' then raise exception 'wrong_phase'; end if;
+    if p_action ? 'round' and (p_action->>'round') is distinct from v_round::text then
+      raise exception 'wrong_phase';
+    end if;
+    if not (p_state->'players' ? p_actor::text) then raise exception 'not_a_player'; end if;
+    v_choice := p_action->>'choice';
+    v_bet    := p_action->>'bet';
+    if jsonb_typeof(p_action->'choice') is distinct from 'string' or v_choice not in ('a', 'b')
+       or jsonb_typeof(p_action->'bet') is distinct from 'string' or v_bet not in ('a', 'b') then
+      raise exception 'invalid_choice';
+    end if;
+
+    p_server := jsonb_set(p_server, array['answers', p_actor::text],
+                          jsonb_build_object('choice', v_choice, 'bet', v_bet), true);
+    select coalesce(jsonb_agg(pl order by o), '[]'::jsonb) into v_answered
+      from jsonb_array_elements_text(p_state->'players') with ordinality as t(pl, o)
+     where (p_server->'answers') ? pl;
+    p_state := jsonb_set(p_state, '{answered}', v_answered);
+
+    -- Tout le monde a répondu, ou réponse arrivée après l'échéance : on révèle.
+    if jsonb_array_length(v_answered) >= jsonb_array_length(p_state->'players')
+       or (v_deadline is not null and now() >= v_deadline) then
+      v_res := public._tp_reveal(p_state, p_server);
+    else
+      v_res := jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    return v_res || jsonb_build_object('secrets', jsonb_build_object(
+      p_actor::text, jsonb_build_object('round', v_round, 'choice', v_choice, 'bet', v_bet)));
+
+  elsif v_type = 'reveal' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'answering' then raise exception 'wrong_phase'; end if;
+    return public._tp_reveal(p_state, p_server);
+
+  elsif v_type = 'next' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'reveal' then raise exception 'wrong_phase'; end if;
+    if v_round >= v_total then
+      return public._tp_finish(p_state, p_server);
+    end if;
+    return public._tp_open_round(p_state, p_server, v_round + 1);
+
+  else
+    raise exception 'unknown_action';
+  end if;
+end $$;
+
+revoke all on function public._tp_open_round(jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public._tp_reveal(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._tp_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public.game_tu_preferes_start(uuid[], jsonb) from public, anon, authenticated;
+revoke all on function public.game_tu_preferes_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 
 
 -- ===== seed.sql =====

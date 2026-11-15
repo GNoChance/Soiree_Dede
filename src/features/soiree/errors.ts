@@ -44,6 +44,32 @@ const MESSAGES: Record<string, string> = {
   drawer_cannot_guess: 'Tu dessines : pas le droit de deviner !',
   already_found: 'Tu as déjà trouvé !',
   not_enough_words: 'Pas assez de mots pour cette partie.',
+  // Tu préfères ?
+  missing_dilemmas: 'Il manque des dilemmes.',
+  invalid_dilemmas: 'Dilemmes invalides.',
+  // Menteur
+  invalid_bid: 'Enchère invalide.',
+  bid_too_low: 'Il faut monter l’enchère !',
+  paco_opening: 'On n’ouvre pas sur les 1 !',
+  no_bid_yet: 'Personne n’a encore enchéri.',
+  pile_disabled: 'La variante « Pile ! » n’est pas activée.',
+  // Bombe à mots
+  invalid_syllables: 'Syllabes invalides.',
+  bomb_paused: 'Attends le top départ !',
+  bomb_not_ready: 'La bombe n’a pas encore explosé.',
+  too_late: 'Trop tard, la bombe a bougé !',
+  invalid_word: 'Lettres uniquement (et tirets) !',
+  word_missing_syllable: 'Ton mot ne contient pas la syllabe !',
+  word_too_short: 'Trop court : il faut plus que la syllabe !',
+  word_already_played: 'Déjà joué dans la partie !',
+  // Loup-garou
+  invalid_composition: 'Composition des rôles invalide.',
+  already_acted: 'Tu as déjà agi cette nuit.',
+  no_potion: 'Tu n’as plus cette potion.',
+  // Bowling
+  wrong_roll: 'Ce lancer ne correspond pas à ta feuille de score.',
+  invalid_roll: 'Lancer invalide : ces quilles sont déjà tombées.',
+  already_done: 'Tu as déjà fini ta partie !',
   not_your_guess: 'Ce n’est pas à toi de deviner.',
   invalid_guess: 'Écris un mot.',
   code_generation_failed: 'Impossible de créer le code, réessaie.',
