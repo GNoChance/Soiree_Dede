@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
@@ -15,11 +15,12 @@ import { toast } from '@/store/toast'
 import { useSession } from '@/store/session'
 import { GAMES, getGame } from '@/games/registry'
 import type { GameDefinition } from '@/games/types'
-import type { GameId, GameOptions, NewUnlocks } from '@/types/db'
-import { useCurrentMatch, useSoiree } from '@/features/soiree/hooks'
+import type { GameId, GameOptions, NewUnlocks, SoireeEndReason } from '@/types/db'
+import { leaveSoiree, refetchActiveSoirees, useActiveSoirees, useCurrentMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { CheckableToken, ConfirmModal, LaunchCountdown, PlayerToken, UnlockReveal } from '@/features/soiree/components'
-import { toastError } from '@/features/soiree/errors'
+import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
+import { errorCode, toastError } from '@/features/soiree/errors'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -27,15 +28,30 @@ export function SoireePage() {
   const meId = useSession((s) => s.profile?.id) ?? ''
   const { data, loading, notFound } = useSoiree(id)
   const { match, loaded: matchLoaded } = useCurrentMatch(id)
+  const { soirees } = useActiveSoirees(meId || undefined)
   const { byId } = usePlayers()
   const [launching, setLaunching] = useState<{ id: string; game: string } | null>(null)
   const [endUnlocks, setEndUnlocks] = useState<NewUnlocks | null>(null)
+  /** Soirée terminée pendant que je suis dans le salon (temps réel) : raison de fin. */
+  const [ended, setEnded] = useState<{ reason: SoireeEndReason | null } | null>(null)
   const endingRef = useRef(false)
   const initialMatchId = useRef<string | null | undefined>(undefined)
+  /** Hauteur de la barre de lancement fixée de l'hôte (0 = pas de barre). */
+  const [barH, setBarH] = useState(0)
+  // Pas de bandeau « une partie commence » pour la soirée affichée : bascule auto ci-dessous.
+  useViewingSoiree(id, 'salon')
 
   const soiree = data?.soiree
   const isHost = soiree?.host_id === meId
   const playerIds = useMemo(() => data?.playerIds ?? [], [data])
+  /** Fin auto prévue (my_active_soirees) ; null pendant une partie. */
+  const idleDeadline = soirees.find((s) => s.id === id)?.idle_deadline ?? null
+
+  // La partie en cours de CETTE soirée change (démarrage, fin, annulation) : l'échéance
+  // de fin auto change aussi -> on recharge mes soirées.
+  useEffect(() => {
+    if (matchLoaded) void refetchActiveSoirees()
+  }, [matchLoaded, match?.id, match?.status])
 
   // Une partie démarre -> compte à rebours puis tout le monde y va. Une partie
   // déjà en cours depuis longtemps à mon arrivée -> simple bouton « Rejoindre ».
@@ -48,19 +64,19 @@ export function SoireePage() {
     setLaunching((l) => l ?? { id: match.id, game: match.game_id })
   }, [matchLoaded, match])
 
-  // Soirée terminée / plus membre -> retour au hub.
+  // Soirée terminée (message selon la raison, puis retour au hub) / plus membre -> hub.
   useEffect(() => {
     if (endingRef.current) return
     if (soiree?.status === 'ended') {
-      toast('La soirée est terminée. Merci d’être venu·e ! 🎉')
-      navigate('/', { replace: true })
+      setLaunching(null)
+      setEnded((e) => e ?? { reason: soiree.end_reason ?? null })
     } else if (notFound) {
       toast.error('Tu ne fais pas (ou plus) partie de cette soirée.')
       navigate('/', { replace: true })
     } else if (data && meId && !playerIds.includes(meId) && !isHost) {
       navigate('/', { replace: true })
     }
-  }, [soiree?.status, notFound, data, playerIds, meId, isHost, navigate])
+  }, [soiree?.status, soiree?.end_reason, notFound, data, playerIds, meId, isHost, navigate])
 
   // Accueil des nouveaux arrivants
   const prevCount = useRef(0)
@@ -84,7 +100,9 @@ export function SoireePage() {
 
   const launchGame = launching ? getGame(launching.game) : undefined
   return (
-    <div className="flex flex-col gap-5 pb-10">
+    // Hôte : la barre « C'est parti ! » est fixée en bas ; la page réserve sa hauteur
+    // mesurée pour que la fin (« Terminer la soirée ») reste atteignable.
+    <div className="flex flex-col gap-5 pb-10" style={isHost && barH ? { paddingBottom: barH + 16 } : undefined}>
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -99,6 +117,10 @@ export function SoireePage() {
           <Users className="size-5" /> {playerIds.length}
         </span>
       </div>
+
+      <SoireeSwitcher currentId={soiree.id} />
+
+      {!match && !launching && <IdleCountdown deadline={idleDeadline} variant="salon" isHost={isHost} />}
 
       <CodeCard code={soiree.code} />
 
@@ -117,6 +139,8 @@ export function SoireePage() {
           byId={byId}
           meId={meId}
           busy={Boolean(match) || Boolean(launching)}
+          idleDeadline={match || launching ? null : idleDeadline}
+          onBarHeight={setBarH}
           onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })}
         />
       ) : (
@@ -128,11 +152,13 @@ export function SoireePage() {
         isHost={isHost}
         onEnded={(u) => {
           endingRef.current = true
+          setEnded(null) // l'évènement temps réel a pu arriver avant la réponse
           if (Object.values(u).some((l) => l.length)) setEndUnlocks(u)
           else navigate('/', { replace: true })
         }}
         onLeft={() => {
           endingRef.current = true
+          setEnded(null)
           navigate('/', { replace: true })
         }}
       />
@@ -146,6 +172,14 @@ export function SoireePage() {
         />
       )}
       {endUnlocks && <UnlockReveal unlocks={endUnlocks} meId={meId} players={byId} onClose={() => navigate('/', { replace: true })} />}
+      {ended && (
+        <SoireeEndedOverlay
+          reason={ended.reason}
+          host={isHost ? 'toi' : playerOrPlaceholder(byId, soiree.host_id).nickname}
+          me={byId[meId]}
+          onDone={() => navigate('/', { replace: true })}
+        />
+      )}
     </div>
   )
 }
@@ -246,7 +280,21 @@ function WaitingCard({ hostName, meSlug }: { hostName: string; meSlug?: string }
 
 const LAST_GAME_KEY = 'dede:last-game'
 
-function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; onStarted: (matchId: string, game: string) => void }) {
+function HostPanel({ soireeId, playerIds, byId, meId, busy, idleDeadline, onBarHeight, onStarted }: { soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; idleDeadline: string | null; onBarHeight: (h: number) => void; onStarted: (matchId: string, game: string) => void }) {
+  // Hauteur réelle de la barre fixée (police agrandie, compte à rebours, message d'erreur…).
+  const barRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const report = () => onBarHeight(Math.ceil(el.getBoundingClientRect().height))
+    report()
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      onBarHeight(0)
+    }
+  }, [onBarHeight])
   const [gameId, setGameId] = useState<string>(() => {
     try {
       return getGame(localStorage.getItem(LAST_GAME_KEY) ?? '')?.id ?? GAMES[0].id
@@ -285,6 +333,9 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soire
       })
       if (error) {
         toastError(error)
+        // Échéance de fin auto dépassée : le serveur annule sa clôture avec l'erreur ;
+        // on la redemande (my_active_soirees) -> évènement 'ended' -> écran de fin.
+        if (errorCode(error) === 'soiree_ended') void refetchActiveSoirees()
         return
       }
       try {
@@ -363,13 +414,13 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, onStarted }: { soire
           {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
         </p>
       )}
-      {/* Espace réservé pour ne pas masquer la fin de la page sous la barre fixe. */}
-      <div aria-hidden className="h-28" />
       {/* Barre de lancement FIXÉE à l'écran (portail vers <body>) : toujours visible,
-          quels que soient la longueur de la page, le défilement ou le zoom. */}
+          quels que soient la longueur de la page, le défilement ou le zoom. Sa hauteur
+          est réservée en bas de la page (onBarHeight), après « Terminer la soirée ». */}
       {createPortal(
-        <div className="pb-safe fixed inset-x-0 bottom-0 z-40 bg-gradient-to-t from-paper via-paper/95 to-transparent px-4 pt-6 pb-3">
+        <div ref={barRef} className="pb-safe fixed inset-x-0 bottom-0 z-40 bg-gradient-to-t from-paper via-paper/95 to-transparent px-4 pt-6 pb-3">
           <div className="mx-auto max-w-md">
+            <IdleCountdown deadline={idleDeadline} variant="bar" />
             <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
               <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
                 C’est parti ! <span className="text-base opacity-80">{game.emoji}</span>
@@ -408,7 +459,8 @@ function FooterActions({ soireeId, isHost, onEnded, onLeft }: { soireeId: string
       fx.fanfare()
       onEnded((data as { new_unlocks?: NewUnlocks } | null)?.new_unlocks ?? {})
     } else {
-      const { error } = await supabase.rpc('leave_soiree')
+      // Multi-soirées : on quitte CETTE soirée (leave_soiree(p_soiree_id)).
+      const { error } = await leaveSoiree(soireeId)
       setBusy(false)
       setConfirm(false)
       if (error) return toastError(error)

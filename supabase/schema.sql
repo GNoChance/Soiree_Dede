@@ -93,6 +93,30 @@ create table if not exists public.matches (
 );
 create index if not exists matches_soiree_idx on public.matches(soiree_id, status);
 
+-- Multi-soirées + fin automatique (cf. section 6) :
+--  * soirees.end_reason : 'host' (end_soiree) | 'empty' (dernier joueur parti) |
+--    'idle' (20 min sans jeu) | 'abandoned' (partie figée depuis 3 h).
+--    Null pour les soirées terminées avant cette colonne.
+--  * matches.updated_at : dernière écriture de la ligne (trigger matches_touch),
+--    sert au filet « partie abandonnée depuis 3 h ». Rattrapage des lignes
+--    existantes : fin de partie pour une partie terminée ; heure de la
+--    MIGRATION pour une partie non terminée (sa dernière action est inconnue :
+--    la dater à sa création tuerait une longue session — Roi de la table,
+--    tournoi — jouée au moment où install.sql est recollé ; au pire, une partie
+--    réellement abandonnée vit 3 h de plus).
+alter table public.soirees add column if not exists end_reason text;
+alter table public.soirees drop constraint if exists soirees_end_reason_chk;
+alter table public.soirees add constraint soirees_end_reason_chk
+  check (end_reason is null or end_reason in ('host', 'empty', 'idle', 'abandoned'));
+alter table public.matches add column if not exists updated_at timestamptz;
+update public.matches
+   set updated_at = case when status <> 'finished' then now() else coalesce(finished_at, created_at) end
+ where updated_at is null;
+alter table public.matches alter column updated_at set default now();
+alter table public.matches alter column updated_at set not null;
+-- Parties non terminées (filet 3 h, exécuté chaque minute par pg_cron).
+create index if not exists matches_unfinished_idx on public.matches(updated_at) where status <> 'finished';
+
 create table if not exists public.match_players (
   match_id   uuid not null references public.matches(id) on delete cascade,
   profile_id uuid not null references public.profiles(id) on delete cascade,
@@ -210,6 +234,16 @@ as $$
   )
 $$;
 
+-- Constantes des soirées (une seule source de vérité côté SQL).
+create or replace function public._soiree_max_open()      -- soirées non terminées par profil
+returns integer language sql immutable as $$ select 5 $$;
+create or replace function public._soiree_idle_timeout()  -- fin auto sans partie en cours
+returns interval language sql immutable as $$ select interval '20 minutes' $$;
+create or replace function public._match_stale_timeout()  -- partie 'playing' figée = abandonnée
+returns interval language sql immutable as $$ select interval '3 hours' $$;
+
+-- Soirée non terminée la plus récemment rejointe (compat : un profil peut
+-- désormais être dans plusieurs soirées, cf. my_active_soirees()).
 create or replace function public._active_soiree_of(p_profile_id uuid)
 returns uuid language sql stable security definer
 set search_path = public, extensions
@@ -217,17 +251,57 @@ as $$
   select sp.soiree_id from public.soiree_players sp
   join public.soirees s on s.id = sp.soiree_id
   where sp.profile_id = p_profile_id and s.status <> 'ended'
-  order by sp.joined_at desc limit 1
+  order by sp.joined_at desc, s.created_at desc limit 1
 $$;
 
+-- Nombre de soirées non terminées dont le profil est membre.
+create or replace function public._open_soirees_count(p_profile_id uuid)
+returns integer language sql stable security definer
+set search_path = public, extensions
+as $$
+  select count(*)::integer from public.soiree_players sp
+  join public.soirees s on s.id = sp.soiree_id
+  where sp.profile_id = p_profile_id and s.status <> 'ended'
+$$;
+
+-- Dernière activité d'une soirée = création, démarrage ou fin/annulation de sa
+-- dernière partie (calculée : pas de colonne à maintenir).
+create or replace function public._soiree_last_activity(p_soiree_id uuid)
+returns timestamptz language sql stable security definer
+set search_path = public, extensions
+as $$
+  select greatest(s.created_at,
+                  (select max(m.created_at) from public.matches m where m.soiree_id = s.id),
+                  (select max(m.finished_at) from public.matches m where m.soiree_id = s.id))
+  from public.soirees s where s.id = p_soiree_id
+$$;
+
+-- SoireeJson : la ligne soirees + player_ids + last_activity_at + current_match
+-- (partie non terminée la plus récente : {id, game_id, status, created_at, player_ids})
+-- + idle_deadline (fin automatique prévue ; null si partie en cours ou soirée terminée).
 create or replace function public._soiree_json(p_soiree_id uuid)
 returns jsonb language sql stable security definer
 set search_path = public, extensions
 as $$
-  select to_jsonb(s) || jsonb_build_object('player_ids', coalesce((
-      select jsonb_agg(sp.profile_id order by sp.joined_at, sp.profile_id)
-      from public.soiree_players sp where sp.soiree_id = s.id), '[]'::jsonb))
-  from public.soirees s where s.id = p_soiree_id
+  select to_jsonb(s) || jsonb_build_object(
+      'player_ids', coalesce((
+        select jsonb_agg(sp.profile_id order by sp.joined_at, sp.profile_id)
+        from public.soiree_players sp where sp.soiree_id = s.id), '[]'::jsonb),
+      'last_activity_at', la.t,
+      'current_match', cm.j,
+      'idle_deadline', case when s.status <> 'ended' and cm.j is null
+                            then la.t + public._soiree_idle_timeout() end)
+  from public.soirees s
+  cross join lateral (select public._soiree_last_activity(s.id) as t) la
+  left join lateral (
+    select jsonb_build_object('id', m.id, 'game_id', m.game_id, 'status', m.status,
+                              'created_at', m.created_at,
+                              'player_ids', case when jsonb_typeof(m.state->'players') = 'array'
+                                                 then m.state->'players' else '[]'::jsonb end) as j
+      from public.matches m
+     where m.soiree_id = s.id and m.status <> 'finished'
+     order by m.created_at desc limit 1) cm on true
+  where s.id = p_soiree_id
 $$;
 
 -- =============================================================================
@@ -532,18 +606,28 @@ begin
   return v_code;
 end $$;
 
--- Termine une soirée (interne). p_natural = false pour le nettoyage automatique.
+-- Termine une soirée (interne).
+--  * p_reason -> soirees.end_reason ('host' | 'empty' | 'idle' | 'abandoned' ;
+--    null = inchangée), posée dans le MÊME update que status = 'ended' : l'évènement
+--    Realtime de fin porte déjà la raison (le front affiche « faute de jeu »).
+--  * p_at = heure de fin retenue (ended_at + « dodo »), jamais dans le futur :
+--    now() en général ; pour la fin auto 'idle', l'échéance d'inactivité (dernière
+--    activité + 20 min) : même résultat que le nettoyage passe tout de suite (pg_cron)
+--    ou plus tard (RPC paresseuse).
+--  * p_natural = false : fin « non naturelle » (filet partie abandonnée), pas de dodo.
 -- Compte une soirée (stat surprise) pour chaque joueur ayant fini au moins une
 -- partie dedans ; « dodo » pour les joueurs présents à la fin si fin entre 2h et 8h (Paris).
-create or replace function public._end_soiree(p_soiree_id uuid, p_natural boolean)
+create or replace function public._close_soiree(p_soiree_id uuid, p_reason text, p_natural boolean, p_at timestamptz)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
+  v_at      timestamptz := least(coalesce(p_at, now()), now());
   v_players uuid[];
   v_hour    integer;
 begin
-  update public.soirees set status = 'ended', ended_at = now()
+  update public.soirees
+     set status = 'ended', ended_at = v_at, end_reason = coalesce(p_reason, end_reason)
    where id = p_soiree_id and status <> 'ended';
   if not found then return '{}'::jsonb; end if;
 
@@ -564,7 +648,7 @@ begin
   on conflict (profile_id) do update
     set soirees_count = public.player_stats.soirees_count + 1, updated_at = now();
 
-  v_hour := extract(hour from (now() at time zone 'Europe/Paris'))::integer;
+  v_hour := extract(hour from (v_at at time zone 'Europe/Paris'))::integer;
   if p_natural and v_hour >= 2 and v_hour < 8 then
     update public.player_stats ps
        set late_soirees_count = ps.late_soirees_count + 1, updated_at = now()
@@ -576,30 +660,123 @@ begin
   return public._unlocks_map(v_players);
 end $$;
 
--- Termine automatiquement les soirées oubliées (aucune activité depuis 12 h).
+-- Compat (ancienne signature) : fin « maintenant », raison inchangée.
+create or replace function public._end_soiree(p_soiree_id uuid, p_natural boolean)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  return public._close_soiree(p_soiree_id, null, p_natural, now());
+end $$;
+
+-- Trigger : matches.updated_at = horodatage de la dernière écriture (sauf si
+-- l'UPDATE le fixe explicitement). Sert au filet « partie figée depuis 3 h ».
+create or replace function public._matches_touch()
+returns trigger language plpgsql
+set search_path = public, extensions
+as $$
+begin
+  if new.updated_at is not distinct from old.updated_at then
+    new.updated_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists matches_touch on public.matches;
+create trigger matches_touch before update on public.matches
+  for each row execute function public._matches_touch();
+
+-- Fin automatique des soirées (paresseuse dans les RPC soirée + job pg_cron
+-- « soirees-idle-cleanup » chaque minute, cf. section 16) :
+--  1. filet : une partie non terminée sans aucune écriture depuis 3 h est
+--     annulée (phase 'aborted') et sa soirée close (end_reason 'abandoned',
+--     fin « non naturelle » : pas de dodo) ;
+--  2. une soirée SANS partie en cours dont la dernière activité (création,
+--     démarrage ou fin/annulation d'une partie) date de plus de 20 min est close
+--     (end_reason 'idle', fin naturelle datée à l'échéance : stats soirées + dodo
+--     si l'échéance tombe entre 2h et 8h, heure de Paris).
+-- Une partie en cours (non terminée, écrite depuis moins de 3 h) ne déclenche
+-- jamais la fin. Candidats choisis sans verrou, puis verrou de la soirée (même ordre
+-- que end_soiree / start_match : soirée puis partie) et RE-VÉRIFICATION : une partie
+-- lancée ou jouée entre-temps (transaction concurrente validée) annule la clôture.
 create or replace function public._cleanup_stale_soirees()
 returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
-declare v_id uuid;
+declare
+  v_sid  uuid;
+  v_mid  uuid;
+  v_last timestamptz;
 begin
-  for v_id in
+  -- 1. Filet : partie figée depuis 3 h.
+  for v_sid in
+    select distinct m.soiree_id from public.matches m
+      join public.soirees s on s.id = m.soiree_id
+     where m.status <> 'finished' and s.status <> 'ended'
+       and m.updated_at < now() - public._match_stale_timeout()
+     order by m.soiree_id
+  loop
+    perform 1 from public.soirees where id = v_sid and status <> 'ended' for update;
+    continue when not found;
+    select m.id into v_mid from public.matches m
+     where m.soiree_id = v_sid and m.status <> 'finished'
+       and m.updated_at < now() - public._match_stale_timeout()
+     order by m.created_at limit 1
+       for update;
+    continue when v_mid is null;
+    -- _close_soiree annule toutes les parties non terminées de la soirée (phase 'aborted').
+    perform public._close_soiree(v_sid, 'abandoned', false, now());
+  end loop;
+
+  -- 2. Fin auto : 20 min sans jeu.
+  for v_sid in
     select s.id from public.soirees s
      where s.status <> 'ended'
-       and greatest(s.created_at,
-                    coalesce((select max(m.created_at) from public.matches m where m.soiree_id = s.id), s.created_at),
-                    coalesce((select max(m.finished_at) from public.matches m where m.soiree_id = s.id), s.created_at))
-           < now() - interval '12 hours'
+       and not exists (select 1 from public.matches m where m.soiree_id = s.id and m.status <> 'finished')
+       and public._soiree_last_activity(s.id) < now() - public._soiree_idle_timeout()
+     order by s.id
   loop
-    perform public._end_soiree(v_id, false);
+    perform 1 from public.soirees where id = v_sid and status <> 'ended' for update;
+    continue when not found;
+    continue when exists (select 1 from public.matches m
+                           where m.soiree_id = v_sid and m.status <> 'finished');
+    v_last := public._soiree_last_activity(v_sid);
+    continue when v_last >= now() - public._soiree_idle_timeout();
+    perform public._close_soiree(v_sid, 'idle', true, v_last + public._soiree_idle_timeout());
   end loop;
 end $$;
 
+-- Compat : la soirée non terminée la plus récemment rejointe (ou null).
 create or replace function public.my_active_soiree()
-returns jsonb language sql stable security definer
+returns jsonb language plpgsql security definer
 set search_path = public, extensions
-as $$ select public._soiree_json(public._active_soiree_of(public.current_profile_id())) $$;
+as $$
+begin
+  perform public._cleanup_stale_soirees();
+  return public._soiree_json(public._active_soiree_of(public.current_profile_id()));
+end $$;
 
+-- Toutes mes soirées non terminées (≤ 5), la plus récente d'abord :
+-- [SoireeJson + host (profil) + joined_at (mon arrivée)].
+create or replace function public.my_active_soirees()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  perform public._cleanup_stale_soirees();
+  return coalesce((
+    select jsonb_agg(public._soiree_json(s.id)
+                     || jsonb_build_object('host', public._profile_json(s.host_id),
+                                           'joined_at', sp.joined_at)
+                     order by s.created_at desc, s.id)
+      from public.soiree_players sp
+      join public.soirees s on s.id = sp.soiree_id
+     where sp.profile_id = v_me and s.status <> 'ended'), '[]'::jsonb);
+end $$;
+
+-- Crée une soirée (l'appelant en est l'hôte). Un profil peut être dans au plus
+-- 5 soirées non terminées : too_many_soirees (moi), player_busy (invités déjà
+-- dans 5 soirées, pseudos dans `detail`).
 create or replace function public.create_soiree(p_player_ids uuid[])
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -614,7 +791,9 @@ begin
   perform pg_advisory_xact_lock(hashtext('soiree_membership'));
   perform public._cleanup_stale_soirees();
 
-  if public._active_soiree_of(v_me) is not null then raise exception 'already_in_soiree'; end if;
+  if public._open_soirees_count(v_me) >= public._soiree_max_open() then
+    raise exception 'too_many_soirees';
+  end if;
 
   v_ids := array(select distinct x from unnest(coalesce(p_player_ids, '{}') || v_me) x where x is not null);
   if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x)) then
@@ -622,7 +801,8 @@ begin
   end if;
   select string_agg(p.nickname, ', ' order by p.sort_order) into v_busy
     from public.profiles p
-   where p.id = any(v_ids) and public._active_soiree_of(p.id) is not null;
+   where p.id = any(v_ids) and p.id <> v_me
+     and public._open_soirees_count(p.id) >= public._soiree_max_open();
   if v_busy is not null then
     raise exception 'player_busy' using detail = v_busy;
   end if;
@@ -662,36 +842,44 @@ begin
   if exists (select 1 from public.soiree_players where soiree_id = v_sid and profile_id = v_me) then
     return public._soiree_json(v_sid);
   end if;
-  if public._active_soiree_of(v_me) is not null then raise exception 'already_in_soiree'; end if;
+  if public._open_soirees_count(v_me) >= public._soiree_max_open() then
+    raise exception 'too_many_soirees';
+  end if;
 
   insert into public.soiree_players(soiree_id, profile_id) values (v_sid, v_me);
   return public._soiree_json(v_sid);
 end $$;
 
--- Quitte la soirée non terminée en cours. Si l'hôte part, l'hôte passe au plus
--- ancien joueur restant ; si plus personne, la soirée est terminée.
-create or replace function public.leave_soiree()
+-- Quitte une soirée non terminée (p_soiree_id ; null/absent = la plus récemment
+-- rejointe, compat avec l'ancien leave_soiree() sans paramètre). Sans effet si je
+-- n'en suis pas membre ou si elle est terminée. Si l'hôte part, l'hôte passe au
+-- plus ancien joueur restant ; si plus personne, la soirée est terminée.
+drop function if exists public.leave_soiree();
+create or replace function public.leave_soiree(p_soiree_id uuid default null)
 returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me   uuid := public._require_profile();
-  v_sid  uuid;
-  v_host uuid;
-  v_new  uuid;
+  v_me     uuid := public._require_profile();
+  v_sid    uuid;
+  v_host   uuid;
+  v_status text;
+  v_new    uuid;
 begin
   perform pg_advisory_xact_lock(hashtext('soiree_membership'));
-  v_sid := public._active_soiree_of(v_me);
+  v_sid := coalesce(p_soiree_id, public._active_soiree_of(v_me));
   if v_sid is null then return; end if;
 
-  select host_id into v_host from public.soirees where id = v_sid for update;
+  select host_id, status into v_host, v_status from public.soirees where id = v_sid for update;
+  if not found or v_status = 'ended' then return; end if;
   delete from public.soiree_players where soiree_id = v_sid and profile_id = v_me;
+  if not found then return; end if;
 
   if v_host = v_me then
     select profile_id into v_new from public.soiree_players
      where soiree_id = v_sid order by joined_at, profile_id limit 1;
     if v_new is null then
-      perform public._end_soiree(v_sid, true);
+      perform public._close_soiree(v_sid, 'empty', true, now());
     else
       update public.soirees set host_id = v_new where id = v_sid;
     end if;
@@ -710,7 +898,7 @@ begin
   if not found then raise exception 'soiree_not_found'; end if;
   if v_s.host_id <> v_me then raise exception 'not_host'; end if;
   if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
-  return jsonb_build_object('new_unlocks', public._end_soiree(p_soiree_id, true));
+  return jsonb_build_object('new_unlocks', public._close_soiree(p_soiree_id, 'host', true, now()));
 end $$;
 
 -- =============================================================================
@@ -1301,6 +1489,8 @@ end $$;
 
 -- p_options peut contenir "player_ids": [uuid] pour ne faire jouer qu'une partie
 -- des joueurs de la soirée (par défaut : tous les joueurs de la soirée).
+-- Multi-soirées : un joueur peut être dans des parties de soirées différentes en
+-- même temps ; seule contrainte = une partie non terminée par soirée.
 create or replace function public.start_match(p_soiree_id uuid, p_game_id text, p_options jsonb)
 returns uuid language plpgsql security definer
 set search_path = public, extensions
@@ -1313,6 +1503,8 @@ declare
   v_start   jsonb;
   v_id      uuid := gen_random_uuid();
 begin
+  -- Fin auto paresseuse : une soirée inactive depuis 20 min est close (-> soiree_ended).
+  perform public._cleanup_stale_soirees();
   select * into v_s from public.soirees where id = p_soiree_id for update;
   if not found then raise exception 'soiree_not_found'; end if;
   if v_s.host_id <> v_me then raise exception 'not_host'; end if;
@@ -1368,6 +1560,9 @@ begin
   if p_action is null or jsonb_typeof(p_action) <> 'object' or p_action->>'type' is null then
     raise exception 'invalid_action';
   end if;
+  -- Garde-fou : une action n'a jamais besoin de plus de 8 Ko (certains jeux recopient
+  -- le coup dans le state public ; un client malveillant ne doit pas pouvoir le gonfler).
+  if octet_length(p_action::text) > 8192 then raise exception 'invalid_action'; end if;
 
   select * into v_m from public.matches where id = p_match_id for update;
   if not found then raise exception 'match_not_found'; end if;
@@ -1526,7 +1721,14 @@ revoke all on function public.evaluate_unlocks(uuid) from public, anon, authenti
 revoke all on function public._unlocks_map(uuid[]) from public, anon, authenticated;
 revoke all on function public._gen_soiree_code() from public, anon, authenticated;
 revoke all on function public._end_soiree(uuid, boolean) from public, anon, authenticated;
+revoke all on function public._close_soiree(uuid, text, boolean, timestamptz) from public, anon, authenticated;
 revoke all on function public._cleanup_stale_soirees() from public, anon, authenticated;
+revoke all on function public._open_soirees_count(uuid) from public, anon, authenticated;
+revoke all on function public._soiree_last_activity(uuid) from public, anon, authenticated;
+revoke all on function public._soiree_max_open() from public, anon, authenticated;
+revoke all on function public._soiree_idle_timeout() from public, anon, authenticated;
+revoke all on function public._match_stale_timeout() from public, anon, authenticated;
+revoke all on function public._matches_touch() from public, anon, authenticated;
 revoke all on function public.finish_match(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public._after_finish_match(uuid, uuid[]) from public, anon, authenticated;
 revoke all on function public.game_qui_de_nous_start(uuid[], jsonb) from public, anon, authenticated;
@@ -1557,7 +1759,8 @@ revoke all on function public.remove_friend(uuid) from public, anon;
 revoke all on function public.my_active_soiree() from public, anon;
 revoke all on function public.create_soiree(uuid[]) from public, anon;
 revoke all on function public.join_soiree_by_code(text) from public, anon;
-revoke all on function public.leave_soiree() from public, anon;
+revoke all on function public.leave_soiree(uuid) from public, anon;
+revoke all on function public.my_active_soirees() from public, anon;
 revoke all on function public.end_soiree(uuid) from public, anon;
 revoke all on function public.start_match(uuid, text, jsonb) from public, anon;
 revoke all on function public.game_action(uuid, jsonb) from public, anon;
@@ -1577,7 +1780,8 @@ grant execute on function
   public.my_active_soiree(),
   public.create_soiree(uuid[]),
   public.join_soiree_by_code(text),
-  public.leave_soiree(),
+  public.leave_soiree(uuid),
+  public.my_active_soirees(),
   public.end_soiree(uuid),
   public.start_match(uuid, text, jsonb),
   public.game_action(uuid, jsonb)
@@ -1615,3 +1819,35 @@ set search_path = public, extensions
 as $$ select now() $$;
 revoke all on function public.server_now() from public, anon;
 grant execute on function public.server_now() to authenticated;
+
+-- =============================================================================
+-- 16. FIN AUTOMATIQUE DES SOIRÉES (pg_cron, idempotent et tolérant)
+-- =============================================================================
+-- Job « soirees-idle-cleanup » chaque minute -> _cleanup_stale_soirees(), et
+-- « soirees-idle-cleanup-purge » chaque nuit : efface l'historique de CE job de plus
+-- de 2 jours (cron.job_run_details n'est jamais vidé et le job tourne 1 440 fois/jour).
+-- Si pg_cron est indisponible (autre hébergeur, PGlite…) : simple NOTICE, le
+-- script continue ; la fin auto reste assurée paresseusement par les RPC soirée
+-- (my_active_soirees, create_soiree, join_soiree_by_code, start_match…), que le
+-- front rappelle lui-même quand un compte à rebours d'inactivité arrive à zéro.
+do $$
+begin
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron indisponible (%) : fin auto des soirées uniquement paresseuse', sqlerrm;
+    return;
+  end;
+  begin
+    -- Remplace les jobs s'ils existent déjà (noms fixes).
+    perform cron.unschedule(j.jobid) from cron.job j
+      where j.jobname in ('soirees-idle-cleanup', 'soirees-idle-cleanup-purge');
+    perform cron.schedule('soirees-idle-cleanup', '* * * * *', 'select public._cleanup_stale_soirees()');
+    perform cron.schedule('soirees-idle-cleanup-purge', '17 4 * * *',
+      $job$delete from cron.job_run_details
+            where end_time < now() - interval '2 days'
+              and jobid in (select jobid from cron.job where jobname = 'soirees-idle-cleanup')$job$);
+  exception when others then
+    raise notice 'planification pg_cron impossible (%) : fin auto des soirées uniquement paresseuse', sqlerrm;
+  end;
+end $$;

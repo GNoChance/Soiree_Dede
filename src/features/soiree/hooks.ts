@@ -52,10 +52,25 @@ function subscribe(channel: RealtimeChannel, onSubscribed: () => void) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Soirée active (lanceur du hub)                                              */
+/* Soirées actives (multi-soirées : jusqu'à 5 par joueur)                      */
 /* -------------------------------------------------------------------------- */
 
-/** Ma soirée non terminée (ou null), tenue à jour : l'hôte peut m'ajouter à tout moment. */
+// Liste partagée de TOUTES mes soirées en cours (hub, salon, bandeau global).
+export {
+  MAX_OPEN_SOIREES,
+  IDLE_WARNING_MS,
+  leaveSoiree,
+  refetchActiveSoirees,
+  soireeEndCopy,
+  useActiveSoirees,
+  useViewingSoiree,
+} from './activeSoirees'
+
+/**
+ * @deprecated Compat (une seule soirée) : la soirée non terminée la plus
+ * récemment rejointe. Un joueur peut désormais être dans plusieurs soirées :
+ * utiliser `useActiveSoirees(meId)`, ou la soirée de la page (`useParams().id`).
+ */
 export function useActiveSoiree(meId: string | undefined) {
   const [soiree, setSoiree] = useState<SoireeJson | null>(null)
   const [loading, setLoading] = useState(true)

@@ -4,7 +4,7 @@
  * Pour ajouter une tenue : une ligne ici + une ligne dans tenues.sql (+ la planche, cf. tools/slice-chibis/README.md).
  */
 
-export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach'
+export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral'
 
 export interface TenueDef {
   id: TenueId
@@ -54,6 +54,9 @@ export const TENUES: TenueDef[] = [
   wins('archer', 'Archer', '🏹', 'le-plus-proche', 'Le plus proche'),
   wins('comedien', 'Comédien', '🎭', 'action-ou-verite', 'Action ou vérité'),
   wins('coach', 'Coach', '📣', 'devine-en-equipe', 'Devine en équipe'),
+  wins('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'),
+  wins('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'),
+  wins('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'),
 ]
 
 export const TENUES_BY_ID = Object.fromEntries(TENUES.map((t) => [t.id, t])) as Record<TenueId, TenueDef>

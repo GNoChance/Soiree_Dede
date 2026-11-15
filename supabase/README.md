@@ -5,7 +5,7 @@
 1. Créer un projet sur https://supabase.com (région Europe).
 2. **Authentication > Sign In / Providers** : activer **Anonymous sign-ins** (« Allow anonymous sign-ins »).
 3. **SQL Editor > New query** : coller tout `supabase/install.sql` (généré par `npm run sql` = `schema.sql` + `features/*.sql` + `games/*.sql` + `seed.sql`), **Run**.
-   (Équivalent : `schema.sql`, puis `features/tenues.sql`, les `games/*.sql`, puis `seed.sql`, dans cet ordre.)
+   (Équivalent : `schema.sql`, puis les `features/*.sql` (ordre alphabétique : `duel.sql`, `tenues.sql`), les `games/*.sql`, puis `seed.sql`, dans cet ordre.)
 4. Les fichiers sont ré-exécutables à volonté (mise à jour du schéma) sans perte de données : le seed n'écrase jamais PIN, XP ni pseudo.
 5. **Project Settings > API** : copier `Project URL` et la clé `anon` `public` dans `.env.local` :
    ```
@@ -13,6 +13,7 @@
    VITE_SUPABASE_ANON_KEY=eyJ...
    ```
 6. (Vérif) **Database > Publications > supabase_realtime** doit contenir `soirees`, `soiree_players`, `matches`, `match_players`.
+7. (Recommandé) Activer **pg_cron** pour la fin automatique des soirées à la minute près : voir « Activer pg_cron » plus bas.
 
 Réinitialiser un PIN oublié : Kevin (admin) appelle `admin_reset_pin('slug')` depuis l'app. Le joueur choisira un nouveau PIN à sa prochaine connexion.
 
@@ -51,16 +52,37 @@ PIN : exactement 4 chiffres. 5 échecs → blocage 15 min (par profil, tous appa
 
 Demandes reçues : `from('friendships').select().eq('addressee_id', me).eq('status','pending')`.
 
-### Soirées
+### Soirées (plusieurs en même temps + fin automatique)
 | RPC | Retour |
 |---|---|
-| `create_soiree(p_player_ids uuid[])` | `SoireeJson` (`{...soiree, player_ids}`) — l'hôte est ajouté d'office |
-| `join_soiree_by_code(p_code)` | `SoireeJson` (insensible à la casse) |
-| `my_active_soiree()` | `SoireeJson \| null` |
-| `leave_soiree()` | void — si l'hôte part, l'hôte passe au joueur le plus ancien ; si plus personne, la soirée est terminée |
-| `end_soiree(p_soiree_id)` | `{new_unlocks}` (hôte) — les parties en cours passent en `phase:'aborted'` |
+| `create_soiree(p_player_ids uuid[])` | `SoireeJson` — l'hôte est ajouté d'office |
+| `join_soiree_by_code(p_code)` | `SoireeJson` (insensible à la casse ; déjà membre = OK, même à 5 soirées) |
+| `my_active_soirees()` | `ActiveSoireeJson[]` : **toutes** mes soirées non terminées (5 au plus), la plus récente d'abord |
+| `my_active_soiree()` | compat : `SoireeJson \| null` = la soirée non terminée la plus récemment rejointe |
+| `leave_soiree(p_soiree_id uuid default null)` | void — quitte **cette** soirée (sans paramètre = compat : la plus récemment rejointe). Sans effet ni erreur si je n'en suis pas membre ou si elle est terminée. Si l'hôte part, l'hôte passe au joueur arrivé le plus tôt ; si plus personne : fin (`end_reason 'empty'`) |
+| `end_soiree(p_soiree_id)` | `{new_unlocks}` (hôte) — `end_reason 'host'` ; les parties en cours passent en `phase:'aborted'` |
 
-Un profil n'est que dans **une** soirée non terminée : `already_in_soiree`, `player_busy` (pseudos dans `error.details`). Les soirées sans activité depuis 12 h sont terminées automatiquement à la prochaine création/jonction.
+- `SoireeJson` = ligne `soirees` (dont `end_reason`) + `player_ids` (ordre d'arrivée) + `last_activity_at` + `current_match` + `idle_deadline` :
+  - `current_match` = partie non terminée la plus récente `{id, game_id, status, created_at, player_ids}` (`player_ids` = `state.players`), ou `null` (« dans le salon ») ;
+  - `idle_deadline` = fin automatique prévue = `last_activity_at + 20 min` ; `null` pendant une partie ou si la soirée est terminée.
+- `ActiveSoireeJson` = `SoireeJson` + `host` (profil de l'hôte, format `_profile_json`, avec `equipped_tenue`) + `joined_at` (mon arrivée).
+- `end_reason` : `'host'` (end_soiree) | `'empty'` (le dernier joueur est parti) | `'idle'` (fin auto, 20 min sans jeu) | `'abandoned'` (filet : partie figée 3 h) ; `null` tant que la soirée est ouverte (et pour les soirées terminées avant la colonne). Posée dans le **même** UPDATE que `status = 'ended'` : l'évènement Realtime de fin porte la raison.
+
+**Plusieurs soirées en même temps** : un profil peut être membre de **5** soirées non terminées au plus (`_soiree_max_open()`). Erreurs : `too_many_soirees` (moi, à la création ou à la jonction) ; `player_busy` = un invité de `create_soiree` est **déjà dans 5 soirées** (pseudos dans `error.details`). Une seule partie non terminée **par soirée** (`match_in_progress`), mais un joueur peut jouer dans des parties de soirées différentes en même temps. `already_in_soiree` n'est plus levé (ancien serveur).
+
+**Fin automatique** (`_cleanup_stale_soirees()`) :
+1. Une soirée **sans partie en cours** dont la dernière activité (création, démarrage, ou fin/annulation de sa dernière partie ; arrivées et départs ne comptent pas) date de plus de **20 min** est terminée : `end_reason 'idle'`, fin **naturelle** (compte dans les soirées jouées ; « dodo » si l'échéance tombe entre 2 h et 8 h, heure de Paris), **datée à l'échéance** (`ended_at = last_activity_at + 20 min`, quel que soit le moment où le nettoyage passe).
+2. Filet : une partie non terminée **sans aucune écriture depuis 3 h** (`matches.updated_at`, tenu par le trigger `matches_touch` : toute action, même un `tick`, le rafraîchit) est annulée (`phase:'aborted'`, `seq` +1) et sa soirée terminée : `end_reason 'abandoned'`, fin non naturelle (pas de dodo). À l'installation de la colonne, les parties **non terminées** existantes sont datées à l'heure de la migration (leur dernière action est inconnue) : une longue session en cours au moment où l'on recolle `install.sql` n'est donc pas tuée ; une partie réellement abandonnée vit au pire 3 h de plus.
+- Une partie en cours (écrite depuis moins de 3 h) n'entraîne **jamais** la fin de sa soirée. Le nettoyage verrouille chaque soirée candidate puis revérifie (une partie lancée au même instant annule la clôture).
+- Exécution : job **pg_cron** `soirees-idle-cleanup` chaque minute (créé par `schema.sql` si l'extension est disponible), **et** paresseusement au début de `my_active_soiree(s)`, `create_soiree`, `join_soiree_by_code`, `start_match`. Sur une soirée dont l'échéance est dépassée mais pas encore close : `start_match` → `soiree_ended`, `join_soiree_by_code` → `soiree_not_found` (l'erreur annule la clôture faite dans la même transaction : le front rappelle alors `my_active_soirees`, comme quand son compte à rebours atteint zéro).
+
+#### Activer pg_cron (Supabase)
+1. **Database > Extensions** : chercher **pg_cron** et l'activer (schéma proposé par défaut).
+2. Re-coller `install.sql` (ou au moins `schema.sql`) : la section 16 (re)crée deux jobs, idempotents : `soirees-idle-cleanup` (`* * * * *` → `select public._cleanup_stale_soirees()`) et `soirees-idle-cleanup-purge` (chaque nuit à 4 h 17 UTC : efface de `cron.job_run_details` l'historique de ce job de plus de 2 jours ; il tourne 1 440 fois par jour).
+3. Vérifier : `select jobname, schedule, active from cron.job;` puis, une minute plus tard, `select status, start_time from cron.job_run_details order by start_time desc limit 5;` (`succeeded`).
+
+Sans pg_cron, le script affiche une NOTICE « pg_cron indisponible… » et continue : la fin auto reste assurée par les RPC ci-dessus et par le front (le hub recharge `my_active_soirees` toutes les 60 s quand l'app est au premier plan, au retour au premier plan, et quand un compte à rebours atteint zéro). Une soirée oubliée alors que plus personne n'a l'app ouverte est close à la connexion suivante, datée à son échéance (même résultat de stats et de dodo).
+Désactiver : `select cron.unschedule('soirees-idle-cleanup'); select cron.unschedule('soirees-idle-cleanup-purge');` (les re-coller les recrée).
 
 ### Moteur
 - `start_match(p_soiree_id, p_game_id, p_options) → uuid` (hôte). Erreur `match_in_progress` s'il y a déjà une partie `playing`. `p_options.player_ids` (optionnel) = sous-ensemble des joueurs de la soirée.
@@ -132,7 +154,7 @@ Points : gagnant vivant 3, gagnant éliminé 2, perdant 0 (Mister White qui devi
 
 ### Déblocages (évalués côté serveur)
 Évalués à chaque fin de partie (tous les joueurs de la partie, d'où « cool »), à l'acceptation d'amitié (amoureux/charmée), à la fin de soirée (dodo/surprise) et au login. Seules les expressions de `profiles.expressions` sont débloquées. `new_unlocks` renvoyé par les RPC/states permet d'animer le déblocage.
-- **dodo** : soirée terminée (par `end_soiree` ou départ du dernier joueur) entre 2 h 00 et 7 h 59 heure de Paris, pour les joueurs encore présents et ayant fini au moins une partie de la soirée.
+- **dodo** : soirée terminée « naturellement » (`end_soiree`, départ du dernier joueur, ou fin auto après 20 min sans jeu — datée à son échéance) entre 2 h 00 et 7 h 59 heure de Paris, pour les joueurs encore présents et ayant fini au moins une partie de la soirée. Pas de dodo pour le filet « partie abandonnée ».
 - **surprise** : une soirée compte pour un joueur s'il y a fini au moins une partie.
 - **cool** : avoir le max de victoires (ex-aequo inclus), au moins 1.
 - **pleurs** : « dernier » = plus mauvais placement d'une partie où tout le monde n'est pas ex-aequo.
@@ -141,7 +163,7 @@ Points : gagnant vivant 3, gagnant éliminé 2, perdant 0 (Mister White qui devi
 ### Tenues (`supabase/features/tenues.sql`)
 Skins vestimentaires : variante du chibi (`public/chibis/<slug>/<tenue>/<expr>.webp`), indépendante de l'expression équipée.
 - Tables : `tenues` (catalogue : `id, label, emoji, game_id, condition_type, threshold, sort_order, has_art`), `tenue_unlocks` (`profile_id, tenue_id, unlocked_at`). Lecture pour tout `authenticated` ; aucune écriture client. Colonne `profiles.equipped_tenue` (défaut `'default'`), exposée dans `_profile_json`, `list_profiles_public()` et les deux vues de classement.
-- Catalogue seedé (`on conflict do update` label/emoji/condition/seuil, **jamais `has_art`**) : `default` (toujours débloquée), puis une tenue par jeu, débloquée par **10 victoires** dans ce jeu : `star` (qui-de-nous), `espion` (undercover), `croupier` (pas-de-bol), `prof` (cerveau-en-fete), `ecolier` (petit-bac), `artiste` (dessine-devine).
+- Catalogue seedé (`on conflict do update` label/emoji/condition/seuil, **jamais `has_art`**) : `default` (toujours débloquée), puis une tenue par jeu, débloquée par **10 victoires** dans ce jeu : `star` (qui-de-nous), `espion` (undercover), `croupier` (pas-de-bol), `prof` (cerveau-en-fete), `ecolier` (petit-bac), `artiste` (dessine-devine), `loup` (loup-garou), `artificier` (bombe-a-mots), `pirate` (menteur), `bowler` (bowling), `philosophe` (tu-preferes), `vedette` (qui-suis-je), `archer` (le-plus-proche), `comedien` (action-ou-verite), `coach` (devine-en-equipe), `stratege` (quatre-a-la-suite), `ninja` (morpion), `amiral` (bataille-navale). Miroir front : `src/data/tenues.ts` (mêmes id/label/emoji/game_id). Jeux en duel : une victoire = une **session** gagnée (`won` posé par `_duel_finish`), pas une manche.
 - `condition_type` : `'default'` ou `'game_wins'` (≥ `threshold` lignes `won` de `match_players` pour `game_id` ; `game_id` null = tous jeux). Nouveau type de condition = un `when` de plus dans `evaluate_tenues`.
 - `equip_tenue(p_tenue)` → profil ; erreurs `unknown_tenue`, `tenue_locked`. `default` toujours équipable.
 - `evaluate_tenues(p_profile_id) → text[]` (interne) : insère les déblocages manquants, renvoie les ids nouvellement débloqués. Un rattrapage tourne à chaque exécution du fichier (victoires acquises avant l'installation).
@@ -157,3 +179,4 @@ Skins vestimentaires : variante du chibi (`public/chibis/<slug>/<tenue>/<expr>.w
 5. `finish_match(p_match_id, p_results)` est interne : `results` = `[{profile_id, points, won, placement, stats}]`, appelée par `game_action`.
 6. `matches.status = 'lobby'` n'est jamais utilisé (une partie est créée directement en `playing`).
 7. (Phase 2) `state.seq` ajouté par `game_action` / `abort` / `_end_soiree` : version monotone du state public (anti-régression d'affichage côté front). **Re-coller `schema.sql`** pour l'activer ; sans lui le front fonctionne quand même (il accepte alors tout state reçu).
+8. (Multi-soirées) Colonnes `soirees.end_reason` (check : `host|empty|idle|abandoned`) et `matches.updated_at` (trigger `matches_touch`, index partiel `matches_unfinished_idx`). RPC `my_active_soirees()`, `leave_soiree(p_soiree_id uuid default null)` (remplace `leave_soiree()`). Internes : `_close_soiree(id, reason, natural, at)` (`_end_soiree(id, natural)` reste un alias), `_open_soirees_count`, `_soiree_last_activity`, constantes `_soiree_max_open()` = 5, `_soiree_idle_timeout()` = 20 min, `_match_stale_timeout()` = 3 h. La fin auto « 12 h sans activité » est remplacée par les règles 20 min / 3 h ci-dessus. Le front gère encore un serveur pas à jour (repli sur `my_active_soiree()` et `leave_soiree()`), mais **re-coller `install.sql`** pour activer le multi-soirées.

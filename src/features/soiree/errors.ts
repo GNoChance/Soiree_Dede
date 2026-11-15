@@ -5,8 +5,10 @@ const MESSAGES: Record<string, string> = {
   not_authenticated: 'Connexion perdue. Recharge l’app et réessaie.',
   not_logged_in: 'Tu n’es plus connecté·e. Choisis ton personnage.',
   unknown_profile: 'Ce joueur n’existe pas.',
-  already_in_soiree: 'Tu es déjà dans une soirée.',
-  player_busy: 'Déjà dans une autre soirée',
+  // Multi-soirées : 5 soirées non terminées au plus par joueur.
+  too_many_soirees: 'Tu es déjà dans 5 soirées : quittes-en une d’abord !',
+  already_in_soiree: 'Tu es déjà dans une soirée.', // ancien serveur (une seule soirée)
+  player_busy: 'Déjà dans 5 soirées',
   soiree_not_found: 'Aucune soirée avec ce code…',
   soiree_ended: 'Cette soirée est terminée.',
   not_host: 'Seul l’hôte peut faire ça.',
@@ -89,6 +91,28 @@ const MESSAGES: Record<string, string> = {
   not_your_guess: 'Ce n’est pas à toi de deviner.',
   invalid_guess: 'Écris un mot.',
   code_generation_failed: 'Impossible de créer le code, réessaie.',
+  // Jeux en duel (socle commun supabase/features/duel.sql + plateaux)
+  not_duelist: 'Tu ne joues pas ce duel : tu regardes !',
+  duelist_cannot_bet: 'Tu joues ce duel : pas le droit de parier !',
+  invalid_bet: 'Pari invalide.',
+  bets_closed: 'Trop tard, les paris sont fermés !',
+  already_ready: 'Tu es déjà prêt·e !',
+  invalid_move: 'Coup impossible.',
+  column_full: 'Cette colonne est pleine !',
+  invalid_mode: 'Format de session inconnu.',
+  invalid_duel_players: 'Choisis deux joueurs différents de la partie.',
+  invalid_board: 'Erreur du plateau, réessaie.',
+  no_next_duel: 'Plus de duel à jouer.',
+  setup_incomplete: 'Termine ta préparation avant de valider !',
+  // Morpion
+  cell_taken: 'Cette case est déjà prise !',
+  wrong_board: 'Tu dois jouer dans le petit morpion en surbrillance !',
+  board_closed: 'Ce petit morpion est déjà terminé !',
+  invalid_variant: 'Variante de morpion inconnue.',
+  // Bataille navale (invalid_fleet / fleet_overlap levés via raise exception '%')
+  invalid_fleet: 'Flotte invalide : place tes 5 bateaux dans la grille !',
+  fleet_overlap: 'Deux bateaux se chevauchent !',
+  already_shot: 'Tu as déjà tiré sur cette case !',
 }
 
 function raw(err: unknown): string {
@@ -117,7 +141,7 @@ export function errorMessage(err: unknown): string {
   const code = errorCode(err)
   if (code === 'player_busy') {
     const who = errorDetails(err)
-    return who ? `Déjà dans une autre soirée : ${who}` : 'Un joueur est déjà dans une autre soirée.'
+    return who ? `Déjà dans 5 soirées : ${who}` : 'Un joueur est déjà dans 5 soirées.'
   }
   if (code) return MESSAGES[code]
   if (/failed to fetch|networkerror|network request|load failed/i.test(raw(err))) {

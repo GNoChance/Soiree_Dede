@@ -67,19 +67,52 @@ export type FriendshipRow = {
 
 export type SoireeStatus = 'lobby' | 'active' | 'ended';
 
+/**
+ * Raison de fin d'une soirée : 'host' (end_soiree), 'empty' (le dernier joueur est
+ * parti), 'idle' (fin auto : 20 min sans jeu), 'abandoned' (filet : partie figée 3 h).
+ */
+export type SoireeEndReason = 'host' | 'empty' | 'idle' | 'abandoned';
+
 export type SoireeRow = {
   id: UUID;
   code: string; // 4 lettres majuscules (sans I, L, O)
   host_id: UUID;
   status: SoireeStatus;
+  /** null tant que la soirée n'est pas terminée (ou terminée avant l'ajout de la colonne). */
+  end_reason: SoireeEndReason | null;
   created_at: Timestamp;
   started_at: Timestamp | null;
+  /** Fin auto 'idle' : l'échéance d'inactivité (pas l'heure du nettoyage). */
   ended_at: Timestamp | null;
 };
 
-/** Soirée renvoyée par create_soiree / join_soiree_by_code / my_active_soiree. */
+/** Partie non terminée la plus récente d'une soirée (`SoireeJson.current_match`). */
+export type SoireeCurrentMatch = {
+  id: UUID;
+  game_id: string;
+  status: MatchStatus;
+  created_at: Timestamp;
+  /** `state.players` de la partie. */
+  player_ids: UUID[];
+};
+
+/** Soirée renvoyée par create_soiree / join_soiree_by_code / my_active_soiree(s). */
 export type SoireeJson = SoireeRow & {
   player_ids: UUID[];
+  /** Dernière activité : création, démarrage ou fin/annulation de la dernière partie. */
+  last_activity_at: Timestamp;
+  /** null = pas de partie en cours (« dans le salon »). */
+  current_match: SoireeCurrentMatch | null;
+  /** Fin automatique prévue (last_activity_at + 20 min) ; null si partie en cours ou soirée terminée. */
+  idle_deadline: Timestamp | null;
+};
+
+/** Élément de my_active_soirees() (la plus récente d'abord, 5 au plus). */
+export type ActiveSoireeJson = SoireeJson & {
+  /** Profil de l'hôte (null : repli sur un ancien serveur). */
+  host: ProfileJson | null;
+  /** Mon arrivée dans la soirée. */
+  joined_at: Timestamp;
 };
 
 export type SoireePlayerRow = {
@@ -98,6 +131,8 @@ export type MatchRow<S extends GameState = GameState> = {
   state: S;
   created_at: Timestamp;
   finished_at: Timestamp | null;
+  /** Dernière écriture de la ligne (trigger) : filet « partie figée depuis 3 h ». */
+  updated_at: Timestamp;
 };
 
 export type MatchPlayerRow = {
@@ -371,7 +406,9 @@ export type RpcErrorCode =
   | 'not_authenticated' | 'not_logged_in' | 'forbidden' | 'unknown_profile'
   | 'invalid_nickname' | 'unknown_expression' | 'expression_locked' | 'unknown_tenue' | 'tenue_locked'
   | 'invalid_friend' | 'no_pending_request'
-  | 'already_in_soiree' | 'player_busy' | 'soiree_not_found' | 'soiree_ended' | 'not_host'
+  // already_in_soiree : ancien serveur (une seule soirée) ; remplacé par too_many_soirees.
+  // player_busy : un invité est déjà dans 5 soirées (pseudos dans error.details).
+  | 'too_many_soirees' | 'already_in_soiree' | 'player_busy' | 'soiree_not_found' | 'soiree_ended' | 'not_host'
   | 'match_in_progress' | 'player_not_in_soiree' | 'unknown_game' | 'not_enough_players'
   | 'missing_questions' | 'invalid_questions' | 'invalid_pair'
   | 'match_not_found' | 'match_not_playing' | 'not_in_match' | 'invalid_action' | 'unknown_action'
@@ -426,10 +463,14 @@ export type Database = {
       respond_friend_request: { Args: { p_requester_id: UUID; p_accept: boolean }; Returns: FriendRequestResult };
       remove_friend: { Args: { p_profile_id: UUID }; Returns: undefined };
 
+      /** Compat : la soirée non terminée la plus récemment rejointe. */
       my_active_soiree: { Args: Record<string, never>; Returns: SoireeJson | null };
+      /** Toutes mes soirées non terminées (≤ 5), la plus récente d'abord. */
+      my_active_soirees: { Args: Record<string, never>; Returns: ActiveSoireeJson[] };
       create_soiree: { Args: { p_player_ids: UUID[] }; Returns: SoireeJson };
       join_soiree_by_code: { Args: { p_code: string }; Returns: SoireeJson };
-      leave_soiree: { Args: Record<string, never>; Returns: undefined };
+      /** Sans p_soiree_id (compat) : la soirée la plus récemment rejointe. */
+      leave_soiree: { Args: { p_soiree_id?: UUID | null }; Returns: undefined };
       end_soiree: { Args: { p_soiree_id: UUID }; Returns: EndSoireeResult };
 
       start_match: { Args: { p_soiree_id: UUID; p_game_id: GameId; p_options: GameOptions }; Returns: UUID };

@@ -10,8 +10,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { useSession } from '@/store/session'
 import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
-import { useCurrentMatch, useGameAction, useMatch, useSoiree } from '@/features/soiree/hooks'
-import { mood, usePlayers } from '@/features/soiree/players'
+import { soireeEndCopy, useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
+import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { ConfirmModal, LaunchCountdown } from '@/features/soiree/components'
 import { ResultsScreen } from '@/features/soiree/ResultsScreen'
 
@@ -42,12 +42,17 @@ export function MatchPage() {
   const [confirmAbort, setConfirmAbort] = useState(false)
   const [next, setNext] = useState<{ id: string; game: string } | null>(null)
 
+  // Pas de bandeau « une partie commence » pour cette soirée : l'enchaînement ci-dessous s'en charge.
+  useViewingSoiree(soireeId, 'match')
+
   const isHost = Boolean(soireeData && soireeData.soiree.host_id === meId)
   const game = match ? getGame(match.game_id) : undefined
   const state = match?.state as unknown as BaseGameState | undefined
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
-  const backToSalon = () => navigate(soireeId ? `/soiree/${soireeId}` : '/', { replace: true })
+  const soireeEnded = soireeData?.soiree.status === 'ended'
+  // Soirée terminée (fin auto, hôte…) : plus de salon, retour au hub.
+  const backToSalon = () => navigate(soireeId && !soireeEnded ? `/soiree/${soireeId}` : '/', { replace: true })
 
   // L'hôte relance une partie pendant que je suis sur les résultats -> on enchaîne.
   useEffect(() => {
@@ -123,9 +128,15 @@ export function MatchPage() {
           <h2 className="flex items-center gap-2 text-3xl">
             <Ban className="size-7" /> Partie annulée
           </h2>
-          <p className="text-muted">{soireeData?.soiree.status === 'ended' ? 'La soirée est terminée.' : 'L’hôte a annulé la partie. Aucun point compté.'}</p>
-          <Button size="lg" fullWidth icon={<Home className="size-6" />} onClick={soireeData?.soiree.status === 'ended' ? () => navigate('/', { replace: true }) : backToSalon}>
-            {soireeData?.soiree.status === 'ended' ? 'Retour au hub' : 'Retour au salon'}
+          <p className="text-muted">
+            {soireeEnded && soireeData
+              ? soireeData.soiree.end_reason === 'abandoned'
+                ? `${soireeEndCopy('abandoned', '').text} Aucun point compté.`
+                : soireeEndCopy(soireeData.soiree.end_reason, soireeData.soiree.host_id === meId ? 'toi' : playerOrPlaceholder(byId, soireeData.soiree.host_id).nickname).text
+              : 'L’hôte a annulé la partie. Aucun point compté.'}
+          </p>
+          <Button size="lg" fullWidth icon={<Home className="size-6" />} onClick={backToSalon}>
+            {soireeEnded ? 'Retour au hub' : 'Retour au salon'}
           </Button>
         </Card>
       ) : finished ? (

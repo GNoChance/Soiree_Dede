@@ -7,11 +7,19 @@ import { bootSession, refreshProfile } from '@/lib/auth'
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus'
 import { ToastHost } from '@/components/ui/Toast'
 import { isSupabaseConfigured, SUPABASE_MISSING_MESSAGE } from '@/lib/supabase'
+import { LiveSoireeBanner } from '@/features/soiree/SoireeLive'
 import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
 
-/** Racine : MotionConfig (respect prefers-reduced-motion), toasts, MAJ PWA, banniere Supabase. */
+/**
+ * Haut de page : zone sûre + hauteur du bandeau global « une partie commence »
+ * (`--live-banner-h`, publiée par LiveSoireeBanner) : le bandeau pousse la page
+ * au lieu de masquer ses boutons.
+ */
+const TOP_PAD = { paddingTop: 'calc(env(safe-area-inset-top) + var(--live-banner-h, 0px))' } as const
+
+/** Racine : MotionConfig (respect prefers-reduced-motion), toasts, MAJ PWA, banniere Supabase, bandeau des soirées. */
 export function Root() {
   useEffect(() => {
     void bootSession()
@@ -25,6 +33,7 @@ export function Root() {
         </div>
       )}
       <Outlet />
+      <LiveSoireeBanner />
       <ToastHost />
       <UpdatePrompt />
     </MotionConfig>
@@ -66,7 +75,7 @@ function useSessionLifecycle() {
 /** Layout des 5 onglets, avec barre de navigation inferieure. */
 export function TabsLayout() {
   return (
-    <div className="pt-safe pl-safe pr-safe mx-auto min-h-dvh max-w-md pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+    <div style={TOP_PAD} className="pl-safe pr-safe mx-auto min-h-dvh max-w-md pb-[calc(6.5rem+env(safe-area-inset-bottom))] transition-[padding] duration-200">
       <AnimatedOutlet className="px-4 pt-4" />
       <BottomNav />
     </div>
@@ -76,7 +85,7 @@ export function TabsLayout() {
 /** Layout plein ecran (salon, partie) sans barre de navigation. */
 export function FullLayout() {
   return (
-    <div className="pt-safe pb-safe pl-safe pr-safe mx-auto min-h-dvh max-w-md">
+    <div style={TOP_PAD} className="pb-safe pl-safe pr-safe mx-auto min-h-dvh max-w-md transition-[padding] duration-200">
       <AnimatedOutlet className="px-4 pt-4" />
     </div>
   )

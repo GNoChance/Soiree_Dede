@@ -5,6 +5,7 @@ Source de vérité partagée entre tous les agents. Toute divergence = bug.
 ## Décisions produit
 - PWA mobile-first, **en ligne uniquement** (installable, assets/chibis en cache, mais pas de jeu hors ligne).
 - **Multi-écrans temps réel** : chaque joueur sur son téléphone. Hôte = celui qui lance la soirée.
+- **Plusieurs soirées en même temps** : un joueur peut être dans **5** soirées non terminées (une partie à la fois par soirée). Hub = liste de mes soirées ; bandeau global quand une partie démarre ailleurs (pas de bascule automatique hors du salon concerné). **Fin automatique** d'une soirée après **20 min sans jeu** (compte à rebours les 5 dernières minutes) ; filet : partie sans action depuis 3 h annulée. Contrat : `supabase/README.md` (Soirées).
 - Français uniquement, tout public.
 - Design « sticker book » : cartoon, contours épais, ombres portées décalées (`box-shadow: 4px 4px 0 <ink>`), couleurs vives, thème clair + sombre. **Très grosses animations** (Framer Motion, confettis, rebonds, transitions de page).
 - Hébergement : Vercel (front) + Supabase (BDD, Auth anonyme, Realtime). **Pas d'Edge Functions** : toute la logique serveur est en SQL (RPC `security definer`), livrée dans un seul fichier que l'utilisateur colle dans le SQL Editor.
@@ -70,9 +71,9 @@ En jeu, **toutes** les expressions du perso sont utilisables comme réactions (m
 - `device_sessions` (auth_uid pk, profile_id, created_at)
 - `login_attempts` (slug, failed_count, locked_until)
 - `friendships` (requester_id, addressee_id, status 'pending'|'accepted', created_at) — amitié réciproque une fois acceptée
-- `soirees` (id, code char(4) unique parmi les actives, host_id, status 'lobby'|'active'|'ended', started_at, ended_at)
+- `soirees` (id, code char(4) unique parmi les actives, host_id, status 'lobby'|'active'|'ended', end_reason 'host'|'empty'|'idle'|'abandoned', started_at, ended_at)
 - `soiree_players` (soiree_id, profile_id, joined_at) — l'hôte invite des joueurs ; ils voient la soirée dans l'app (et code 4 lettres en secours)
-- `matches` (id, soiree_id, game_id text, status 'lobby'|'playing'|'finished', state jsonb **public**, created_at, finished_at)
+- `matches` (id, soiree_id, game_id text, status 'lobby'|'playing'|'finished', state jsonb **public**, created_at, finished_at, updated_at)
 - `match_players` (match_id, profile_id, placement int, points int, won bool)
 - `match_secrets` (match_id, profile_id, secret jsonb) — RLS : lecture uniquement par son propriétaire
 - `unlocks` (profile_id, expression, unlocked_at)
@@ -135,3 +136,79 @@ Variables : `.env.local` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (jama
 
 ## Tenues (skins)
 Variante vestimentaire du chibi : `public/chibis/<slug>/<tenue>/<expression>.webp`. Catalogue : table `tenues` (`supabase/features/tenues.sql`) + miroir `src/data/tenues.ts`. `profiles.equipped_tenue` (défaut `default`), RPC `equip_tenue`, déblocage « 10 victoires dans un jeu » évalué en fin de partie (`new_tenues` dans le state final). `Avatar`/`ChibiImage` prennent `tenue` (sans `tenue`, `Avatar` lit l'annuaire `usePlayers`) et se replient sur `default` + emoji si l'illustration manque (`src/data/tenues-art.generated.ts`, généré par `tools/slice-chibis`). Détails : `supabase/README.md` (Tenues) et `tools/slice-chibis/README.md`.
+
+## Jeux en duel (socle commun)
+Jeux à 2 joueurs à la fois (4 à la suite, morpion, bataille navale…) : les autres regardent en direct et **parient**. Le socle gère la session, les tours, le minuteur, les paris, les points et `finish_match` ; un jeu ne fournit **que son plateau** (3 fonctions SQL + 1 composant React).
+Fichiers : `supabase/features/duel.sql` (chargé après `schema.sql`, avant `games/*.sql` par `npm run sql`), `src/features/duel/*`. Premier client : `quatre-a-la-suite` (`supabase/games/quatre-a-la-suite.sql`, `src/games/quatre-a-la-suite/`) — **le modèle à copier**. Autres clients : `morpion` (variantes `classic` 3×3 / `giant` 10×10 aligner 5 / `ultimate`, option `board.variant` via `BoardOptions`) et `bataille-navale` (seul jeu avec préparation `board_setup` : flotte 5-4-3-3-2 secrète, 60 s, placement auto ou manuel ; touché/coulé = rejoue). Détails des plateaux : en-tête de chaque `supabase/games/<id>.sql`.
+
+### Modes de session (option `mode`, choisie par l'hôte)
+| mode | déroulé | fin | `won` |
+|---|---|---|---|
+| `king` 👑 Roi de la table | file tirée au sort ; duel `queue[0]` (roi) vs `queue[1]` (challenger). Gagnant → reste en tête, perdant → fin de file. **Nul → les deux sortent** (fin de file, roi puis challenger), les 2 suivants entrent. | dès qu'un joueur enchaîne **3 victoires** (`streak_target`) une fois que tout le monde a joué ≥ 1 duel, **ou** quand tout le monde a joué ≥ **2** duels (`min_played`). Garde-fou : `4n+10` duels (`limit`). | meilleur(s) score(s) (> 0) |
+| `tournament` 🏆 | tableau à élimination directe tiré au sort ; taille = puissance de 2 ≥ n, `taille−n` exempts placés au hasard au 1er tour (qualifiés d'office). Matchs joués tour par tour, dans l'ordre. **Nul → revanche une fois** (`replay`, même match) ; **2e nul → qualifié tiré au sort** (`random`). | finale jouée | le champion (classé 1er quels que soient les points) |
+| `duel` ⚔️ | 2 joueurs choisis (`duel_players`) ou au hasard ; `best_of` 1 ou 3 (premier à 2 manches ; après 3 manches, le plus de manches gagnées l'emporte, égalité = nul). | le duel | le vainqueur (nul : personne) |
+
+`best_of` vaut toujours 1 hors mode duel. L'hôte peut **arrêter** (`stop`) à tout moment : le duel en cours ne compte pas ; `won` = champion du tournoi s'il existe déjà, sinon meilleur(s) score(s) > 0.
+
+**Points de session** : victoire de duel **+3**, duel nul **+1** chacun (y compris un nul de tournoi départagé au tirage), **pari juste +1** (un pari sur un duel nul ne rapporte rien). `finish_match` reçoit `points` = points de session, `placement` = rang (gagnants d'abord, puis points ; ex-aequo partagés).
+**Premier joueur** : pour chaque duel, celui des deux qui a commencé le moins de manches dans la session (égalité : au hasard) ; il alterne ensuite à chaque manche du duel.
+
+### Phases et minuteurs (`state.phase`, `deadline` + `{"type":"tick"}`)
+`transition` (« Prochain duel : X vs Y », paris ouverts ; 8 s au 1er duel puis 5 s) → [`setup` : préparation simultanée, durée donnée par le jeu] → `playing` (**30 s par coup**, option `turn_seconds` 10–120 ; à l'échéance **coup automatique au hasard** via `board_auto`) → `result` (4 s après une manche, 5 s après le duel) → manche suivante / `transition` du duel suivant / `finished`. L'hôte accélère `transition` et `result` avec `{"type":"next"}`.
+**Paris** : spectateurs = joueurs de la partie hors duellistes (l'hôte non joueur ne parie pas). Ouverts en `transition`, puis en manche 1 tant qu'aucun coup n'est joué **ou** pendant les 15 premières secondes du duel (`duel.bets_until`). Modifiables tant qu'ouverts. Publics (`duel.bets`).
+
+### State public (`DuelState<Board, Move>`, miroir TS : `src/features/duel/types.ts`)
+```json
+{ "game": "<id>", "phase": "transition|setup|playing|result|finished|aborted",
+  "players": ["uuid"], "deadline": "ISO|null", "winners": ["uuid"], "results": [],
+  "session": { "mode": "king|tournament|duel", "best_of": 1, "turn_seconds": 30, "board_options": {},
+    "scores": {"uuid": 0},
+    "stats": {"uuid": {"played":0,"wins":0,"draws":0,"losses":0,"bets":0,"bets_won":0,"starts":0}},
+    "streak": {"player": null, "count": 0}, "streak_target": 3, "min_played": 2, "duel_count": 0,
+    "history": [{"no":1,"a":"","b":"","winner":null,"draw":true,"advanced":null,"wins":{},"games":[],
+                 "bets":{},"bets_right":[],"round":null,"match":null,"replay":false}],
+    "queue": ["uuid"],
+    "bracket": {"size":8,"byes":3,"rounds":[[{"a":"","b":null,"winner":"","status":"pending|done|bye","draws":0,"random":false}]]},
+    "pair": ["uuid","uuid"], "over": false,
+    "end_reason": "streak|rotation|limit|bracket|duel|stopped|null", "champion": null },
+  "duel": { "no": 1, "a": "uuid", "b": "uuid", "first": "uuid", "starter": "uuid", "turn": "uuid|null",
+    "game_no": 1, "wins": {"uuid": 0}, "games": [{"no":1,"starter":"","winner":null,"moves":12}],
+    "bets": {"<spectateur>": "<duelliste>"}, "bets_until": "ISO", "moves": 0,
+    "last_move": {"by": "uuid", "move": {}, "auto": false}, "outcome": "win|draw|null", "winner": null,
+    "ready": [], "result": {"winner": null, "draw": false, "advanced": null, "bets_right": []},
+    "round": 0, "match": 0, "replay": false },
+  "board": { "…": "plateau PUBLIC du jeu (null en transition)" } }
+```
+`queue`/`bracket`/`pair` ne sont renseignés que dans leur mode. `duel.result` n'est renseigné qu'à la fin du **duel** (pas d'une manche). `match_server_state.data` = `{"board": <server du jeu>}`.
+
+### Actions (communes, traitées par `_duel_action`)
+`{"type":"move","move":{…}}` (duelliste au trait en `playing` ; en `setup` : coup de préparation de l'un ou l'autre) · `{"type":"ready"}` (duelliste, `setup`) · `{"type":"bet","winner":"<uuid>"}` (spectateur) · `{"type":"tick"}` (tous ; sans effet avant l'échéance) · `{"type":"next"}` (hôte, `transition`/`result`) · `{"type":"stop"}` (hôte). `abort` reste géré par le moteur.
+Erreurs du socle : `wrong_phase`, `not_duelist`, `not_your_turn`, `invalid_move`, `already_ready`, `not_a_player`, `duelist_cannot_bet`, `invalid_bet`, `bets_closed`, `not_host`, `unknown_action` ; au démarrage `not_enough_players`, `too_many_players` (> 16 ; le jeu peut être plus strict), `invalid_mode`, `invalid_duel_players`, `unknown_game` (hook obligatoire manquant) ; hook incohérent : `invalid_board`.
+
+### Contrat SQL d'un jeu en duel — `supabase/games/<id>.sql`
+Préfixe `game_<id_underscore>_` ; les joueurs sont passés en **texte** (uuid::text). Hooks sans `security definer` (appelés depuis `game_<id>_action`, qui l'est). Terminer par les `revoke all … from public, anon, authenticated`.
+1. `board_new(p_ctx jsonb, p_a text, p_b text) returns jsonb` — **obligatoire**. `p_ctx = {duel_no, game_no, a, b, starter, options}` (`options` = `p_options.board`). Renvoie `{board: {…objet public}, server?: any, secrets?: {"<uid>": any}, setup_seconds?: int}`. Appelé à chaque **manche**.
+2. `board_move(p_board jsonb, p_server jsonb, p_actor text, p_move jsonb) returns jsonb` — **obligatoire**. Lève un code métier si le coup est illégal (`invalid_move` ou code propre, ex. `column_full`). Renvoie `{board, server?, secrets?, outcome: null|'win'|'draw', winner?: uid, turn?: uid}` ; `turn` absent = alternance (présent = ex. « touché, rejoue ») ; `server` absent = inchangé.
+3. `board_auto(p_board jsonb, p_server jsonb, p_actor text) returns jsonb` — **obligatoire**. Un coup **légal tiré au hasard** pour `p_actor` (même format que `p_move`) ; le socle le rejoue via `board_move` (`last_move.auto = true`).
+4. `board_setup(p_board jsonb, p_server jsonb, p_actor text, p_move jsonb) returns jsonb` — **optionnel** : préparation **simultanée** (ex. bataille navale : placer sa flotte en 60 s). Activée si `board_new` renvoie `setup_seconds > 0` : phase `setup`, les deux duellistes envoient des coups de préparation sans tour (`{"type":"move","move":{…}}` → `board_setup(actor, move)`), puis `{"type":"ready"}`. Le hook reçoit en plus trois coups **réservés** (refusés s'ils viennent d'un client) : `{"type":"ready"}` (valider ; lever par ex. `setup_incomplete`), `{"type":"auto"}` (à l'échéance : **compléter au hasard** la préparation de `p_actor`, non prêt), `{"type":"begin"}` avec `p_actor` **NULL** (les deux sont prêts : figer). Renvoie `{board, server?, secrets?}`. Ensuite `playing`, `turn = starter`. Coup de préparation après `ready` → `already_ready`.
+5. Délégation (seules fonctions vues par le moteur) :
+```sql
+create or replace function public.game_<id>_start(p_players uuid[], p_options jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
+  return public._duel_start('<id>', p_players, p_options);
+end $$;
+create or replace function public.game_<id>_action(p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+begin return public._duel_action('<id>', p_state, p_server, p_actor, p_is_host, p_action); end $$;
+```
+**Information cachée** (flottes…) : jamais dans `board` ; la vérité dans `server`, la vue de chaque duelliste dans `secrets` (upsert, jamais supprimés : y mettre `duel_no`/`game_no` pour que le front ignore le secret d'un duel précédent ; les spectateurs n'ont pas de secret).
+Helpers internes (`revoke`) : `_duel_start`, `_duel_action`, `_duel_announce`, `_duel_pair_next`, `_duel_begin_game`, `_duel_apply_move`, `_duel_end_game`, `_duel_end_duel`, `_duel_advance`, `_duel_finish`, `_duel_setup_call`, `_duel_setup_begin`, `_duel_bracket_new`, `_duel_bracket_win`, `_duel_hook`/`_duel_fn` (dispatch dynamique, comme `_game_fn`), `_duel_board_new/_move/_auto/_setup`, `_duel_iso`, `_duel_in`, `_duel_stat`, `_duel_score`, `_duel_other`, `_duel_add_secrets`, `_duel_shuffle`.
+
+### Contrat front — `src/games/<id>/`
+- `index.ts` : `export const definition = makeDuelGame({ id, order, name, tagline, emoji, color, rules, minPlayers?, maxPlayers?, Play, Summary?, BoardOptions?, defaultBoardOptions?, prepareBoard? })` (`@/features/duel/makeDuelGame`). Fournit `Options` = `DuelOptions` (mode, meilleur de 1/3, choix des duellistes) + `BoardOptions` éventuel (stocké sous `options.board`, envoyé sous `p_options.board`), `defaultOptions`, `prepareStart` (`prepareDuelOptions` : un duelliste décoché dans « Qui joue ? » est remplacé au hasard par le serveur), `roundLabel` (`duelHeadline`) et `Summary` par défaut (`DuelSummary`). `Play`/`Summary` en `lazy`.
+- `Play.tsx` : `export default (props: GamePlayProps) => <DuelPlay<Board, Move> {...props} Board={MonPlateau} myTurnHint="…" setupHint="…" sideColors={…optionnel} />`. `DuelPlay` assemble `DuelStage` (face-à-face, chibis, chrono du joueur au trait, points, manches gagnées), `DuelTransition`, `BetPanel`, `DuelResultBanner` (vainqueur, confettis, paris justes), `SessionBoard` (file du roi / tableau animé / points), les ticks (`useDuelTicker`) et les boutons de l'hôte (`next`, `stop`).
+- Plateau : `ComponentType<DuelBoardProps<Board, Move>>` — props `board, me, isMyTurn, onMove(move), onReady(), pending, duel, phase, spectator, get(id), colors {a, b}, secret`. Il est rendu en `setup`, `playing` et `result` (y mettre en valeur le coup gagnant). `colors.a` = `duel.a`, `colors.b` = `duel.b` (couleurs des persos, repli tomate/soleil si trop proches : `pickSideColors`).
+- Hooks/utilitaires : `useDuel(state, meId, players)` (rôle, `isMyTurn`, `betsOpen`, `left`, `betsLeft`, `get`…), `useDuelTicker`, logique pure `@/features/duel/logic` (`duelRole`, `betsOpen`, `sessionRanking`, `roundName`, `winsNeeded`, `pickSideColors`…, testable sous Node). `Summary.tsx` optionnel : `<DuelSummary {...props} extra={<StatsDuJeu />} />`.
+- À ne pas oublier : codes d'erreur propres au jeu dans `src/features/soiree/errors.ts`, éventuelle tenue dans `features/tenues.sql`.
