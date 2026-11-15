@@ -97,8 +97,7 @@ Score : +1 si mon vote = un majoritaire (égalité : tous comptent). Gagnant(s) 
 ### Jeu `undercover`
 Options : `{"pair": ["chat","chien"], "misterWhite": true}` — le serveur tire au sort lequel des deux mots est le mot civil, les rôles et l'ordre de parole. ≥ 3 joueurs ; 2 undercovers si ≥ 7 joueurs ; Mister White seulement si ≥ 5 joueurs (sinon ignoré, cf. `setup.mister_white`).
 
-Secret (`match_secrets.secret`) : `{"role":"civil|undercover|mrwhite","word":"chat"|null}`.
-> Règle classique : civils et undercovers ne savent pas qui ils sont. **Le front n'affiche que le mot** (et « Tu es Mister White » si `role = 'mrwhite'`). Le rôle est dans le secret car demandé au contrat ; il n'est lisible que par le joueur lui-même.
+Secret (`match_secrets.secret`) : `{"word":"chat"}` pour civils et undercovers (le rôle n'est volontairement PAS transmis : règle classique, personne ne sait s'il est undercover), `{"role":"mrwhite","word":null}` pour Mister White.
 
 State public (aucun mot avant la fin) :
 ```json

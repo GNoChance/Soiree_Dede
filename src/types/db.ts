@@ -289,10 +289,10 @@ export type UndercoverState = FinishedExtras & {
 };
 
 /** Contenu de match_secrets.secret pour Undercover (lisible par son seul propriétaire). */
-export type UndercoverSecret = {
-  role: UndercoverRole;
-  word: string | null; // null pour Mister White
-};
+// Civils et undercovers ne reçoivent que leur mot (ils ignorent leur rôle).
+export type UndercoverSecret =
+  | { word: string; role?: undefined }
+  | { role: 'mrwhite'; word: null };
 
 export type UndercoverOptions = {
   pair: [string, string];  // [motA, motB] ; le serveur tire au sort lequel est le mot civil
