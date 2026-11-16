@@ -22,6 +22,8 @@ export interface TenueDef {
   unit?: string
   /** true = jeu en duel : chaque duel remporté compte (condition 'duel_wins'). */
   duel?: boolean
+  /** Dossier des illustrations (public/chibis/<slug>/<art>/ + portraits/<art>.webp) ; absent = pas d'illustration. */
+  art?: string
   /** true = débloquée d'office */
   default?: boolean
 }
@@ -48,22 +50,22 @@ const duels = (id: TenueId, label: string, emoji: string, gameId: string, gameNa
 export const DEFAULT_TENUE: TenueId = 'default'
 
 export const TENUES: TenueDef[] = [
-  { id: 'default', label: 'Tenue de soirée', emoji: '🎉', gameId: null, threshold: 0, condition: 'Débloquée d\'office', default: true },
-  wins('star', 'Star', '🌟', 'qui-de-nous', 'Qui de nous ?'),
-  wins('espion', 'Espion', '🕵️', 'undercover', 'Undercover'),
-  wins('croupier', 'Croupier', '🃏', 'pas-de-bol', 'Pas de bol !'),
-  wins('prof', 'Prof', '🎓', 'cerveau-en-fete', 'Cerveau en fête'),
-  wins('ecolier', 'Écolier', '🎒', 'petit-bac', 'Petit bac'),
-  wins('artiste', 'Artiste', '🎨', 'dessine-devine', 'Dessine & devine'),
-  wins('loup', 'Loup', '🐺', 'loup-garou', 'Loup-garou'),
-  wins('artificier', 'Artificier', '💣', 'bombe-a-mots', 'Bombe à mots'),
-  wins('pirate', 'Pirate', '🏴‍☠️', 'menteur', 'Menteur'),
+  { id: 'default', label: 'Tenue de soirée', emoji: '🎉', gameId: null, threshold: 0, condition: 'Débloquée d\'office', default: true, art: 'default' },
+  { ...wins('star', 'Star', '🌟', 'qui-de-nous', 'Qui de nous ?'), art: 'cinema' },
+  { ...wins('espion', 'Espion', '🕵️', 'undercover', 'Undercover'), art: 'spy' },
+  { ...wins('croupier', 'Croupier', '🃏', 'pas-de-bol', 'Pas de bol !'), art: 'croupier' },
+  { ...wins('prof', 'Prof', '🎓', 'cerveau-en-fete', 'Cerveau en fête'), art: 'student' },
+  { ...wins('ecolier', 'Écolier', '🎒', 'petit-bac', 'Petit bac'), art: 'student' },
+  { ...wins('artiste', 'Artiste', '🎨', 'dessine-devine', 'Dessine & devine'), art: 'painter' },
+  { ...wins('loup', 'Loup', '🐺', 'loup-garou', 'Loup-garou'), art: 'werewolf' },
+  { ...wins('artificier', 'Artificier', '💣', 'bombe-a-mots', 'Bombe à mots'), art: 'pyro' },
+  { ...wins('pirate', 'Pirate', '🏴‍☠️', 'menteur', 'Menteur'), art: 'pirate' },
   wins('bowler', 'Bowler', '🎳', 'bowling', 'Bowling'),
-  wins('philosophe', 'Philosophe', '🤔', 'tu-preferes', 'Tu préfères ?'),
-  wins('vedette', 'Star de cinéma', '🎬', 'qui-suis-je', 'Qui suis-je ?'),
-  wins('archer', 'Archer', '🏹', 'le-plus-proche', 'Le plus proche'),
-  wins('comedien', 'Comédien', '🎭', 'action-ou-verite', 'Action ou vérité'),
-  wins('coach', 'Coach', '📣', 'devine-en-equipe', 'Devine en équipe'),
+  { ...wins('philosophe', 'Philosophe', '🤔', 'tu-preferes', 'Tu préfères ?'), art: 'philosopher' },
+  { ...wins('vedette', 'Star de cinéma', '🎬', 'qui-suis-je', 'Qui suis-je ?'), art: 'cinema' },
+  { ...wins('archer', 'Archer', '🏹', 'le-plus-proche', 'Le plus proche'), art: 'archer' },
+  { ...wins('comedien', 'Comédien', '🎭', 'action-ou-verite', 'Action ou vérité'), art: 'actor' },
+  { ...wins('coach', 'Coach', '📣', 'devine-en-equipe', 'Devine en équipe'), art: 'coach' },
   duels('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'),
   duels('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'),
   duels('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'),

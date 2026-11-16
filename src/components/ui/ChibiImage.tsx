@@ -24,8 +24,8 @@ export interface ChibiImageProps {
  * Tenue sans illustration (liste générée ou onError) -> repli automatique sur `default`.
  */
 export function ChibiImage({ slug, expression = 'joie', tenue, size = 96, className, alt, bare, thumb, tenueBadge }: ChibiImageProps) {
-  const art = useTenueArt(slug, tenue)
-  const src = chibiUrl(slug, expression, art.tenue, thumb ?? size <= 100)
+  const art = useTenueArt(slug, tenue, expression)
+  const src = chibiUrl(slug, art.expression, art.dir, thumb ?? size <= 100)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const char = getCharacter(slug)
   const failed = failedSrc === src

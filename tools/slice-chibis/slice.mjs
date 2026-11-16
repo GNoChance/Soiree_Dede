@@ -220,24 +220,5 @@ for (const { slug, tenue, file } of sheets) {
 }
 console.log(`\n${total} fichiers, ${(bytes / 1024).toFixed(0)} Ko, problemes: ${problems}`);
 
-// --- src/data/tenues-art.generated.ts : couples "slug/tenue" (hors default) dont les 12 images existent.
-// Le front s'en sert pour ne pas requeter d'images inexistantes (repli sur default + emoji).
-const art = [];
-for (const slug of SLUGS) {
-  const base = path.join(OUT, slug);
-  if (!fs.existsSync(base)) continue;
-  for (const tenue of fs.readdirSync(base).sort()) {
-    if (tenue === 'default' || !fs.statSync(path.join(base, tenue)).isDirectory()) continue;
-    const complete = (EXPR[slug] || STD).every((e) => fs.existsSync(path.join(base, tenue, e + '.webp')));
-    if (complete) art.push(slug + '/' + tenue);
-    else console.log('  !! tenue incomplete ignoree : ' + slug + '/' + tenue);
-  }
-}
-const GEN = path.join(ROOT, 'src/data/tenues-art.generated.ts');
-fs.writeFileSync(GEN, [
-  '// GENERE par tools/slice-chibis/slice.mjs - ne pas editer a la main.',
-  "// Couples \"slug/tenue\" dont les images existent dans public/chibis (hors 'default').",
-  'export const TENUE_ART: readonly string[] = [' + (art.length ? '\n' + art.map((a) => "  '" + a + "',").join('\n') + '\n' : '') + ']',
-  '',
-].join('\n'));
-console.log('tenues-art.generated.ts : ' + art.length + ' couple(s) slug/tenue');
+// --- src/data/tenues-art.generated.ts : régénéré depuis costumes-manifest.json.
+await import('./gen-art.mjs');

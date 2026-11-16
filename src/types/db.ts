@@ -12,7 +12,7 @@ export type GameId = 'qui-de-nous' | 'undercover';
 export type ExpressionId =
   | 'joie' | 'colere' | 'pleurs' | 'boude' | 'reflexion' | 'dodo' | 'bisou'
   | 'clin_oeil' | 'surprise' | 'amoureux' | 'cool' | 'gamer'
-  | 'pouces' | 'timide' | 'charmee';
+  | 'pouces' | 'timide' | 'charmee' | 'determine';
 
 export type ProfileSlug =
   | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini';

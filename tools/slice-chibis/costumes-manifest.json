@@ -1,0 +1,265 @@
+{
+  "carole": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "cecile": {
+    "costumes": [
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "cycy": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "dede": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "kevin": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "manon": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "marius": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "mika": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  },
+  "nini": {
+    "costumes": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "pirate",
+      "philosopher",
+      "actor",
+      "coach"
+    ],
+    "portraits": [
+      "spy",
+      "cinema",
+      "student",
+      "croupier",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
+    ]
+  }
+}

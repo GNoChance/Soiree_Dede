@@ -1,7 +1,7 @@
 export type ExpressionId =
   | 'joie' | 'colere' | 'pleurs' | 'boude' | 'reflexion' | 'dodo'
   | 'bisou' | 'clin_oeil' | 'surprise' | 'amoureux' | 'cool' | 'gamer'
-  | 'pouces' | 'timide' | 'charmee'
+  | 'pouces' | 'timide' | 'charmee' | 'determine'
 
 /** Compteur suivi pour la progression : colonne de player_stats, ou 'friends' (amis acceptés). */
 export type ProgressStat =
@@ -42,8 +42,33 @@ export const EXPRESSIONS: Record<ExpressionId, ExpressionDef> = {
   colere: { id: 'colere', label: 'Colère', emoji: '😡', condition: 'Perdre 3 parties d\'affilée', progress: { stat: 'max_loss_streak', target: 3, unit: "défaites d'affilée" } },
   pleurs: { id: 'pleurs', label: 'Pleurs', emoji: '😭', condition: 'Finir dernier 5 fois', progress: { stat: 'last_place_count', target: 5, unit: "fois dernier" } },
   dodo: { id: 'dodo', label: 'Dodo', emoji: '😴', condition: 'Terminer une soirée après 2h du matin (Europe/Paris)', progress: { stat: 'late_soirees_count', target: 1, unit: "soirée tardive" } },
+  determine: { id: 'determine', label: 'Déterminé', emoji: '😤', condition: 'Débloquer Cool ou Gamer (tenues uniquement)' },
   surprise: { id: 'surprise', label: 'Surprise', emoji: '😮', condition: 'Participer à 10 soirées', progress: { stat: 'soirees_count', target: 10, unit: "soirées" } },
 }
 
 export const getExpression = (id: string): ExpressionDef | undefined =>
   (EXPRESSIONS as Record<string, ExpressionDef>)[id]
+
+/** Palette commune des tenues (planches costumes, ordre des colonnes). */
+export const COSTUME_EXPRESSIONS: ExpressionId[] = [
+  'joie', 'colere', 'pleurs', 'boude', 'reflexion', 'dodo',
+  'bisou', 'clin_oeil', 'surprise', 'pouces', 'timide', 'determine',
+]
+
+/** Expressions voisines quand l'expression équipée n'existe pas dans une palette. */
+const FALLBACKS: Partial<Record<ExpressionId, ExpressionId[]>> = {
+  cool: ['determine', 'gamer'],
+  gamer: ['determine', 'cool'],
+  determine: ['cool', 'gamer'],
+  amoureux: ['bisou', 'charmee'],
+  charmee: ['bisou', 'amoureux'],
+  pouces: ['joie'],
+  timide: ['bisou'],
+}
+
+/** Expression réellement dessinée dans la palette (repli sur une voisine, sinon joie). */
+export function expressionIn(palette: readonly string[], expression: string): string {
+  if (palette.includes(expression)) return expression
+  for (const e of FALLBACKS[expression as ExpressionId] ?? []) if (palette.includes(e)) return e
+  return 'joie'
+}

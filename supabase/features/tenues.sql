@@ -228,5 +228,7 @@ revoke all on function public._after_finish_match(uuid, uuid[]) from public, ano
 revoke all on function public.equip_tenue(text) from public, anon;
 grant execute on function public.equip_tenue(text) to authenticated;
 
--- Rattrapage (idempotent) : victoires déjà acquises avant l'installation des tenues.
+-- Rattrapage (idempotent) : victoires déjà acquises avant l'installation des tenues,
+-- et expressions de la palette des tenues (pouces, timide, déterminé) pour tous les persos.
 select public.evaluate_tenues(id) from public.profiles;
+select public.evaluate_unlocks(id) from public.profiles;

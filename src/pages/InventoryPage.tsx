@@ -11,6 +11,8 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
+import { hasTenueArt, tenuePalette } from '@/components/ui/tenueArt'
+import { getTenue } from '@/data/tenues'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus'
@@ -53,7 +55,10 @@ export function InventoryPage() {
   if (!profile) return null
 
   const isUnlocked = (id: ExpressionId) => Boolean(EXPRESSIONS[id]?.default || unlocks[id])
-  const all = profile.expressions
+  // Palette de la tenue portée : la tenue débloque la planche, chaque expression garde son défi.
+  const tenue = profile.equipped_tenue ?? 'default'
+  const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
+  const tenueDef = tenue !== 'default' && hasTenueArt(profile.slug, tenue) ? getTenue(tenue) : undefined
   const unlockedCount = all.filter(isUnlocked).length
   const sel = selected ? EXPRESSIONS[selected] : null
 
@@ -122,6 +127,14 @@ export function InventoryPage() {
       {tab === 'tenues' ? (
         <TenuesTab />
       ) : (
+      <>
+      {tenueDef && (
+        <StaggerItem>
+          <p className="text-center text-sm font-bold text-muted">
+            Expressions en {tenueDef.emoji} {tenueDef.label} : chacune se débloque avec son défi.
+          </p>
+        </StaggerItem>
+      )}
       <StaggerList className="grid grid-cols-3 gap-3">
         {all.map((id) => {
           const def = EXPRESSIONS[id]
@@ -146,6 +159,7 @@ export function InventoryPage() {
                   <ChibiImage
                     slug={profile.slug}
                     expression={id}
+                    tenue={tenue}
                     size={84}
                     thumb
                     className={cn(!open && 'opacity-40 brightness-0')}
@@ -169,12 +183,14 @@ export function InventoryPage() {
           )
         })}
       </StaggerList>
+      </>
       )}
 
       <BottomSheet open={Boolean(sel)} onClose={() => setSelected(null)} title={sel && isUnlocked(sel.id) ? sel.label : 'Expression secrète'}>
         {sel && (
           <SheetBody
             slug={profile.slug}
+            tenue={tenue}
             def={sel}
             unlocked={isUnlocked(sel.id)}
             unlockedAt={unlocks[sel.id]}
@@ -191,9 +207,10 @@ export function InventoryPage() {
 }
 
 function SheetBody({
-  slug, def, unlocked, unlockedAt, equipped, progress, busy, onEquip, fmtDate,
+  slug, tenue, def, unlocked, unlockedAt, equipped, progress, busy, onEquip, fmtDate,
 }: {
   slug: string
+  tenue: string
   def: ExpressionDef
   unlocked: boolean
   unlockedAt?: string
@@ -214,6 +231,7 @@ function SheetBody({
         <ChibiImage
           slug={slug}
           expression={def.id}
+          tenue={tenue}
           size={220}
           thumb={false}
           className={cn(!unlocked && 'opacity-40 brightness-0')}

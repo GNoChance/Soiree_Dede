@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
-import { useTenueArt } from '@/components/ui/tenueArt'
+import { tenuePortraitUrl, useTenueArt } from '@/components/ui/tenueArt'
 import { usePlayersStore } from '@/features/soiree/players'
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus'
 import { refreshProfile } from '@/lib/auth'
@@ -117,6 +117,8 @@ function TenueCard({
 }) {
   const art = useTenueArt(slug, def.id)
   const hasArt = art.missingEmoji === null
+  const portrait = tenuePortraitUrl(slug, def.id)
+  const reveal = useFirstReveal(slug, def.id, unlocked && !def.default)
   const pct = progress.target ? (progress.value / progress.target) * 100 : 100
   return (
     <motion.div
@@ -132,18 +134,11 @@ function TenueCard({
         </span>
       )}
 
-      <div className="relative flex h-28 w-full items-center justify-center">
-        {hasArt ? (
-          <>
-            <ChibiImage
-              slug={slug}
-              expression={expression}
-              tenue={def.id}
-              size={112}
-              className={cn(!unlocked && 'opacity-40 brightness-0')}
-            />
-            {!unlocked && <Lock className="absolute size-9 text-white drop-shadow-[0_2px_0_var(--ink)]" strokeWidth={3} />}
-          </>
+      <div className="relative flex h-36 w-full items-center justify-center">
+        {portrait ? (
+          <PortraitCard src={portrait} label={def.label} unlocked={unlocked} reveal={reveal} />
+        ) : def.default ? (
+          <ChibiImage slug={slug} expression={expression} tenue={def.id} size={128} />
         ) : (
           <motion.div
             initial={{ scale: 0.6, rotate: -8 }}
@@ -173,7 +168,7 @@ function TenueCard({
 
       {unlocked ? (
         <p className={cn('text-xs font-bold', equipped ? 'text-[#1f1b2e]/70' : 'text-muted')}>
-          {def.default ? 'Débloquée d\'office' : 'Débloquée !'}
+          {def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
         </p>
       ) : (
         <div className="w-full">
@@ -206,3 +201,66 @@ function TenueCard({
     </motion.div>
   )
 }
+
+/* -------------------------------------------------------------------------- */
+/* Carte portrait : dos verrouillé, retournée (une fois) au déblocage          */
+/* -------------------------------------------------------------------------- */
+
+const SEEN_KEY = 'dede.tenues.revealed'
+
+function readSeen(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as unknown
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** true la première fois qu'une tenue débloquée est vue sur cet appareil (anime le retournement). */
+function useFirstReveal(slug: string, tenue: string, unlocked: boolean) {
+  const k = `${slug}/${tenue}`
+  const [reveal] = useState(() => unlocked && !readSeen().includes(k))
+  useEffect(() => {
+    if (!unlocked) return
+    const seen = readSeen()
+    if (seen.includes(k)) return
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify([...seen, k]))
+    } catch {
+      /* stockage indisponible : on rejouera l'animation, sans gravité */
+    }
+  }, [k, unlocked])
+  return reveal
+}
+
+function PortraitCard({ src, label, unlocked, reveal }: { src: string; label: string; unlocked: boolean; reveal: boolean }) {
+  const face = 'absolute inset-0 overflow-hidden rounded-card border-[3px] border-ink [backface-visibility:hidden]'
+  return (
+    <div className="relative h-full w-full max-w-[9.5rem] [perspective:700px]">
+      <motion.div
+        className="relative h-full w-full [transform-style:preserve-3d]"
+        initial={{ rotateY: reveal ? 180 : unlocked ? 0 : 180 }}
+        animate={{ rotateY: unlocked ? 0 : 180 }}
+        transition={{ type: 'spring', stiffness: 120, damping: 14, delay: reveal ? 0.35 : 0 }}
+        onAnimationComplete={() => {
+          if (reveal) {
+            fx.success()
+            burst({ x: 0.5, y: 0.4 }, 40)
+          }
+        }}
+      >
+        {/* Recto : le portrait */}
+        <div className={cn(face, 'bg-surface')}>
+          <img src={src} alt={label} loading="lazy" decoding="async" draggable={false} className="size-full object-contain" />
+        </div>
+        {/* Verso : silhouette verrouillée */}
+        <div className={cn(face, 'flex items-center justify-center bg-sunk [transform:rotateY(180deg)]')}>
+          <img src={src} alt="" aria-hidden loading="lazy" decoding="async" draggable={false} className="size-full object-contain opacity-30 brightness-0" />
+          <Lock className="absolute size-9 text-white drop-shadow-[0_2px_0_var(--ink)]" strokeWidth={3} />
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+

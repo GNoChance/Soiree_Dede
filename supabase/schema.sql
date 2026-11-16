@@ -310,8 +310,15 @@ $$;
 -- 3. DÉBLOCAGES
 -- =============================================================================
 
+-- Palette commune des tenues (planches costumes) : ouverte à tous les persos,
+-- en plus de leur planche de base (profiles.expressions).
+create or replace function public._costume_expressions()
+returns text[] language sql immutable
+as $$ select array['joie','colere','pleurs','boude','reflexion','dodo',
+                   'bisou','clin_oeil','surprise','pouces','timide','determine'] $$;
+
 -- Évalue toutes les conditions pour un profil ; renvoie les expressions
--- nouvellement débloquées. Seules les expressions de profiles.expressions comptent.
+-- nouvellement débloquées. Comptent : profiles.expressions + la palette des tenues.
 create or replace function public.evaluate_unlocks(p_profile_id uuid)
 returns text[] language plpgsql security definer
 set search_path = public, extensions
@@ -349,10 +356,15 @@ begin
   if v_s.last_place_count >= 5 then v_c := v_c || 'pleurs'::text; end if;
   if v_s.late_soirees_count >= 1 then v_c := v_c || 'dodo'::text; end if;
   if v_s.soirees_count >= 10 then v_c := v_c || 'surprise'::text; end if;
+  -- Déterminé (palette des tenues) : condition de Cool OU de Gamer, remplie maintenant ou déjà acquise.
+  if 'cool' = any(v_c) or 'gamer' = any(v_c) or exists (
+    select 1 from public.unlocks u where u.profile_id = p_profile_id and u.expression in ('cool', 'gamer')
+  ) then v_c := v_c || 'determine'::text; end if;
 
   with ins as (
     insert into public.unlocks(profile_id, expression)
-    select p_profile_id, e from unnest(v_c) e where e = any(v_p.expressions)
+    select p_profile_id, e from unnest(v_c) e
+     where e = any(v_p.expressions) or e = any(public._costume_expressions())
     on conflict do nothing
     returning expression
   )
@@ -502,7 +514,8 @@ as $$
 declare
   v_me uuid := public._require_profile();
 begin
-  if not exists (select 1 from public.profiles where id = v_me and p_expression = any(expressions)) then
+  if not exists (select 1 from public.profiles where id = v_me and p_expression = any(expressions))
+     and not (p_expression = any(public._costume_expressions())) then
     raise exception 'unknown_expression';
   end if;
   if p_expression <> 'joie' and not exists (
