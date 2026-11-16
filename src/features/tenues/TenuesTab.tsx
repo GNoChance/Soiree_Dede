@@ -137,7 +137,7 @@ function TenueCard({
       <div className="relative flex h-36 w-full items-center justify-center">
         {portrait ? (
           <PortraitCard src={portrait} label={def.label} unlocked={unlocked} reveal={reveal} />
-        ) : def.default ? (
+        ) : def.default || (hasArt && unlocked) ? (
           <ChibiImage slug={slug} expression={expression} tenue={def.id} size={128} />
         ) : (
           <motion.div

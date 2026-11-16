@@ -182,33 +182,18 @@
   },
   "marius": {
     "costumes": [
+      "admiral",
+      "tycoon",
+      "star",
       "spy",
-      "cinema",
-      "student",
       "croupier",
+      "teacher",
+      "student",
       "painter",
       "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach"
+      "pyro"
     ],
-    "portraits": [
-      "spy",
-      "cinema",
-      "student",
-      "croupier",
-      "painter",
-      "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach"
-    ]
+    "portraits": []
   },
   "mika": {
     "costumes": [
