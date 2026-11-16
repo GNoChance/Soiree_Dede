@@ -191,9 +191,19 @@
       "student",
       "painter",
       "werewolf",
-      "pyro"
+      "pyro",
+      "tictactoe",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach"
     ],
-    "portraits": []
+    "portraits": [
+      "bowler",
+      "strategist",
+      "tictactoe"
+    ]
   },
   "mika": {
     "costumes": [
