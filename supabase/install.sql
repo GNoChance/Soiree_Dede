@@ -9591,7 +9591,9 @@ $$;
 
 -- Cartes (textes originaux). kind : move_to {cell} | move_by {steps} |
 -- nearest {target: potes|service} | jail | jail_card | gain {amount} |
--- pay {amount} | collect_each {amount} | pay_each {amount} | repairs {house, hotel}.
+-- pay {amount} | collect_each {amount} | pay_each {amount} | repairs {house, hotel} |
+-- friend_gain / friend_pay {slug, amount} : le pote `slug` te donne / tu donnes au pote
+-- (la banque s'il ne joue pas ou si c'est lui qui pioche).
 -- Ids : hNN (paquet « hasard »), pNN (paquet « potes » = Entre potes) ; les paquets
 -- sont construits dynamiquement (préfixe h/p) : ajouter une carte = ajouter une ligne.
 -- h17+/p17+ : cartes « persos » (foot de Marius, muscu de Keke, travaux de Dédé…).
@@ -9618,6 +9620,11 @@ as $$
     "h16":{"deck":"hasard","kind":"gain","amount":100,"text":"Ton ticket de tombola de la fête du village est gagnant : touche 100 €."},
     "h17":{"deck":"hasard","kind":"move_to","cell":39,"text":"Marius a match au Stade Chaban-Delmas : file l’encourager ! Si tu passes par le Départ, touche 200 €."},
     "h18":{"deck":"hasard","kind":"pay","amount":30,"text":"Keke t’a traîné·e à la salle de muscu : paie 30 € de séance d’essai. Les courbatures sont offertes."},
+    "h20":{"deck":"hasard","kind":"friend_gain","slug":"cycy","amount":100,"text":"Cycy veut absolument aller aux Voûtes et t’invite ! Cycy te donne 100 €."},
+    "h21":{"deck":"hasard","kind":"move_to","cell":25,"text":"Manon a perdu sa Switch et ne peut plus jouer à Animal Crossing : file chez Karo, Manon & Marius pour aider à la chercher ! Si tu passes par le Départ, touche 200 €."},
+    "h22":{"deck":"hasard","kind":"friend_gain","slug":"mika","amount":50,"text":"Grâce à ton coup de main, Mika a fini son chantier en avance : Mika te donne 50 €."},
+    "h23":{"deck":"hasard","kind":"move_by","steps":-3,"text":"Promenade avec Cécile et Kaya : Kaya a flairé une piste et fait demi-tour. Recule de 3 cases."},
+    "h24":{"deck":"hasard","kind":"friend_pay","slug":"carole","amount":50,"text":"Journée plage avec Karo : c’est toi qui offres les glaces. Donne 50 € à Karo."},
     "h19":{"deck":"hasard","kind":"repairs","house":20,"hotel":80,"text":"Dédé débarque avec la caisse à outils pour « juste un petit coup de peinture » : paie 20 € par maison et 80 € par hôtel."},
     "p01":{"deck":"potes","kind":"move_to","cell":0,"text":"On t’a confié les clés de la salle des fêtes : retourne au Départ et touche 200 €."},
     "p02":{"deck":"potes","kind":"collect_each","amount":10,"text":"C’est ta crémaillère ! Chaque joueur te donne 10 € pour la déco."},
@@ -9637,6 +9644,11 @@ as $$
     "p16":{"deck":"potes","kind":"gain","amount":10,"text":"Ta tarte aux fraises remporte le concours de la kermesse : touche 10 €."},
     "p17":{"deck":"potes","kind":"pay","amount":50,"text":"Tu pars voir le match de foot de Marius : tu paies ton coup à boire à la buvette. Paie 50 €."},
     "p18":{"deck":"potes","kind":"move_by","steps":-3,"text":"Séance jambes avec Keke : tu ne sens plus tes cuisses. Recule de 3 cases."},
+    "p20":{"deck":"potes","kind":"friend_pay","slug":"cycy","amount":100,"text":"Cycy veut absolument aller aux Voûtes… et c’est toi qui invites ! Donne 100 € à Cycy."},
+    "p21":{"deck":"potes","kind":"friend_pay","slug":"mika","amount":50,"text":"Mika a besoin d’aide pour son chantier : donne 50 € à Mika pour le matériel."},
+    "p22":{"deck":"potes","kind":"move_by","steps":3,"text":"Promenade avec Cécile et Kaya : Kaya tire sur la laisse ! Avance de 3 cases."},
+    "p23":{"deck":"potes","kind":"friend_gain","slug":"carole","amount":50,"text":"Journée plage avec Karo ! Karo t’offre les glaces : Karo te donne 50 €."},
+    "p24":{"deck":"potes","kind":"pay","amount":30,"text":"Rendez-vous chez le toiletteur pour Irubie avec Nini : paie 30 €."},
     "p19":{"deck":"potes","kind":"gain","amount":50,"text":"Tu as donné un coup de main à Dédé sur le chantier tout le week-end : touche 50 € (et un apéro bien mérité)."}
   }'::jsonb;
 $$;
@@ -9934,7 +9946,7 @@ begin
   v := jsonb_set(v, array['decks', p_deck], deck);
 
   -- Montant calculé (pour l'affichage).
-  if k in ('gain', 'pay') then
+  if k in ('gain', 'pay', 'friend_gain', 'friend_pay') then
     amt := (c->>'amount')::integer;
   elsif k in ('collect_each', 'pay_each') then
     select count(*)::integer into cnt from jsonb_array_elements_text(s->'alive') as x where x <> p_p;
@@ -9961,7 +9973,11 @@ begin
     return public._tdp_land(jsonb_build_object('s', s, 'v', v), p_p, p_depth + 1, 'normal');
   elsif k = 'move_by' then
     target := (pos + (c->>'steps')::integer + 40) % 40;
-    s := jsonb_set(s, array['pos', p_p], to_jsonb(target));
+    if (c->>'steps')::integer > 0 then
+      s := public._tdp_advance(s, p_p, (c->>'steps')::integer); -- en avant : +200 si on passe le Départ
+    else
+      s := jsonb_set(s, array['pos', p_p], to_jsonb(target));
+    end if;
     s := public._tdp_log(s, jsonb_build_object('player', p_p, 'kind', 'move', 'from', pos, 'cell', target));
     return public._tdp_land(jsonb_build_object('s', s, 'v', v), p_p, p_depth + 1, 'normal');
   elsif k = 'nearest' then
@@ -9988,6 +10004,19 @@ begin
     for q in select jsonb_array_elements_text(s->'alive') loop
       if q <> p_p then s := public._tdp_transfer(s, p_p, q, (c->>'amount')::integer); end if;
     end loop;
+  elsif k in ('friend_gain', 'friend_pay') then
+    -- Carte perso : l'argent passe par le pote nommé s'il joue encore (et n'est pas
+    -- celui qui pioche) ; sinon c'est la banque qui paie / encaisse.
+    select a into q
+      from jsonb_array_elements_text(s->'alive') as a
+      join public.profiles pr on pr.id::text = a
+     where pr.slug = c->>'slug' and a <> p_p
+     limit 1;
+    if k = 'friend_gain' then
+      s := public._tdp_transfer(s, q, p_p, amt);
+    else
+      s := public._tdp_transfer(s, p_p, q, amt);
+    end if;
   end if;
   return jsonb_build_object('s', s, 'v', v);
 end $$;

@@ -153,7 +153,7 @@ function PlaceCard({ cell, s, ev, name, meId, onClose }: { cell: number; s: TdpS
   )
 }
 
-const CARD_AMOUNT_SIGN: Partial<Record<TdpCardDrawn['kind'], 1 | -1>> = { gain: 1, collect_each: 1, pay: -1, pay_each: -1, repairs: -1 }
+const CARD_AMOUNT_SIGN: Partial<Record<TdpCardDrawn['kind'], 1 | -1>> = { gain: 1, collect_each: 1, friend_gain: 1, pay: -1, pay_each: -1, repairs: -1, friend_pay: -1 }
 
 function DrawnCard({ card, ev, name, onClose }: { card: TdpCardDrawn; ev: TdpLastEvent; name: (id: string | null | undefined) => string; onClose: () => void }) {
   const potes = card.deck === 'potes'

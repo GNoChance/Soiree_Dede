@@ -52,12 +52,15 @@ export type TdpCardKind =
   | 'collect_each'
   | 'pay_each'
   | 'repairs'
+  /** Cartes persos : le pote nommé te donne / tu donnes au pote (la banque s'il ne joue pas). */
+  | 'friend_gain'
+  | 'friend_pay'
 export type TdpEndReason = 'last_standing' | 'rounds' | 'time' | 'safety'
 
 /** Carte tirée (texte original fourni par le serveur). */
 export interface TdpCardDrawn {
   deck: TdpDeck
-  /** 'h01'…'h16' (Hasard), 'p01'…'p16' (Entre potes). */
+  /** 'hNN' (Hasard), 'pNN' (Entre potes). */
   id: string
   text: string
   kind: TdpCardKind
