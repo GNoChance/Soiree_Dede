@@ -39,7 +39,14 @@
       "pirate",
       "philosopher",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "tycoon",
+      "star",
+      "spy",
+      "teacher"
     ],
     "portraits": [
       "spy",

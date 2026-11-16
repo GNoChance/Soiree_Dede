@@ -82,7 +82,7 @@ function segment(img, region, n, tol, white = true, openR = 3) {
   return { lab, FG, w, h, x0, y0, owner, ordered, big };
 }
 
-async function cutSticker(img, seg, k) {
+async function cutSticker(img, seg, k, closeR = 2) {
   const { rgb, W } = img;
   const { lab, FG, w, h, x0, y0, owner } = seg;
   let bx0 = w, by0 = h, bx1 = -1, by1 = -1;
@@ -95,7 +95,8 @@ async function cutSticker(img, seg, k) {
   // pixels d'origine proches de la composante ouverte (rend les détails fins sans les filets éloignés)
   const near = dilate(m, sw, sh, 4);
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) { const q = y * sw + x; m[q] = near[q] && FG[(y + cy0) * w + x + cx0] ? 1 : 0; }
-  m = fillHoles(close(m, sw, sh, 2), sw, sh);
+  // closeR > 2 : referme les contours troués (ex. casquette blanche collée au liseré blanc du sticker)
+  m = fillHoles(close(m, sw, sh, closeR), sw, sh);
   const F = fillHoles(dilate(m, sw, sh, RING), sw, sh);
   const rgba = Buffer.alloc(sw * sh * 4);
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
@@ -130,7 +131,7 @@ for (const s of CFG.sheets) {
   console.log(`${s.name} (${s.file}) zone ${region.join(',')}`);
   const seg = segment(img, region, s.n, s.tol ?? 24, s.white ?? true, s.open ?? 3);
   const tiles = [];
-  for (const k of seg.ordered) tiles.push(await cutSticker(img, seg, k));
+  for (const k of seg.ordered) tiles.push(await cutSticker(img, seg, k, s.closeR ?? 2));
   if (preview) {
     await contact(tiles, tiles.map((_, i) => String(i)), path.join(CHECK, `${s.name}-idx.png`));
     continue;
