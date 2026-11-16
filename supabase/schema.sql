@@ -95,7 +95,8 @@ create index if not exists matches_soiree_idx on public.matches(soiree_id, statu
 
 -- Multi-soirées + fin automatique (cf. section 6) :
 --  * soirees.end_reason : 'host' (end_soiree) | 'empty' (dernier joueur parti) |
---    'idle' (20 min sans jeu) | 'abandoned' (partie figée depuis 3 h).
+--    'idle' (20 min sans jeu) | 'abandoned' (partie figée depuis 3 h) |
+--    'admin' (supprimée par un admin, admin_end_soiree).
 --    Null pour les soirées terminées avant cette colonne.
 --  * matches.updated_at : dernière écriture de la ligne (trigger matches_touch),
 --    sert au filet « partie abandonnée depuis 3 h ». Rattrapage des lignes
@@ -107,7 +108,7 @@ create index if not exists matches_soiree_idx on public.matches(soiree_id, statu
 alter table public.soirees add column if not exists end_reason text;
 alter table public.soirees drop constraint if exists soirees_end_reason_chk;
 alter table public.soirees add constraint soirees_end_reason_chk
-  check (end_reason is null or end_reason in ('host', 'empty', 'idle', 'abandoned'));
+  check (end_reason is null or end_reason in ('host', 'empty', 'idle', 'abandoned', 'admin'));
 alter table public.matches add column if not exists updated_at timestamptz;
 update public.matches
    set updated_at = case when status <> 'finished' then now() else coalesce(finished_at, created_at) end
@@ -199,7 +200,7 @@ set search_path = public, extensions
 as $$ select profile_id from public.device_sessions where auth_uid = auth.uid() $$;
 
 create or replace function public._require_profile()
-returns uuid language plpgsql stable security definer
+returns uuid language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare v_id uuid;
@@ -914,6 +915,61 @@ begin
   if v_s.host_id <> v_me then raise exception 'not_host'; end if;
   if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
   return jsonb_build_object('new_unlocks', public._close_soiree(p_soiree_id, 'host', true, now()));
+end $$;
+
+-- ---- Admin : soirées en cours ------------------------------------------------
+-- Pour débloquer une soirée buguée : l'admin voit toutes les soirées non terminées
+-- et peut les clore de force (partie en cours annulée, sans XP ; parties déjà
+-- terminées conservées dans l'historique ; tous les joueurs sortent de la soirée).
+
+create or replace function public._require_admin()
+returns uuid language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+begin
+  if not exists (select 1 from public.profiles where id = v_me and is_admin) then
+    raise exception 'forbidden';
+  end if;
+  return v_me;
+end $$;
+
+create or replace function public.admin_list_soirees()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  perform public._require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'id', s.id, 'code', s.code, 'status', s.status, 'created_at', s.created_at,
+             'host_id', s.host_id,
+             'player_ids', coalesce((select jsonb_agg(sp.profile_id order by sp.joined_at)
+                                       from public.soiree_players sp where sp.soiree_id = s.id), '[]'::jsonb),
+             'match', (select jsonb_build_object('id', m.id, 'game_id', m.game_id, 'status', m.status,
+                                                 'created_at', m.created_at, 'updated_at', m.updated_at)
+                         from public.matches m
+                        where m.soiree_id = s.id and m.status <> 'finished'
+                        order by m.created_at desc limit 1))
+           order by s.created_at desc)
+      from public.soirees s
+     where s.status <> 'ended'), '[]'::jsonb);
+end $$;
+
+create or replace function public.admin_end_soiree(p_soiree_id uuid)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s public.soirees%rowtype;
+begin
+  perform public._require_admin();
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  -- Fin « non naturelle » : pas de dodo.
+  return jsonb_build_object('new_unlocks', public._close_soiree(p_soiree_id, 'admin', false, now()));
 end $$;
 
 -- =============================================================================
@@ -1767,6 +1823,9 @@ revoke all on function public.is_soiree_member(uuid) from public, anon;
 revoke all on function public.login_profile(text, text) from public, anon;
 revoke all on function public.logout_device() from public, anon;
 revoke all on function public.admin_reset_pin(text) from public, anon;
+revoke all on function public._require_admin() from public, anon, authenticated;
+revoke all on function public.admin_list_soirees() from public, anon;
+revoke all on function public.admin_end_soiree(uuid) from public, anon;
 revoke all on function public.update_nickname(text) from public, anon;
 revoke all on function public.equip_expression(text) from public, anon;
 revoke all on function public.send_friend_request(uuid) from public, anon;
@@ -1788,6 +1847,8 @@ grant execute on function
   public.login_profile(text, text),
   public.logout_device(),
   public.admin_reset_pin(text),
+  public.admin_list_soirees(),
+  public.admin_end_soiree(uuid),
   public.update_nickname(text),
   public.equip_expression(text),
   public.send_friend_request(uuid),

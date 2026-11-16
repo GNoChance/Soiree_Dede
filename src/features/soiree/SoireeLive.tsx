@@ -323,7 +323,7 @@ export function SoireeEndedOverlay({ reason, host, me, onDone }: { reason: Soire
     return () => window.clearTimeout(t)
   }, [reason])
   const { title, text } = soireeEndCopy(reason, host)
-  const expression = mood(me, reason === 'idle' ? 'sleepy' : reason === 'abandoned' ? 'sad' : 'happy')
+  const expression = mood(me, reason === 'idle' ? 'sleepy' : reason === 'abandoned' || reason === 'admin' ? 'sad' : 'happy')
   return createPortal(
     <motion.div
       className="fixed inset-0 z-[65] flex items-center justify-center bg-[#07050f]/60 p-5 backdrop-blur-[2px]"

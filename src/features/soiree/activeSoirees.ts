@@ -201,6 +201,8 @@ export function soireeEndCopy(reason: SoireeEndReason | null | undefined, host: 
       return { title: 'Soirée terminée faute de jeu', text: 'Personne n’a lancé de jeu pendant 20 minutes. À la prochaine !' }
     case 'abandoned':
       return { title: 'Soirée terminée', text: 'La partie en cours était abandonnée depuis plus de 3 heures.' }
+    case 'admin':
+      return { title: 'Soirée supprimée', text: 'L’admin a supprimé cette soirée (la partie en cours est annulée). Tu peux en relancer une !' }
     case 'host':
       return { title: 'Soirée terminée', text: `${host === 'toi' ? 'Tu as' : `${host} a`} terminé la soirée. Merci d’être venu·e ! 🎉` }
     default:
@@ -231,7 +233,9 @@ function onSoireeEnded(row: SoireeRow) {
       ? `La soirée ${where} est terminée faute de jeu 😴`
       : row.end_reason === 'abandoned'
         ? `La soirée ${where} est terminée : la partie était abandonnée.`
-        : row.end_reason === 'host'
+        : row.end_reason === 'admin'
+          ? `La soirée ${where} a été supprimée par l’admin.`
+          : row.end_reason === 'host'
           ? `${host} a terminé la soirée. Merci d’être venu·e ! 🎉`
           : `La soirée ${where} est terminée.`
   toast(msg, { duration: 5000 })

@@ -71,7 +71,7 @@ export type SoireeStatus = 'lobby' | 'active' | 'ended';
  * Raison de fin d'une soirée : 'host' (end_soiree), 'empty' (le dernier joueur est
  * parti), 'idle' (fin auto : 20 min sans jeu), 'abandoned' (filet : partie figée 3 h).
  */
-export type SoireeEndReason = 'host' | 'empty' | 'idle' | 'abandoned';
+export type SoireeEndReason = 'host' | 'empty' | 'idle' | 'abandoned' | 'admin';
 
 export type SoireeRow = {
   id: UUID;
@@ -455,6 +455,8 @@ export type Database = {
       current_profile_id: { Args: Record<string, never>; Returns: UUID | null };
       logout_device: { Args: Record<string, never>; Returns: undefined };
       admin_reset_pin: { Args: { p_slug: string }; Returns: undefined };
+      admin_list_soirees: { Args: Record<string, never>; Returns: unknown };
+      admin_end_soiree: { Args: { p_soiree_id: UUID }; Returns: EndSoireeResult };
       update_nickname: { Args: { p_nickname: string }; Returns: ProfileJson };
       equip_expression: { Args: { p_expression: ExpressionId }; Returns: ProfileJson };
       equip_tenue: { Args: { p_tenue: TenueId }; Returns: ProfileJson };

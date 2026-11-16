@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
 import { CHARACTERS } from '@/data/characters'
+import { AdminSoirees } from '@/features/admin/AdminSoirees'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -146,6 +147,11 @@ export function SettingsPage() {
               ))}
             </div>
           </Card>
+        </StaggerItem>
+      )}
+      {profile?.is_admin && (
+        <StaggerItem>
+          <AdminSoirees />
         </StaggerItem>
       )}
       <StaggerItem>

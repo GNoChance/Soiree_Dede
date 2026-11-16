@@ -37,6 +37,8 @@ Types TypeScript : `src/types/db.ts` (`createClient<Database>(...)`).
 | `current_profile_id()` | `uuid \| null` |
 | `logout_device()` | void |
 | `admin_reset_pin(p_slug)` | void (admin seulement, déconnecte aussi les autres appareils du profil) |
+| `admin_list_soirees()` | jsonb : soirées non terminées (code, hôte, joueurs, partie en cours) — admin seulement |
+| `admin_end_soiree(p_soiree_id)` | {new_unlocks} : clôt de force (end_reason 'admin', partie en cours annulée sans XP) — admin seulement |
 | `update_nickname(p_nickname)` | profil (1–20 caractères, espaces normalisés) |
 | `equip_expression(p_expression)` | profil (`unknown_expression` / `expression_locked`) |
 | `equip_tenue(p_tenue)` | profil (`unknown_tenue` / `tenue_locked`) — cf. section Tenues |
