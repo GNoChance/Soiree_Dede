@@ -226,8 +226,8 @@ function isNewer(cur: MatchRow | null, next: Pick<MatchRow, 'status' | 'state'>)
   const nextFinished = next.status === 'finished'
   if (curFinished && !nextFinished) return false
   if (nextFinished && !curFinished) return true
-  const a = (cur.state as { seq?: number }).seq
-  const b = (next.state as { seq?: number }).seq
+  const a = (cur.state as { seq?: number } | null | undefined)?.seq
+  const b = (next.state as { seq?: number } | null | undefined)?.seq
   if (typeof a !== 'number' || typeof b !== 'number') return true
   return b >= a
 }
@@ -264,7 +264,13 @@ export function useMatch(matchId: string | undefined) {
     const ch = supabase
       .channel(channelName(`match:${matchId}`))
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (p) => {
-        accept(p.new as MatchRow)
+        const row = p.new as Partial<MatchRow> | null
+        // State volumineux (ex. Tour des Potes) : Realtime l'omet du message -> on relit la ligne.
+        if (!row || !row.state || typeof row.state !== 'object' || !row.status) {
+          void refetch()
+          return
+        }
+        accept(row as MatchRow)
       })
       // Secrets mis à jour en cours de partie (mains de cartes, mot du dessinateur…).
       // Realtime applique la RLS : on ne reçoit que SA propre ligne.

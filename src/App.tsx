@@ -8,10 +8,12 @@ import { InventoryPage } from '@/pages/InventoryPage'
 import { LeaderboardPage } from '@/pages/LeaderboardPage'
 import { SoireePage } from '@/pages/SoireePage'
 import { MatchPage } from '@/pages/MatchPage'
+import { RouteError } from '@/pages/RouteError'
 
 const router = createBrowserRouter([
   {
     element: <Root />,
+    errorElement: <RouteError />,
     children: [
       { path: '/onboarding', element: <OnboardingPage /> },
       {
