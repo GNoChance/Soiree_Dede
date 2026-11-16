@@ -60,15 +60,15 @@ export const TENUES: TenueDef[] = [
   { ...wins('loup', 'Loup', '🐺', 'loup-garou', 'Loup-garou'), art: 'werewolf' },
   { ...wins('artificier', 'Artificier', '💣', 'bombe-a-mots', 'Bombe à mots'), art: 'pyro' },
   { ...wins('pirate', 'Pirate', '🏴‍☠️', 'menteur', 'Menteur'), art: 'pirate' },
-  wins('bowler', 'Bowler', '🎳', 'bowling', 'Bowling'),
+  { ...wins('bowler', 'Bowler', '🎳', 'bowling', 'Bowling'), art: 'bowler' },
   { ...wins('philosophe', 'Philosophe', '🤔', 'tu-preferes', 'Tu préfères ?'), art: 'philosopher' },
   { ...wins('vedette', 'Star de cinéma', '🎬', 'qui-suis-je', 'Qui suis-je ?'), art: 'cinema' },
   { ...wins('archer', 'Archer', '🏹', 'le-plus-proche', 'Le plus proche'), art: 'archer' },
   { ...wins('comedien', 'Comédien', '🎭', 'action-ou-verite', 'Action ou vérité'), art: 'actor' },
   { ...wins('coach', 'Coach', '📣', 'devine-en-equipe', 'Devine en équipe'), art: 'coach' },
-  duels('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'),
-  duels('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'),
-  duels('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'),
+  { ...duels('stratege', 'Stratège', '🧠', 'quatre-a-la-suite', '4 à la suite'), art: 'strategist' },
+  { ...duels('ninja', 'Ninja', '🥷', 'morpion', 'Morpion'), art: 'tictactoe' },
+  { ...duels('amiral', 'Amiral', '⚓', 'bataille-navale', 'Bataille navale'), art: 'admiral' },
 ]
 
 export const TENUES_BY_ID = Object.fromEntries(TENUES.map((t) => [t.id, t])) as Record<TenueId, TenueDef>

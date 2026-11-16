@@ -112,7 +112,12 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "admiral",
+      "tictactoe",
+      "tycoon"
     ]
   },
   "kevin": {
