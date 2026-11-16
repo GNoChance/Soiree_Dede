@@ -2,6 +2,7 @@
 import { Dices, Home, Ticket } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
+import { playRattle, useShake } from '../menteur/shake'
 import { BOARD, JAIL_FINE } from './board'
 import { eur } from './format'
 import { PHASE_LABELS, cellsOf, tdpActions } from './rules'
@@ -21,9 +22,15 @@ interface Props {
 }
 
 export default function Actions({ s, meId, isHost, pending, left, name, send, onRoll, onAssets }: Props) {
+  const myTurn = s.turn === meId
+  // Lancer les dés : bouton OU secousse du téléphone (même détection que le Menteur).
+  const canRoll = myTurn && (s.phase === 'roll' || s.phase === 'jail') && !pending && !s.away.includes(meId)
+  const shake = useShake(canRoll, () => {
+    playRattle(0.5)
+    onRoll()
+  })
   const active = ['roll', 'jail', 'buy', 'manage', 'debt'].includes(s.phase)
   if (!active) return null
-  const myTurn = s.turn === meId
   const cash = s.cash[meId] ?? 0
   const iAmAway = s.away.includes(meId)
   const hasAssets = cellsOf(s, meId).length > 0
@@ -75,6 +82,8 @@ export default function Actions({ s, meId, isHost, pending, left, name, send, on
             {s.doubles > 0 ? 'Double ! Relancer' : 'Lancer les dés'}
           </Button>
         )}
+
+        {canRoll && <ShakeHint status={shake.status} onEnable={() => void shake.enable()} />}
 
         {myTurn && s.phase === 'jail' && (
           <div className="flex flex-col gap-2">
@@ -134,4 +143,17 @@ export default function Actions({ s, meId, isHost, pending, left, name, send, on
       </div>
     </div>
   )
+}
+
+/** « …ou secoue ton téléphone » ; sur iPhone, un toucher est nécessaire pour autoriser les capteurs. */
+function ShakeHint({ status, onEnable }: { status: 'unsupported' | 'needs-permission' | 'ready' | 'denied'; onEnable: () => void }) {
+  if (status === 'ready') return <p className="text-center text-xs font-bold text-muted">📳 … ou secoue ton téléphone !</p>
+  if (status === 'needs-permission') {
+    return (
+      <button type="button" onClick={onEnable} className="text-center text-xs font-bold text-muted underline">
+        📳 Activer « secouer pour lancer »
+      </button>
+    )
+  }
+  return null
 }

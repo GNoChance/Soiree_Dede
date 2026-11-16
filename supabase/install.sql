@@ -11031,7 +11031,8 @@ update public.profiles set is_admin = (slug = 'kevin') where is_admin is distinc
 
 -- Expression équipée invalide (ex. expressions modifiées) -> retour à 'joie'
 update public.profiles set equipped_expression = 'joie'
- where not (equipped_expression = any(expressions));
+ where not (equipped_expression = any(expressions))
+   and not (equipped_expression = any(public._costume_expressions()));  -- palette des tenues (pouces, timide, déterminé…)
 
 -- Lignes de stats + déblocage par défaut
 insert into public.player_stats (profile_id)
