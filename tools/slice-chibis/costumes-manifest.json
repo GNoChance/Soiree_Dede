@@ -68,7 +68,13 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star"
     ],
     "portraits": [
       "spy",
