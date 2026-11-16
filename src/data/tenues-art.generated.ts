@@ -39,6 +39,8 @@ export const TENUE_ART: readonly string[] = [
   'cycy/admiral',
   'cycy/tycoon',
   'cycy/star',
+  'cycy/teacher',
+  'cycy/student',
   'dede/spy',
   'dede/cinema',
   'dede/student',

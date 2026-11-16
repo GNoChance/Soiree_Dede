@@ -5,6 +5,6 @@ const F = (name, dir = name) => ({ name, file: `cycy-${name}.png`, n: 12, dir, m
 export default {
   slug: 'cycy',
   src: 'assets-source/costumes/cycy-v2',
-  sheets: ['bowler', 'strategist', 'tictactoe', 'admiral', 'tycoon', 'star', 'cinema', 'spy', 'croupier', 'painter', 'werewolf', 'pyro'].map((n) => F(n)),
+  sheets: ['bowler', 'strategist', 'tictactoe', 'admiral', 'tycoon', 'star', 'cinema', 'spy', 'croupier', 'painter', 'werewolf', 'pyro'].map((n) => F(n)).concat([F('gown', 'actor'), F('sweater', 'teacher'), F('beanie', 'student')]),
   portraits: [],
 };
