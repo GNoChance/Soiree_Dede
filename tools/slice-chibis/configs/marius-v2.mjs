@@ -26,6 +26,9 @@ export default {
     F('archer'),
     F('actor'),
     F('coach'),
+    F('bowler'),
+    F('strategist'),
+    F('cinema'),
   ],
   portraits: [
     { file: 'marius-bowler-portrait.png', dir: 'bowler' },
