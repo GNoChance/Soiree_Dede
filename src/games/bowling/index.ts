@@ -13,7 +13,7 @@ export const definition: GameDefinition = {
   tagline: 'Chacun sa piste, tous en même temps : glisse, vise, STRIKE !',
   emoji: '🎳',
   color: '#4CC9F0',
-  minPlayers: 1,
+  minPlayers: 2,
   maxPlayers: 9,
   rules:
     'Chacun joue sa partie sur son téléphone, en même temps. Glisse vers le haut pour lancer (plus vite = plus fort, une courbe = de l’effet), glisse la boule sur le côté pour te placer. Règles officielles : strike, spare, bonus à la dernière frame.',

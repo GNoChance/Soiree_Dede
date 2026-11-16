@@ -256,7 +256,8 @@ declare
   v_empty  jsonb;
   v_state  jsonb;
 begin
-  if coalesce(cardinality(p_players), 0) < 1 then raise exception 'not_enough_players'; end if;
+  -- 2 joueurs minimum : en solo, la victoire serait automatique (tenue Bowler « farmable »).
+  if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
 
   v_frames := case when coalesce(p_options->>'frames', '') ~ '^\d{1,2}$'

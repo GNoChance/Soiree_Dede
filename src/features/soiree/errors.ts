@@ -113,6 +113,17 @@ const MESSAGES: Record<string, string> = {
   invalid_fleet: 'Flotte invalide : place tes 5 bateaux dans la grille !',
   fleet_overlap: 'Deux bateaux se chevauchent !',
   already_shot: 'Tu as déjà tiré sur cette case !',
+  // Le Tour des Potes
+  not_enough_cash: 'Pas assez d’argent !',
+  invalid_cell: 'Case invalide.',
+  not_buildable: 'On ne construit pas sur cette case.',
+  not_owner: 'Ce lieu ne t’appartient pas.',
+  group_incomplete: 'Il te faut tout le quartier pour construire !',
+  build_uneven: 'Construis d’abord sur les autres lieux du quartier (pas plus d’une maison d’écart).',
+  max_buildings: 'Il y a déjà un hôtel ici !',
+  no_buildings: 'Aucun bâtiment à vendre ici.',
+  sell_uneven: 'Vends d’abord sur les lieux les plus construits du quartier.',
+  no_jail_card: 'Tu n’as pas de carte « Sortie du violon ».',
 }
 
 function raw(err: unknown): string {
