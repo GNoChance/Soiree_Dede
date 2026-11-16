@@ -10,9 +10,10 @@ import { playerOrPlaceholder } from '@/features/soiree/players'
 import type { PlayerInfo } from '../types'
 import { CARD_AMOUNT_SIGN, cardKeyOf, eur, nowLine } from './format'
 import { ownerOf, pendingCard } from './rules'
+import { PotToast } from './TaxPot'
 import type { SceneReveal, SceneView, TdpScene } from './scene3d/TdpScene'
 import type { TdpState } from './types'
-import { DICE_MS, DRAW_ANIM_MS } from './usePlayback'
+import { DICE_MS, DRAW_ANIM_MS, TAX_FLY_MS, type TaxFx } from './usePlayback'
 
 interface Props {
   s: TdpState
@@ -26,6 +27,11 @@ interface Props {
   drawPending: boolean
   /** Une carte est affichée en grand (overlay) : la scène range la carte 3D. */
   cardShowing: boolean
+  /** Pot des taxes affiché au centre, et taxe en cours de paiement (billets en vol). */
+  taxPot: number
+  taxFx: TaxFx | null
+  /** Cagnotte ramassée sur « Pause apéro » : billets du centre vers le pion. */
+  potFx: TaxFx | null
   onTwoD: () => void
   onUnsupported: () => void
 }
@@ -39,7 +45,7 @@ export function webglAvailable(): boolean {
   }
 }
 
-export default function Board3D({ s, players, meId, name, shownPos, selected, onCell, onDraw, drawPending, cardShowing, onTwoD, onUnsupported }: Props) {
+export default function Board3D({ s, players, meId, name, shownPos, selected, onCell, onDraw, drawPending, cardShowing, taxPot, taxFx, potFx, onTwoD, onUnsupported }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<TdpScene | null>(null)
   const [ready, setReady] = useState(false)
@@ -108,8 +114,11 @@ export default function Board3D({ s, players, meId, name, shownPos, selected, on
       canDraw,
       reveal,
       cardShowing,
+      taxPot,
+      taxFx,
+      potFx,
     }),
-    [scenePlayers, shownPos, s.turn, s.jail, s.bankrupt, ownerColor, s.buildings, selected, s.dice, s.last_event, moving, draw?.deck, canDraw, reveal, cardShowing],
+    [scenePlayers, shownPos, s.turn, s.jail, s.bankrupt, ownerColor, s.buildings, selected, s.dice, s.last_event, moving, draw?.deck, canDraw, reveal, cardShowing, taxPot, taxFx, potFx],
   )
   const viewRef = useRef(view)
   useEffect(() => {
@@ -131,6 +140,7 @@ export default function Board3D({ s, players, meId, name, shownPos, selected, on
         return createScene(host.current, {
           rollMs: DICE_MS,
           drawMs: DRAW_ANIM_MS,
+          taxMs: TAX_FLY_MS,
           onCell: (i) => cb.current.onCell(i),
           onDeck: () => cb.current.onDraw(),
           onLost: () => cb.current.onUnsupported(),
@@ -172,6 +182,7 @@ export default function Board3D({ s, players, meId, name, shownPos, selected, on
           <p className="font-display text-sm font-extrabold text-muted">Plateau en préparation…</p>
         </div>
       )}
+      <PotToast fx={potFx} name={name} meId={meId} />
       {ready && (
         <>
           <div className="pointer-events-none absolute inset-x-2 top-2 flex items-start justify-between gap-2">

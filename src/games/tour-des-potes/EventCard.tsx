@@ -22,7 +22,8 @@ const SHOW_MS = 7000
 function itemsOf(ev: TdpLastEvent): Item[] {
   const items: Item[] = []
   if (ev.card) items.push({ kind: 'card', card: ev.card })
-  if (isPlace(BOARD[ev.cell])) items.push({ kind: 'place', cell: ev.cell })
+  // Loyer payé : la mini-scène « chez le propriétaire » (RentScene) remplace la fiche du lieu.
+  if (isPlace(BOARD[ev.cell]) && !ev.rent) items.push({ kind: 'place', cell: ev.cell })
   return items
 }
 
@@ -35,10 +36,13 @@ interface EventCardProps {
   cardDelay?: number
   /** Prévient quand une carte est affichée à l'écran (la caméra / les pions attendent). */
   onActive?: (active: boolean) => void
+  /** La mini-scène de loyer est à l'écran : on referme la fiche en cours (pas deux overlays empilés). */
+  suppress?: boolean
 }
 
-export default function EventCard({ s, initialNo, name, meId, cardDelay = 500, onActive }: EventCardProps) {
+export default function EventCard({ s, initialNo, name, meId, cardDelay = 500, onActive, suppress = false }: EventCardProps) {
   const [show, setShow] = useState<{ no: number; k: string; idx: number; items: Item[] } | null>(null)
+  if (suppress && show) setShow(null)
   const initialCard = useState(() => cardKeyOf(s))[0]
   const ev = s.last_event
   const no = ev?.no ?? 0

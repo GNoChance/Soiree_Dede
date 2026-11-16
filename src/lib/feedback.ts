@@ -78,7 +78,7 @@ function noiseSweep(c: AudioContext, dur: number, from: number, to: number, gain
   src.start(t0)
 }
 
-export type SoundName = 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare'
+export type SoundName = 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare' | 'cash'
 
 const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
   pop: (c) => tone(c, { freq: 620, slideTo: 220, dur: 0.1, gain: 0.22 }),
@@ -92,6 +92,12 @@ const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
     tone(c, { freq: 196, start: 0.12, slideTo: 70, dur: 0.38, type: 'sawtooth', gain: 0.1 })
   },
   whoosh: (c) => noiseSweep(c, 0.3, 300, 2400),
+  // billets / caisse : froissement bref puis petit « ding »
+  cash: (c) => {
+    noiseSweep(c, 0.12, 2200, 5200, 0.07)
+    tone(c, { freq: 1318, start: 0.08, dur: 0.07, type: 'square', gain: 0.05 })
+    tone(c, { freq: 1760, start: 0.15, dur: 0.2, type: 'triangle', gain: 0.13 })
+  },
   fanfare: (c) => {
     const notes = [523.25, 659.25, 783.99, 1046.5]
     notes.forEach((f, i) => tone(c, { freq: f, start: i * 0.11, dur: 0.2, type: 'square', gain: 0.1 }))
@@ -130,5 +136,6 @@ export const fx = {
   success: () => { playSound('success'); vibrate([15, 40, 25]) },
   fail: () => { playSound('fail'); vibrate([60, 40, 90]) },
   whoosh: () => { playSound('whoosh'); vibrate(8) },
+  cash: () => { playSound('cash'); vibrate([8, 30, 12]) },
   fanfare: () => { playSound('fanfare'); vibrate([30, 40, 30, 40, 120]) },
 }

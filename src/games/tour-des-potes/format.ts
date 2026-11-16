@@ -70,6 +70,8 @@ export function logLine(e: TdpEvent, name: (id: string | null | undefined) => st
       return { icon: '💸', text: `${who} paie ${eur(e.amount ?? 0)} de loyer à ${name(e.to)} (${cell})` }
     case 'tax':
       return { icon: '🧾', text: `${who} paie ${eur(e.amount ?? 0)} : ${cell}` }
+    case 'pot':
+      return { icon: '🍹', text: `${who} ramasse la cagnotte de l’apéro : +${eur(e.amount ?? 0)}` }
     case 'card':
       return { icon: e.deck === 'potes' ? '🍻' : '❓', text: `${who} tire « ${e.deck ? DECK_NAMES[e.deck] : 'carte'} » : ${e.text ?? ''}` }
     case 'jail':

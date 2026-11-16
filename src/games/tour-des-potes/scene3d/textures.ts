@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three'
 import { BOARD, DECK_NAMES, type BoardCell } from '../board'
+import { BILL_STYLE, type Denom } from '../money'
 import { BOARD_SIZE, cellBox, sideOf } from './layout'
 
 export const ATLAS = 2048
@@ -394,4 +395,64 @@ export function makeEmojiTex(emoji: string): THREE.CanvasTexture {
   ctx.font = `72px ${EMOJI_FONT}`
   ctx.fillText(emoji, 48, 52)
   return tex(c)
+}
+
+/** Face d'un billet maison (même dessin que le billet 2D : bande claire, pastille, valeur). */
+export function makeBillTex(value: Denom): THREE.CanvasTexture {
+  const W = 192
+  const H = 108
+  const [c, ctx] = canvas(W, H)
+  const s = BILL_STYLE[value]
+  ctx.fillStyle = INK
+  ctx.fillRect(0, 0, W, H)
+  roundRect(ctx, 8, 8, W - 16, H - 16, 14)
+  ctx.fillStyle = s.bg
+  ctx.fill()
+  ctx.save()
+  ctx.clip()
+  ctx.fillStyle = s.light
+  ctx.globalAlpha = 0.75
+  ctx.translate(W * 0.72, H / 2)
+  ctx.rotate(0.3)
+  ctx.fillRect(-24, -H, 48, H * 2)
+  ctx.restore()
+  ctx.fillStyle = s.light
+  ctx.beginPath()
+  ctx.arc(W * 0.2, H / 2, 17, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `800 ${value >= 100 ? 58 : 66}px ${FONT}`
+  ctx.fillStyle = s.fg
+  ctx.fillText(String(value), W / 2 + 4, H / 2 + 5)
+  return tex(c)
+}
+
+/** Étiquette « Cagnotte : X € » posée derrière le tas (redessinée quand le montant change). */
+export function makePotLabel(): { texture: THREE.CanvasTexture; draw: (text: string) => void } {
+  const W = 512
+  const H = 112
+  const [c, ctx] = canvas(W, H)
+  const texture = tex(c, 4)
+  const draw = (text: string) => {
+    ctx.clearRect(0, 0, W, H)
+    ctx.fillStyle = INK
+    roundRect(ctx, 0, 0, W, H, 44)
+    ctx.fill()
+    ctx.fillStyle = '#fff8e7'
+    roundRect(ctx, 9, 9, W - 18, H - 18, 36)
+    ctx.fill()
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = INK
+    let size = 62
+    do {
+      ctx.font = `800 ${size}px ${FONT}`
+      size -= 3
+    } while (ctx.measureText(text).width > W - 56 && size > 28)
+    ctx.fillText(text, W / 2, H / 2 + 5)
+    texture.needsUpdate = true
+  }
+  draw('')
+  return { texture, draw }
 }

@@ -11,6 +11,8 @@ import { cn } from '@/lib/cn'
 import type { PlayerInfo } from '../types'
 import { BOARD, type BoardCell } from './board'
 import { levelOf, ownerOf } from './rules'
+import { PotToast, TaxFlight } from './TaxPot'
+import type { TaxFx } from './usePlayback'
 import type { TdpState } from './types'
 
 /* ------------------------------ géométrie ------------------------------ */
@@ -241,9 +243,15 @@ export interface BoardProps {
   onCell: (i: number) => void
   /** Contenu du centre (joueur au trait, dés, minuteur…). */
   center: ReactNode
+  /** Taxe en cours de paiement : billets qui volent de la case vers le tas du centre. */
+  taxFx?: TaxFx | null
+  /** Cagnotte ramassée : billets du tas vers le pion + annonce. */
+  potFx?: TaxFx | null
+  meId?: string
+  name?: (id: string | null | undefined) => string
 }
 
-export function Board({ s, players, shownPos, selected, onCell, center }: BoardProps) {
+export function Board({ s, players, shownPos, selected, onCell, center, taxFx, potFx, meId, name }: BoardProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(328)
   useEffect(() => {
@@ -286,6 +294,9 @@ export function Board({ s, players, shownPos, selected, onCell, center }: BoardP
         )
       })}
       <Pawns s={s} players={players} shownPos={shownPos} width={width} />
+      {taxFx && <TaxFlight key={taxFx.key} fx={taxFx} board={ref} />}
+      {potFx && <TaxFlight key={potFx.key} fx={potFx} board={ref} reverse />}
+      <PotToast fx={potFx ?? null} name={name} meId={meId} />
     </div>
   )
 }

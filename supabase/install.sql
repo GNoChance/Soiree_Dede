@@ -9533,6 +9533,12 @@ revoke all on function public.game_qui_suis_je_action(jsonb, jsonb, uuid, boolea
 --   d'extension : nouvelles actions dans game_tour_des_potes_action, la valeur
 --   récupérable d'un joueur est centralisée dans _tdp_sale_value, la fortune
 --   dans _tdp_fortune.
+-- CAGNOTTE : tax_pot = taxes payées sur les cases 4 / 38 depuis le dernier
+--   ramassage (hors fortune) ; le joueur qui s'arrête sur « Pause apéro » (20)
+--   la ramasse en entier (évènement 'pot', last_event.pot = montant, stat pot) ; round_rents = {round, payments: [{no,
+--   payer, owner, cell, amount}]} = loyers payés pendant le tour de table en
+--   cours (no = event_no du log rent ; 60 au plus ; vidé quand round change).
+--   States antérieurs sans ces champs : lus avec coalesce.
 --
 -- server : {"decks": {"hasard": [ids], "potes": [ids]}} (ordre de pioche) ;
 --   TEST UNIQUEMENT : "forced_dice": [[a,b], ...] (file de dés imposés, lue par
@@ -9873,6 +9879,28 @@ begin
   return public._tdp_le(p_s, jsonb_build_object('jail', p_reason, 'cell', 10));
 end $$;
 
+-- Loyer payé : ajouté à round_rents (tour de table en cours ; no = dernier
+-- event_no, celui du log rent qui vient d'être écrit ; 60 entrées au plus).
+create or replace function public._tdp_add_rent(p_s jsonb, p_payer text, p_owner text, p_cell integer, p_amount integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  rnd integer := coalesce((p_s->>'round')::integer, 1);
+  pay jsonb := '[]'::jsonb;
+begin
+  if jsonb_typeof(p_s->'round_rents') = 'object'
+     and (p_s->'round_rents'->>'round')::integer = rnd
+     and jsonb_typeof(p_s->'round_rents'->'payments') = 'array' then
+    pay := p_s->'round_rents'->'payments';
+  end if;
+  pay := pay || jsonb_build_array(jsonb_build_object(
+    'no', (p_s->>'event_no')::integer, 'payer', p_payer, 'owner', p_owner,
+    'cell', p_cell, 'amount', p_amount));
+  while jsonb_array_length(pay) > 60 loop pay := pay - 0; end loop;
+  return p_s || jsonb_build_object('round_rents', jsonb_build_object('round', rnd, 'payments', pay));
+end $$;
+
 -- Résolution de la case où se trouve p_p. g = {s: state, v: server}.
 -- p_depth = 0 : case atteinte par les dés (case carte -> phase card) ;
 -- > 0 : déplacement par carte (case carte -> pioche immédiate, jusqu'à 4).
@@ -9902,6 +9930,7 @@ begin
       amt := public._tdp_rent(s, i, ds, p_mode);
       s := public._tdp_transfer(s, p_p, o, amt);
       s := public._tdp_log(s, jsonb_build_object('player', p_p, 'kind', 'rent', 'cell', i, 'amount', amt, 'to', o));
+      s := public._tdp_add_rent(s, p_p, o, i, amt);
       s := public._tdp_stat(s, p_p, 'rent_paid', amt);
       s := public._tdp_stat(s, o, 'rent_received', amt);
       s := public._tdp_le(s, jsonb_build_object('rent', jsonb_build_object('to', o, 'amount', amt)));
@@ -9910,6 +9939,7 @@ begin
     amt := (c->>'amount')::integer;
     s := public._tdp_transfer(s, p_p, null, amt);
     s := public._tdp_log(s, jsonb_build_object('player', p_p, 'kind', 'tax', 'cell', i, 'amount', amt));
+    s := s || jsonb_build_object('tax_pot', coalesce((s->>'tax_pot')::integer, 0) + amt);
     s := public._tdp_le(s, jsonb_build_object('tax', amt));
   elsif t in ('hasard', 'entre_potes') then
     if p_depth = 0 then
@@ -9920,6 +9950,16 @@ begin
     elsif p_depth < 4 then
       return public._tdp_card(jsonb_build_object('s', s, 'v', v), p_p,
                               case t when 'hasard' then 'hasard' else 'potes' end, p_depth);
+    end if;
+  elsif t = 'apero' then
+    -- Pause apéro : le joueur ramasse toute la cagnotte des taxes.
+    amt := coalesce((s->>'tax_pot')::integer, 0);
+    if amt > 0 then
+      s := public._tdp_transfer(s, null, p_p, amt);
+      s := public._tdp_log(s, jsonb_build_object('player', p_p, 'kind', 'pot', 'cell', i, 'amount', amt));
+      s := public._tdp_stat(s, p_p, 'pot', amt);
+      s := s || jsonb_build_object('tax_pot', 0);
+      s := public._tdp_le(s, jsonb_build_object('pot', amt));
     end if;
   elsif t = 'direction_violon' then
     s := public._tdp_to_jail(s, p_p, 'case');
@@ -10193,6 +10233,10 @@ begin
 
   s := s || jsonb_build_object(
     'round', rnd,
+    'round_rents', case when coalesce((s->'round_rents'->>'round')::integer, -1) = rnd
+                       and jsonb_typeof(s->'round_rents'->'payments') = 'array'
+                       then s->'round_rents'
+                       else jsonb_build_object('round', rnd, 'payments', '[]'::jsonb) end,
     'turn', nxt,
     'turn_no', coalesce((s->>'turn_no')::integer, 0) + 1,
     'doubles', 0,
@@ -10517,6 +10561,8 @@ begin
     'log', '[]'::jsonb,
     'event_no', 0,
     'stats', v_stats,
+    'tax_pot', 0,
+    'round_rents', jsonb_build_object('round', 1, 'payments', '[]'::jsonb),
     'deadline', null,
     'end_reason', null,
     'winners', null,
@@ -10703,6 +10749,7 @@ revoke all on function public._tdp_build_value(jsonb, text) from public, anon, a
 revoke all on function public._tdp_sale_value(jsonb, text) from public, anon, authenticated;
 revoke all on function public._tdp_fortune(jsonb, text) from public, anon, authenticated;
 revoke all on function public._tdp_log(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._tdp_add_rent(jsonb, text, text, integer, integer) from public, anon, authenticated;
 revoke all on function public._tdp_le(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_stat(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._tdp_transfer(jsonb, text, text, integer) from public, anon, authenticated;

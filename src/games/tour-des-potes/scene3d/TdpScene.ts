@@ -3,7 +3,8 @@
  *
  * - Plateau : atlas canvas unique (cases + centre), 40 cases en relief, maisons /
  *   hôtels en petits volumes, marque du propriétaire, pions = sprites chibi.
- * - Centre : deux tas de cartes (Hasard / Entre potes) + deux dés.
+ * - Centre : deux tas de cartes (Hasard / Entre potes) + deux dés + la cagnotte des
+ *   taxes (tas de billets qui grossit ; billets en vol pion → tas, ou tas → pion).
  * - Caméra : vue d'ensemble, suivi du pion, gros plan sur le tas ; pincer / glisser
  *   (limités), double-tap = recentrer.
  * - Rendu À LA DEMANDE : la boucle rAF s'arrête dès que plus rien ne bouge
@@ -13,11 +14,13 @@
 import * as THREE from 'three'
 import { BOARD } from '../board'
 import { chibiUrl } from '@/data/characters'
+import { billsFor, potBills, type Denom } from '../money'
 import {
-  BOARD_SIZE, CARD_D, CARD_W, CELL_H, CENTER_H, DECK_H, DECK_POS, DICE_REST, SLAB_H, cellBox, pawnSlots, sideOf,
+  BILL_D, BILL_H, BILL_W, BOARD_SIZE, CARD_D, CARD_W, CELL_H, CENTER_H, DECK_H, DECK_POS, DICE_REST, POT_LABEL_Z, POT_POS, SLAB_H,
+  cellBox, pawnSlots, sideOf,
 } from './layout'
 import {
-  DECK_COLOR, makeBoardAtlas, makeCardBack, makeCardFace, makeDieFaces, makeEmojiTex, makeGlow, makeStackSide,
+  DECK_COLOR, makeBillTex, makeBoardAtlas, makeCardBack, makeCardFace, makeDieFaces, makeEmojiTex, makeGlow, makePotLabel, makeStackSide,
   type CardFaceInfo,
 } from './textures'
 
@@ -33,6 +36,13 @@ export interface ScenePlayer {
 
 export interface SceneReveal extends CardFaceInfo {
   key: string
+}
+
+/** Billets en vol : taxe (pion → cagnotte) ou cagnotte ramassée (cagnotte → pion). */
+export interface SceneMoneyFx {
+  key: number
+  player: string
+  amount: number
 }
 
 export interface SceneView {
@@ -58,6 +68,10 @@ export interface SceneView {
   reveal: SceneReveal | null
   /** L'overlay de lecture de la carte est affiché. */
   cardShowing: boolean
+  /** Cagnotte des taxes affichée au centre. */
+  taxPot: number
+  taxFx: SceneMoneyFx | null
+  potFx: SceneMoneyFx | null
 }
 
 export interface SceneOptions {
@@ -65,6 +79,8 @@ export interface SceneOptions {
   rollMs: number
   /** Durée de l'animation de pioche avant l'overlay (ms). */
   drawMs: number
+  /** Durée du vol des billets d'une taxe (ms), = TAX_FLY_MS de usePlayback. */
+  taxMs: number
   onCell: (i: number) => void
   onDeck: (deck: DeckId) => void
   onLost: () => void
@@ -108,6 +124,27 @@ interface Deck {
   hit: THREE.Mesh
   cardRest: THREE.Vector3
 }
+
+interface BillFlight {
+  mesh: THREE.Mesh
+  t0: number
+  dur: number
+  from: THREE.Vector3
+  to: THREE.Vector3
+  spin: number
+  /** Billet d'une taxe : une fois posé, il reste jusqu'à ce que le tas soit mis à jour. */
+  keep: boolean
+  landed: boolean
+}
+
+const POT_MAX = 18
+/** Dispersion déterministe du billet k dans le tas. */
+const potSlot = (k: number) => ({
+  x: POT_POS.x + Math.sin(k * 2.4) * 0.16,
+  y: CENTER_H + BILL_H / 2 + 0.004 + k * (BILL_H + 0.004),
+  z: POT_POS.z + Math.cos(k * 1.7) * 0.12,
+  yaw: Math.sin(k * 12.9898) * 0.75,
+})
 
 type CamMode = 'overview' | 'follow' | 'deck'
 
@@ -169,6 +206,18 @@ export class TdpScene {
   private revealState: 'idle' | 'anim' | 'hold' | 'show' = 'idle'
   private showSince = 0
 
+  // cagnotte des taxes
+  private potGroup = new THREE.Group()
+  private potLabel = makePotLabel()
+  private potShown = -1
+  private billGeo!: THREE.BoxGeometry
+  private billEdge!: THREE.MeshLambertMaterial
+  private billMats = new Map<Denom, THREE.Material[]>()
+  private flights: BillFlight[] = []
+  private lastTaxKey: number | null = null
+  private lastPotKey: number | null = null
+  private fxInit = false
+
   // caméra
   private cam = { tx: 0, ty: 0, tz: 0.5, yaw: 0, pitch: 1.0, dist: 22 }
   private camGoal = { tx: 0, ty: 0, tz: 0.5, yaw: 0, pitch: 1.0, dist: 22 }
@@ -206,6 +255,7 @@ export class TdpScene {
     this.buildDecks()
     this.buildDice()
     this.buildCard()
+    this.buildPot()
 
     this.resize()
     const ro = new ResizeObserver(() => this.resize())
@@ -378,6 +428,29 @@ export class TdpScene {
     this.card = g
   }
 
+  private buildPot() {
+    this.billGeo = this.track(new THREE.BoxGeometry(BILL_W, BILL_H, BILL_D))
+    this.billEdge = this.track(new THREE.MeshLambertMaterial({ color: 0x1f1b2e }))
+    this.root.add(this.potGroup)
+    const geo = this.track(new THREE.PlaneGeometry(2.7, 2.7 * (112 / 512)))
+    geo.rotateX(-Math.PI / 2)
+    const mat = this.track(new THREE.MeshBasicMaterial({ map: this.track(this.potLabel.texture), transparent: true, alphaTest: 0.05 }))
+    const label = new THREE.Mesh(geo, mat)
+    label.position.set(POT_POS.x, CENTER_H + 0.012, POT_LABEL_Z)
+    this.root.add(label)
+  }
+
+  /** Matériaux d'un billet (face imprimée dessus / dessous, tranche sombre), créés à la demande. */
+  private billMat(d: Denom): THREE.Material[] {
+    let m = this.billMats.get(d)
+    if (!m) {
+      const face = this.track(new THREE.MeshBasicMaterial({ map: this.track(makeBillTex(d)) }))
+      m = [this.billEdge, this.billEdge, face, face, this.billEdge, this.billEdge]
+      this.billMats.set(d, m)
+    }
+    return m
+  }
+
   /* ------------------------------ état externe ------------------------------ */
 
   update(v: SceneView) {
@@ -409,6 +482,17 @@ export class TdpScene {
     }
     // carte piochée
     if (v.reveal && v.reveal.key !== this.revealKey) this.startReveal(v.reveal)
+    // cagnotte des taxes (au montage : rien n'est rejoué)
+    if (v.taxPot !== this.potShown) this.syncPot(v.taxPot)
+    const taxKey = v.taxFx?.key ?? null
+    const potKey = v.potFx?.key ?? null
+    if (this.fxInit) {
+      if (v.taxFx && taxKey !== this.lastTaxKey) this.startTax(v.taxFx)
+      if (v.potFx && potKey !== this.lastPotKey) this.startPot(v.potFx, prev?.taxPot ?? 0)
+    }
+    this.fxInit = true
+    this.lastTaxKey = taxKey ?? this.lastTaxKey
+    this.lastPotKey = potKey ?? this.lastPotKey
     this.invalidate()
   }
 
@@ -574,6 +658,95 @@ export class TdpScene {
         }
       }
     }
+  }
+
+  /* ------------------------------ cagnotte des taxes ------------------------------ */
+
+  private syncPot(pot: number) {
+    this.potShown = pot
+    this.potLabel.draw(`Cagnotte : ${pot.toLocaleString('fr-FR')} €`)
+    this.potGroup.clear()
+    potBills(pot, POT_MAX).forEach((d, k) => {
+      const s = potSlot(k)
+      const m = new THREE.Mesh(this.billGeo, this.billMat(d))
+      m.position.set(s.x, s.y, s.z)
+      m.rotation.y = s.yaw
+      this.potGroup.add(m)
+    })
+    // les billets d'une taxe déjà posés font maintenant partie du tas
+    this.flights = this.flights.filter((f) => {
+      if (f.keep && f.landed) this.root.remove(f.mesh)
+      return !(f.keep && f.landed)
+    })
+  }
+
+  private pawnTop(id: string): THREE.Vector3 | null {
+    const pw = this.pawns.get(id)
+    return pw ? new THREE.Vector3(pw.group.position.x, CELL_H + 0.7, pw.group.position.z) : null
+  }
+
+  private addFlight(d: Denom, from: THREE.Vector3, to: THREE.Vector3, t0: number, dur: number, keep: boolean, k: number) {
+    const mesh = new THREE.Mesh(this.billGeo, this.billMat(d))
+    mesh.visible = false
+    mesh.userData.yaw = potSlot(k).yaw
+    this.root.add(mesh)
+    this.flights.push({ mesh, t0, dur, from, to, spin: (k % 2 ? -1 : 1) * (Math.PI * 2 + k * 0.4), keep, landed: false })
+  }
+
+  /** Taxe : les billets partent du pion et se posent sur le tas. */
+  private startTax(fx: SceneMoneyFx) {
+    const from = this.pawnTop(fx.player)
+    if (!from) return
+    const bills = billsFor(fx.amount, 4, 6)
+    const now = performance.now()
+    const gap = 90
+    const dur = Math.max(400, this.opts.taxMs - 100 - (bills.length - 1) * gap)
+    const base = Math.min(POT_MAX, this.potGroup.children.length)
+    bills.forEach((d, i) => {
+      const s = potSlot(Math.min(POT_MAX, base + i))
+      this.addFlight(d, from.clone(), new THREE.Vector3(s.x, s.y, s.z), now + i * gap, dur, true, base + i)
+    })
+  }
+
+  /** Cagnotte ramassée : les billets du tas s'envolent vers le pion. */
+  private startPot(fx: SceneMoneyFx, potBefore: number) {
+    const to = this.pawnTop(fx.player)
+    if (!to) return
+    const bills = billsFor(Math.max(fx.amount, potBefore), 5, 10)
+    const now = performance.now()
+    bills.forEach((d, i) => {
+      const s = potSlot(bills.length - 1 - i)
+      this.addFlight(d, new THREE.Vector3(s.x, s.y, s.z), to.clone(), now + i * 80, 750, false, i)
+    })
+  }
+
+  private tickFlights(now: number): boolean {
+    if (!this.flights.length) return false
+    this.flights = this.flights.filter((f) => {
+      const t = (now - f.t0) / f.dur
+      if (t < 0) return true
+      if (t >= 1) {
+        // filet : un billet posé ne reste pas si le tas n'est jamais mis à jour
+        if (f.keep && now - f.t0 - f.dur < 1500) {
+          f.landed = true
+          f.mesh.visible = true
+          f.mesh.position.copy(f.to)
+          f.mesh.rotation.set(0, f.mesh.userData.yaw as number, 0)
+          f.mesh.scale.setScalar(1)
+          return true
+        }
+        this.root.remove(f.mesh)
+        return false
+      }
+      const k = easeInOut(t)
+      f.mesh.visible = true
+      f.mesh.position.lerpVectors(f.from, f.to, k)
+      f.mesh.position.y += Math.sin(Math.PI * k) * 2.1
+      f.mesh.rotation.set(Math.sin(Math.PI * k) * 0.9, (f.mesh.userData.yaw as number) + f.spin * (1 - k), Math.sin(Math.PI * k) * 0.5 * Math.sign(f.spin))
+      f.mesh.scale.setScalar(f.keep ? 0.55 + 0.45 * k + 0.25 * Math.sin(Math.PI * k) : 1 - 0.45 * k + 0.25 * Math.sin(Math.PI * k))
+      return true
+    })
+    return this.flights.length > 0
   }
 
   /* ------------------------------ dés ------------------------------ */
@@ -942,6 +1115,7 @@ export class TdpScene {
     busy = this.tickCard(now) || busy
     if (wasReveal && this.revealState === 'idle') busy = true // la caméra doit repartir
     busy = this.tickPawns(dt) || busy
+    busy = this.tickFlights(now) || busy
     busy = this.tickDecks(now) || busy
     busy = this.tickCells(dt) || busy
     if (now < this.rollUntil) busy = true
@@ -1035,6 +1209,7 @@ export class TdpScene {
     }
     for (const d of this.disposables) d.dispose()
     this.cardFace.texture.dispose()
+    this.flights = []
     this.renderer.dispose()
     this.renderer.forceContextLoss()
     this.renderer.domElement.remove()

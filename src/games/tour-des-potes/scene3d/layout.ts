@@ -53,6 +53,13 @@ export const CARD_W = 1.8
 export const CARD_D = 2.5
 export const DECK_H = 0.5
 
+/** Cagnotte des taxes : tas de billets entre les deux paquets, étiquette juste derrière (les dés ne la cachent pas). */
+export const POT_POS = { x: 0, z: -0.4 } as const
+export const POT_LABEL_Z = -1.5
+export const BILL_W = 0.98
+export const BILL_D = 0.55
+export const BILL_H = 0.03
+
 /** Position de repos des deux dés. */
 export const DICE_REST: [number, number][] = [
   [-0.75, 1.6],

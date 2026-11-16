@@ -47,6 +47,7 @@ export default function TourDesPotesSummary({ state, meId, players }: GameSummar
   const awards = [
     { icon: '💰', label: 'Roi du loyer', top: best((id) => s.stats?.[id]?.rent_received ?? 0), fmt: eur },
     { icon: '😬', label: 'Plus gros payeur', top: best((id) => s.stats?.[id]?.rent_paid ?? 0), fmt: eur },
+    { icon: '🍹', label: 'Roi de la cagnotte', top: best((id) => s.stats?.[id]?.pot ?? 0), fmt: eur },
     { icon: '🔨', label: 'Bâtisseur', top: best((id) => s.stats?.[id]?.built ?? 0), fmt: (n: number) => `${n} bâtiment${n > 1 ? 's' : ''}` },
     { icon: '🚔', label: 'Habitué du violon', top: best((id) => s.stats?.[id]?.jail ?? 0), fmt: (n: number) => `${n} fois` },
   ].flatMap((a) => (a.top ? [{ ...a, top: a.top }] : []))

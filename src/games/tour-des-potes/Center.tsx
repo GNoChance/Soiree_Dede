@@ -4,6 +4,7 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { PlayerInfo } from '../types'
 import { Die } from './Dice'
 import { logLine, nowLine } from './format'
+import { TaxPot } from './TaxPot'
 import type { TdpState } from './types'
 
 interface Props {
@@ -12,9 +13,11 @@ interface Props {
   meId: string
   name: (id: string | null | undefined) => string
   rolling: boolean
+  /** Total des taxes affiché au centre (les billets en vol n'y sont pas encore). */
+  taxPot: number
 }
 
-export default function Center({ s, players, meId, name, rolling }: Props) {
+export default function Center({ s, players, meId, name, rolling, taxPot }: Props) {
   const p = s.turn ? playerOrPlaceholder(players, s.turn) : null
   const last = [...s.log].reverse().map((e) => logLine(e, name)).find((l) => l && l.icon !== '▶️')
   const dice = s.dice ?? s.last_event?.dice ?? null
@@ -44,9 +47,10 @@ export default function Center({ s, players, meId, name, rolling }: Props) {
           </span>
         )}
       </div>
+      <TaxPot pot={taxPot} />
       <p className="max-w-full text-xs leading-tight font-extrabold">{nowLine(s, name, meId)}</p>
       {last && (
-        <p className="line-clamp-2 max-w-full text-[10px] leading-tight text-muted">
+        <p className="line-clamp-1 max-w-full text-[10px] leading-tight text-muted">
           {last.icon} {last.text}
         </p>
       )}

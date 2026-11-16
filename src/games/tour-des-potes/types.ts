@@ -111,6 +111,8 @@ export interface TdpLastEvent {
   rent: { to: string; amount: number } | null
   /** Taxe payée. */
   tax: number | null
+  /** Cagnotte des taxes ramassée sur « Pause apéro » (absent si rien ramassé). */
+  pot?: number
   /** Carte tirée (la dernière si plusieurs). null en phase card (pas encore piochée). */
   card: TdpCardDrawn | null
   /** Le joueur a acheté la case atteinte. */
@@ -129,6 +131,7 @@ export type TdpEventKind =
   | 'move' // déplacement par carte {from, cell}
   | 'rent' // {cell, amount, to}
   | 'tax' // {cell, amount}
+  | 'pot' // cagnotte des taxes ramassée sur Pause apéro {cell: 20, amount}
   | 'card' // {deck, card, text, card_kind, amount}
   | 'jail' // {reason: 'triple'|'case'|'card', cell: 10}
   | 'jail_stay' // {jail_attempt}
@@ -179,10 +182,22 @@ export interface TdpPlayerStats {
   laps: number
   rent_paid: number
   rent_received: number
+  /** Total de cagnotte ramassé sur « Pause apéro » (absent tant que rien ramassé). */
+  pot?: number
   bought: number
   built: number
   jail: number
   cards: number
+}
+
+/** Loyer payé pendant le tour de table en cours (cf. TdpStateBase.round_rents). */
+export interface TdpRentPayment {
+  /** event_no du log 'rent' correspondant. */
+  no: number
+  payer: string
+  owner: string
+  cell: number
+  amount: number
 }
 
 /** Ligne du classement final. */
@@ -257,6 +272,20 @@ export interface TdpStateBase {
   /** Numéro du dernier évènement. */
   event_no: number
   stats: Record<string, TdpPlayerStats>
+  /**
+   * Cagnotte des taxes (cases 4, 38) depuis le dernier ramassage : billets
+   * empilés au centre du plateau. Le joueur qui s'arrête sur « Pause apéro »
+   * (case 20) la ramasse en entier (évènement 'pot', last_event.pot) et elle
+   * repart de 0. Hors fortune ; les paiements de cartes n'y vont pas. (Absent
+   * dans un state antérieur à la mise à jour : lire avec ?? 0.)
+   */
+  tax_pot: number
+  /**
+   * Loyers payés pendant le tour de table en cours (round = state.round), dans
+   * l'ordre, y compris ceux déclenchés par une carte ; 60 au plus. Vidé au
+   * changement de tour de table. (Absent dans un state antérieur : lire avec ?.)
+   */
+  round_rents: { round: number; payments: TdpRentPayment[] }
   /** ISO : échéance de la décision en cours (null si pas de minuteur / fin). */
   deadline: string | null
   end_reason: TdpEndReason | null
