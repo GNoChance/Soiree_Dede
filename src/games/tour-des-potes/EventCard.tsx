@@ -10,7 +10,7 @@ import { X } from 'lucide-react'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { BOARD, DECK_NAMES } from './board'
-import { cityName, eur, isPlace } from './format'
+import { CARD_AMOUNT_SIGN, cardKeyOf, cityName, eur, isPlace } from './format'
 import { DICE_MS, walkSteps } from './usePlayback'
 import { ownerOf, rentFor } from './rules'
 import type { TdpCardDrawn, TdpLastEvent, TdpState } from './types'
@@ -26,26 +26,41 @@ function itemsOf(ev: TdpLastEvent): Item[] {
   return items
 }
 
-export default function EventCard({ s, initialNo, name, meId }: { s: TdpState; initialNo: number; name: (id: string | null | undefined) => string; meId: string }) {
-  const [show, setShow] = useState<{ no: number; idx: number; items: Item[] } | null>(null)
+interface EventCardProps {
+  s: TdpState
+  initialNo: number
+  name: (id: string | null | undefined) => string
+  meId: string
+  /** Délai avant d'afficher la carte piochée (animation 3D de pioche) ; 0,5 s en 2D. */
+  cardDelay?: number
+  /** Prévient quand une carte est affichée à l'écran (la caméra / les pions attendent). */
+  onActive?: (active: boolean) => void
+}
+
+export default function EventCard({ s, initialNo, name, meId, cardDelay = 500, onActive }: EventCardProps) {
+  const [show, setShow] = useState<{ no: number; k: string; idx: number; items: Item[] } | null>(null)
+  const initialCard = useState(() => cardKeyOf(s))[0]
   const ev = s.last_event
   const no = ev?.no ?? 0
 
-  // Nouveau coup : on attend la fin des dés et du déplacement, puis on affiche.
+  // Nouveau coup (ou carte piochée : last_event.no ne change pas) : on attend la fin
+  // des dés / du déplacement / de l'animation de pioche, puis on affiche.
+  const cardKey = cardKeyOf(s)
+  const evKey = cardKey ?? String(no)
   useEffect(() => {
-    if (!ev || no === initialNo) return
+    if (!ev || (cardKey ? cardKey === initialCard : no === initialNo)) return
     const items = itemsOf(ev)
     if (!items.length) return
-    const delay = DICE_MS + walkSteps(ev.from, ev.cell) * 110 + 450
+    const delay = ev.card ? cardDelay : DICE_MS + walkSteps(ev.from, ev.cell) * 110 + 450
     const t = window.setTimeout(() => {
       fx.whoosh()
-      setShow({ no, idx: 0, items })
+      setShow({ no, k: evKey, idx: 0, items })
     }, delay)
     return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ne dépend que du numéro d'évènement
-  }, [no, initialNo])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ne dépend que de la clé d'évènement
+  }, [evKey, initialNo])
 
-  const key = show ? `${show.no}-${show.idx}` : null
+  const key = show ? `${show.k}-${show.idx}` : null
   const next = useCallback(
     () => setShow((cur) => (cur && cur.idx + 1 < cur.items.length ? { ...cur, idx: cur.idx + 1 } : null)),
     [],
@@ -61,6 +76,10 @@ export default function EventCard({ s, initialNo, name, meId }: { s: TdpState; i
   // Fin de partie : plus de carte.
   const live = show && s.phase !== 'finished' && s.phase !== 'aborted' ? show : null
   const item = live ? live.items[live.idx] : null
+  const isActive = !!live
+  useEffect(() => {
+    onActive?.(isActive)
+  }, [isActive, onActive])
 
   return createPortal(
     <div className="pointer-events-none fixed inset-x-0 top-[14dvh] z-[45] px-4">
@@ -152,8 +171,6 @@ function PlaceCard({ cell, s, ev, name, meId, onClose }: { cell: number; s: TdpS
     </div>
   )
 }
-
-const CARD_AMOUNT_SIGN: Partial<Record<TdpCardDrawn['kind'], 1 | -1>> = { gain: 1, collect_each: 1, friend_gain: 1, pay: -1, pay_each: -1, repairs: -1, friend_pay: -1 }
 
 function DrawnCard({ card, ev, name, onClose }: { card: TdpCardDrawn; ev: TdpLastEvent; name: (id: string | null | undefined) => string; onClose: () => void }) {
   const potes = card.deck === 'potes'

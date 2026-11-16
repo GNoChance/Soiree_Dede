@@ -5,9 +5,12 @@
  * rien n'est rejoué : on affiche directement l'état courant.
  */
 import { useEffect, useRef, useState } from 'react'
+import { cardKeyOf } from './format'
 import type { TdpState } from './types'
 
 export const DICE_MS = 900
+/** Animation 3D de pioche (soulever, retourner, face caméra) avant l'affichage de la carte. */
+export const DRAW_ANIM_MS = 1900
 const STEP_MS = 110
 const MAX_WALK = 12
 
@@ -23,7 +26,11 @@ export function walkSteps(from: number, to: number): number {
   return n <= MAX_WALK ? n : 0
 }
 
-export function usePlayback(s: TdpState) {
+/**
+ * `paused` : on fige la marche des pions (carte lue à l'écran) ; `cardHoldMs` : délai
+ * avant que la carte piochée soit affichée (le déplacement qu'elle cause attend la fin).
+ */
+export function usePlayback(s: TdpState, paused = false, cardHoldMs = 600) {
   const [shownPos, setShownPos] = useState<Record<string, number>>(s.pos)
   const [rolling, setRolling] = useState(false)
   const [floats, setFloats] = useState<MoneyFloat[]>([])
@@ -31,6 +38,8 @@ export function usePlayback(s: TdpState) {
   const initialNo = useState(() => s.last_event?.no ?? 0)[0]
   const holdUntil = useRef(0)
   const target = useRef(s.pos)
+  const pausedRef = useRef(paused)
+  const initialCard = useState(() => cardKeyOf(s))[0]
 
   // Gains / pertes : comparaison du state précédent (ajustement pendant le rendu).
   if (s.cash !== prevCash) {
@@ -58,13 +67,24 @@ export function usePlayback(s: TdpState) {
     }
   }, [rollNo, initialNo])
 
+  useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
+
+  // Carte piochée : les pions attendent que la carte ait été montrée.
+  const cardKey = cardKeyOf(s)
+  useEffect(() => {
+    if (!cardKey || cardKey === initialCard) return
+    holdUntil.current = Math.max(holdUntil.current, Date.now() + cardHoldMs + 400)
+  }, [cardKey, initialCard, cardHoldMs])
+
   // Marche des pions vers leur case réelle.
   useEffect(() => {
     target.current = s.pos
   }, [s.pos])
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (Date.now() < holdUntil.current) return
+      if (pausedRef.current || Date.now() < holdUntil.current) return
       setShownPos((cur) => {
         let changed = false
         const next = { ...cur }

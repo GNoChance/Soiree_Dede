@@ -3,7 +3,7 @@
  * Sans dépendance React : importable sous Node (tests).
  */
 import { BOARD, POTES_RENTS, SERVICE_MULT, type BoardCell, type GroupId } from './board.ts'
-import type { TdpAction, TdpOptions, TdpState } from './types.ts'
+import type { TdpAction, TdpOptions, TdpPendingBuy, TdpPendingCard, TdpState } from './types.ts'
 
 type Owned = Pick<TdpState, 'owners' | 'buildings'>
 
@@ -73,6 +73,17 @@ export function sellBlocker(s: Owned, player: string, cell: number): string | nu
   return null
 }
 
+/** Phases « en cours » (une décision du joueur au trait est attendue, minuteur actif). */
+export const TDP_ACTIVE_PHASES: readonly TdpState['phase'][] = ['roll', 'jail', 'card', 'buy', 'manage', 'debt']
+
+/** Offre d'achat en attente (phase buy), sinon null. */
+export const pendingBuy = (s: Pick<TdpState, 'phase' | 'pending'>): TdpPendingBuy | null =>
+  s.phase === 'buy' && s.pending && 'price' in s.pending ? s.pending : null
+
+/** Pioche en attente (phase card), sinon null. */
+export const pendingCard = (s: Pick<TdpState, 'phase' | 'pending'>): TdpPendingCard | null =>
+  s.phase === 'card' && s.pending && 'deck' in s.pending ? s.pending : null
+
 const BUILD_PHASES = ['roll', 'jail', 'manage']
 const SELL_PHASES = ['roll', 'jail', 'manage', 'debt']
 
@@ -112,6 +123,7 @@ export const tdpActions = {
   roll: (): TdpAction => ({ type: 'roll' }),
   payJail: (): TdpAction => ({ type: 'pay_jail' }),
   useCard: (): TdpAction => ({ type: 'use_card' }),
+  draw: (): TdpAction => ({ type: 'draw' }),
   buy: (): TdpAction => ({ type: 'buy' }),
   pass: (): TdpAction => ({ type: 'pass' }),
   build: (cell: number): TdpAction => ({ type: 'build', cell }),
@@ -144,6 +156,7 @@ export async function prepareTdpStart(options: Record<string, unknown>): Promise
 export const PHASE_LABELS: Record<TdpState['phase'], string> = {
   roll: 'Lance les dés',
   jail: 'Au violon',
+  card: 'Pioche une carte',
   buy: 'Acheter ?',
   manage: 'Gestion',
   debt: 'Dette à régler',

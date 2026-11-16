@@ -6,7 +6,17 @@
  *
  * DÉROULÉ D'UN TOUR (joueur `turn`) :
  *   phase `roll`  → {type:'roll'} : dés serveur ; déplacement ; résolution
- *                   automatique (loyer, taxe, carte, « Direction le violon ») ;
+ *                   automatique (loyer, taxe, « Direction le violon ») ;
+ *   phase `card`  → case Hasard / Entre potes atteinte DIRECTEMENT par les
+ *                   dés (lancer normal ou sortie du violon en lançant) : en
+ *                   attente de pioche, `pending` = {cell, deck} ; le joueur
+ *                   envoie {type:'draw'} → la carte est tirée et appliquée
+ *                   (`last_event.card` rempli, évènement 'card' dans
+ *                   `events`), puis la suite normale (buy si la carte mène à
+ *                   un lieu libre, roll après un double, sinon manage…).
+ *                   Une carte qui renvoie sur une autre case carte est
+ *                   appliquée aussitôt (pas de nouvelle phase card).
+ *                   `last_event.no` ne change pas à la pioche (pas de dés).
  *   phase `buy`   → lieu libre atteint : {type:'buy'} ou {type:'pass'} ;
  *   phase `manage`→ construire / vendre puis {type:'end_turn'} ;
  *   après un DOUBLE (et hors violon) la phase redevient `roll` (on rejoue ;
@@ -20,11 +30,12 @@
  *                   reprend (roll si double en cours, sinon manage). Si même
  *                   en vendant tout il ne pouvait pas payer, la faillite est
  *                   immédiate (pas de phase debt).
- *   `build`/`sell` sont aussi permis en `roll` et `jail` (avant de lancer).
+ *   `build`/`sell` sont aussi permis en `roll` et `jail` (avant de lancer),
+ *   jamais en `card` ni en `buy`.
  *
  * MINUTEUR : `deadline` (ISO, null si `turn_seconds` = 0). N'importe quel
  * client envoie {type:'tick'} à l'échéance (sans effet avant) → décision
- * automatique : roll → lance ; jail → tente le double ; buy → passe ;
+ * automatique : roll → lance ; jail → tente le double ; card → pioche ; buy → passe ;
  * manage → fin du tour ; debt → vend automatiquement (ou faillite).
  * HÔTE : {type:'skip'} → le joueur au trait est marqué absent (`away`) et
  * son tour est joué automatiquement ; ses tours suivants aussi, jusqu'à ce
@@ -38,7 +49,7 @@
 
 import type { CellType } from './board.ts'
 
-export type TdpPhase = 'roll' | 'jail' | 'buy' | 'manage' | 'debt' | 'finished' | 'aborted'
+export type TdpPhase = 'roll' | 'jail' | 'card' | 'buy' | 'manage' | 'debt' | 'finished' | 'aborted'
 export type TdpFormat = 'chrono' | 'tours' | 'classique'
 export type TdpDeck = 'hasard' | 'potes'
 export type TdpCardKind =
@@ -72,6 +83,18 @@ export interface TdpCardDrawn {
  * Dernier lancer et ses conséquences : à afficher sur TOUS les écrans
  * (anecdote de `BOARD[cell]`, loyer payé, carte…). Recréé à chaque lancer.
  */
+/** Offre d'achat (phase buy). */
+export interface TdpPendingBuy {
+  cell: number
+  price: number
+}
+
+/** Pioche en attente (phase card) : case atteinte et paquet à piocher. */
+export interface TdpPendingCard {
+  cell: number
+  deck: TdpDeck
+}
+
 export interface TdpLastEvent {
   /** Numéro de l'évènement `roll` dans le journal (change à chaque lancer → anim). */
   no: number
@@ -88,7 +111,7 @@ export interface TdpLastEvent {
   rent: { to: string; amount: number } | null
   /** Taxe payée. */
   tax: number | null
-  /** Carte tirée (la dernière si plusieurs). */
+  /** Carte tirée (la dernière si plusieurs). null en phase card (pas encore piochée). */
   card: TdpCardDrawn | null
   /** Le joueur a acheté la case atteinte. */
   bought: boolean
@@ -179,9 +202,9 @@ export interface TdpRankingRow {
   bankrupt: boolean
 }
 
-export interface TdpState {
+/** Champs communs du state (hors `phase` / `pending`, cf. TdpState). */
+export interface TdpStateBase {
   game: 'tour-des-potes'
-  phase: TdpPhase
   /** Joueurs de la partie (ordre de la soirée). */
   players: string[]
   /** Ordre de jeu (tiré au sort). */
@@ -226,8 +249,6 @@ export interface TdpState {
   jail_cards: Record<string, string[]>
   /** Joueurs marqués absents par l'hôte (tours joués automatiquement). */
   away: string[]
-  /** Offre d'achat en phase buy. */
-  pending: { cell: number; price: number } | null
   last_event: TdpLastEvent | null
   /** Évènements produits par la DERNIÈRE action (à animer dans l'ordre). */
   events: TdpEvent[]
@@ -250,10 +271,26 @@ export interface TdpState {
   xp_gained?: Record<string, number>
 }
 
+/**
+ * State public. `pending` dépend de la phase (union discriminée par `phase`) :
+ *   phase `buy`  → offre d'achat {cell, price} ;
+ *   phase `card` → pioche en attente {cell, deck} (action {type:'draw'}) ;
+ *   autres phases → null.
+ * Tester `s.phase === 'buy'` (ou 'card') suffit à typer `s.pending`.
+ */
+export type TdpState = TdpStateBase &
+  (
+    | { phase: 'buy'; pending: TdpPendingBuy | null }
+    | { phase: 'card'; pending: TdpPendingCard | null }
+    | { phase: Exclude<TdpPhase, 'buy' | 'card'>; pending: null }
+  )
+
 export type TdpAction =
   | { type: 'roll' }
   | { type: 'pay_jail' }
   | { type: 'use_card' }
+  /** Phase card : piocher la carte en attente. */
+  | { type: 'draw' }
   | { type: 'buy' }
   | { type: 'pass' }
   | { type: 'build'; cell: number }

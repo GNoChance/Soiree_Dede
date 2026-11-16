@@ -1,11 +1,11 @@
 /** Barre d'actions collée en bas : gros boutons selon la phase, minuteur, absent / passer le tour. */
-import { Dices, Home, Ticket } from 'lucide-react'
+import { Dices, Hand, Home, Ticket } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 import { playRattle, useShake } from '../menteur/shake'
 import { BOARD, JAIL_FINE } from './board'
 import { eur } from './format'
-import { PHASE_LABELS, cellsOf, tdpActions } from './rules'
+import { PHASE_LABELS, TDP_ACTIVE_PHASES, cellsOf, pendingBuy, tdpActions } from './rules'
 import type { TdpAction, TdpState } from './types'
 
 interface Props {
@@ -18,10 +18,11 @@ interface Props {
   name: (id: string | null | undefined) => string
   send: (a: TdpAction) => void
   onRoll: () => void
+  onDraw: () => void
   onAssets: () => void
 }
 
-export default function Actions({ s, meId, isHost, pending, left, name, send, onRoll, onAssets }: Props) {
+export default function Actions({ s, meId, isHost, pending, left, name, send, onRoll, onDraw, onAssets }: Props) {
   const myTurn = s.turn === meId
   // Lancer les dés : bouton OU secousse du téléphone (même détection que le Menteur).
   const canRoll = myTurn && (s.phase === 'roll' || s.phase === 'jail') && !pending && !s.away.includes(meId)
@@ -29,9 +30,10 @@ export default function Actions({ s, meId, isHost, pending, left, name, send, on
     playRattle(0.5)
     onRoll()
   })
-  const active = ['roll', 'jail', 'buy', 'manage', 'debt'].includes(s.phase)
+  const active = TDP_ACTIVE_PHASES.includes(s.phase)
   if (!active) return null
   const cash = s.cash[meId] ?? 0
+  const buy = pendingBuy(s)
   const iAmAway = s.away.includes(meId)
   const hasAssets = cellsOf(s, meId).length > 0
   const total = s.turn_seconds * 1000
@@ -104,14 +106,20 @@ export default function Actions({ s, meId, isHost, pending, left, name, send, on
           </div>
         )}
 
-        {myTurn && s.phase === 'buy' && s.pending && (
+        {myTurn && s.phase === 'card' && (
+          <Button size="lg" fullWidth icon={<Hand className="size-6" />} disabled={pending} onClick={onDraw}>
+            Piocher une carte
+          </Button>
+        )}
+
+        {buy && myTurn && (
           <div className="flex flex-col gap-2">
             <p className="text-center text-sm leading-tight font-bold">
-              {BOARD[s.pending.cell].name} · {eur(s.pending.price)} · ton argent : {eur(cash)}
-              {cash < s.pending.price && <span className="block text-tomato">Il te manque {eur(s.pending.price - cash)}.</span>}
+              {BOARD[buy.cell].name} · {eur(buy.price)} · ton argent : {eur(cash)}
+              {cash < buy.price && <span className="block text-tomato">Il te manque {eur(buy.price - cash)}.</span>}
             </p>
             <div className="grid grid-cols-[3fr_2fr] gap-2">
-              <Button size="lg" className="min-h-14 px-3 text-xl" disabled={pending || cash < s.pending.price} onClick={() => send(tdpActions.buy())}>
+              <Button size="lg" className="min-h-14 px-3 text-xl" disabled={pending || cash < buy.price} onClick={() => send(tdpActions.buy())}>
                 Acheter
               </Button>
               <Button size="lg" variant="secondary" className="min-h-14 px-3 text-xl" disabled={pending} onClick={() => send(tdpActions.pass())}>
@@ -133,7 +141,7 @@ export default function Actions({ s, meId, isHost, pending, left, name, send, on
           </Button>
         )}
 
-        {myTurn && s.phase !== 'debt' && s.phase !== 'buy' && hasAssets && (
+        {myTurn && s.phase !== 'debt' && s.phase !== 'buy' && s.phase !== 'card' && hasAssets && (
           <>
             <Button size="sm" variant="secondary" fullWidth icon={<Home className="size-4" />} onClick={onAssets}>
               Mes biens (construire / vendre)

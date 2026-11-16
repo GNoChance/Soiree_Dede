@@ -1,7 +1,7 @@
 /** Textes et petits helpers d'affichage du Tour des Potes (purs, sans React). */
 import { BOARD, CITIES, DECK_NAMES, type BoardCell } from './board'
-import { PHASE_LABELS, buildBlocker, levelOf, sellBlocker } from './rules'
-import type { TdpEvent, TdpState } from './types'
+import { PHASE_LABELS, buildBlocker, levelOf, pendingBuy, pendingCard, sellBlocker } from './rules'
+import type { TdpCardDrawn, TdpEvent, TdpState } from './types'
 
 export const eur = (n: number) => `${n.toLocaleString('fr-FR')} €`
 export const signedEur = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toLocaleString('fr-FR')} €`
@@ -116,8 +116,15 @@ export function nowLine(s: TdpState, name: (id: string | null | undefined) => st
       return s.doubles > 0 ? `${who} rejoue (double !)` : me ? 'À toi de lancer !' : `${who} va lancer les dés`
     case 'jail':
       return me ? 'Tu es au violon' : `${who} est au violon`
-    case 'buy':
-      return s.pending ? `${who} : acheter ${BOARD[s.pending.cell].name} (${eur(s.pending.price)}) ?` : PHASE_LABELS.buy
+    case 'card': {
+      const pc = pendingCard(s)
+      const deck = pc ? `« ${DECK_NAMES[pc.deck]} »` : 'une carte'
+      return me ? `Pioche une carte ${deck} !` : `${who} pioche une carte ${deck}`
+    }
+    case 'buy': {
+      const pb = pendingBuy(s)
+      return pb ? `${who} : acheter ${BOARD[pb.cell].name} (${eur(pb.price)}) ?` : PHASE_LABELS.buy
+    }
     case 'manage':
       return me ? 'Construis ou finis ton tour' : `${who} gère ses biens`
     case 'debt':
@@ -149,3 +156,9 @@ export function whyNotSell(s: TdpState, me: string, cell: number): string | null
   return null
 }
 
+
+/** Clé de la carte piochée du dernier évènement (null si aucune) : `last_event.no` ne change pas à la pioche. */
+export const cardKeyOf = (s: Pick<TdpState, 'last_event'>): string | null => (s.last_event?.card ? `${s.last_event.no}:${s.last_event.card.id}` : null)
+
+/** Signe du montant d'une carte (gain +1 / paiement −1) ; absent = pas de montant à afficher. */
+export const CARD_AMOUNT_SIGN: Partial<Record<TdpCardDrawn['kind'], 1 | -1>> = { gain: 1, collect_each: 1, friend_gain: 1, pay: -1, pay_each: -1, repairs: -1, friend_pay: -1 }

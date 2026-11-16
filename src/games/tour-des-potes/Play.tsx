@@ -3,27 +3,56 @@
  * panneau des joueurs, journal et barre d'actions collée en bas.
  * Contrat : ./types.ts — helpers : ./rules.ts — rendu du plateau : ./PlayBoard.tsx.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Box } from 'lucide-react'
 import { playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps } from '../types'
 import Actions from './Actions'
 import Assets from './Assets'
+import Board3D from './Board3D'
 import { Board } from './PlayBoard'
 import CellSheet from './CellSheet'
 import Center from './Center'
 import EventCard from './EventCard'
 import { FormatBar, LogPanel, PlayersPanel } from './Panels'
-import { tdpActions } from './rules'
+import { TDP_ACTIVE_PHASES, tdpActions } from './rules'
 import type { TdpAction, TdpState } from './types'
-import { usePlayback } from './usePlayback'
+import { DRAW_ANIM_MS, usePlayback } from './usePlayback'
+
+const VIEW_KEY = 'tdp:view'
+const readView3d = () => {
+  try {
+    return localStorage.getItem(VIEW_KEY) !== '2d'
+  } catch {
+    return true
+  }
+}
 
 export default function TourDesPotesPlay({ state, meId, players, isHost, act, pending }: GamePlayProps) {
   const s = state as unknown as TdpState
   const name = useCallback((id: string | null | undefined) => (id ? playerOrPlaceholder(players, id).nickname : '—'), [players])
-  const active = ['roll', 'jail', 'buy', 'manage', 'debt'].includes(s.phase)
+  const active = TDP_ACTIVE_PHASES.includes(s.phase)
   const left = useCountdown(active ? s.deadline : null)
-  const { shownPos, rolling, floats, dismissFloat, initialNo } = usePlayback(s)
+  const [cardUp, setCardUp] = useState(false)
+  const [pref3d, setPref3d] = useState(readView3d)
+  const [glFailed, setGlFailed] = useState(false)
+  const view3d = pref3d && !glFailed
+  const { shownPos, rolling, floats, dismissFloat, initialNo } = usePlayback(s, cardUp, view3d ? DRAW_ANIM_MS : 500)
+  const setView = useCallback((v3: boolean) => {
+    setPref3d(v3)
+    try {
+      localStorage.setItem(VIEW_KEY, v3 ? '3d' : '2d')
+    } catch {
+      /* préférence non mémorisée */
+    }
+  }, [])
+  const onUnsupported = useCallback(() => setGlFailed(true), [])
+  const [drawPending, setDrawPending] = useState(false)
+  const onDraw = useCallback(() => {
+    setDrawPending(true)
+    void act(tdpActions.draw()).finally(() => setDrawPending(false))
+  }, [act])
   const [cell, setCell] = useState<number | null>(null)
   const [assets, setAssets] = useState(false)
   const [rollPending, setRollPending] = useState(false)
@@ -59,22 +88,48 @@ export default function TourDesPotesPlay({ state, meId, players, isHost, act, pe
     <div className="flex flex-col gap-3 pb-2">
       <FormatBar s={s} />
       <PlayersPanel s={s} players={players} meId={meId} floats={floats} dismissFloat={dismissFloat} />
-      <Board
-        s={s}
-        players={players}
-        shownPos={shownPos}
-        selected={cell}
-        onCell={setCell}
-        center={<Center s={s} players={players} meId={meId} name={name} rolling={rolling || (rollPending && s.turn === meId)} />}
-      />
+      {view3d ? (
+        <Suspense fallback={null}>
+          <Board3D
+            s={s}
+            players={players}
+            meId={meId}
+            name={name}
+            shownPos={shownPos}
+            selected={cell}
+            onCell={setCell}
+            onDraw={onDraw}
+            drawPending={drawPending}
+            cardShowing={cardUp}
+            onTwoD={() => setView(false)}
+            onUnsupported={onUnsupported}
+          />
+        </Suspense>
+      ) : (
+        <>
+          <Board
+            s={s}
+            players={players}
+            shownPos={shownPos}
+            selected={cell}
+            onCell={setCell}
+            center={<Center s={s} players={players} meId={meId} name={name} rolling={rolling || (rollPending && s.turn === meId)} />}
+          />
+          {!glFailed && (
+            <button type="button" onClick={() => setView(true)} className="mx-auto -mt-1 flex min-h-9 items-center gap-1.5 rounded-chip border-2 border-ink bg-surface px-3 font-display text-xs font-extrabold">
+              <Box className="size-4" strokeWidth={3} /> Vue 3D
+            </button>
+          )}
+        </>
+      )}
       <p className="-mt-1 text-center text-xs text-muted">Touche une case pour voir sa fiche.</p>
       <LogPanel s={s} name={name} />
 
-      <Actions s={s} meId={meId} isHost={isHost} pending={pending} left={left} name={name} send={send} onRoll={onRoll} onAssets={() => setAssets(true)} />
+      <Actions s={s} meId={meId} isHost={isHost} pending={pending} left={left} name={name} send={send} onRoll={onRoll} onDraw={onDraw} onAssets={() => setAssets(true)} />
 
       <CellSheet cell={cell} s={s} meId={meId} players={players} pending={pending} send={send} onClose={() => setCell(null)} />
       <Assets open={assets} onClose={() => setAssets(false)} s={s} meId={meId} pending={pending} send={send} onOpenCell={setCell} />
-      <EventCard s={s} initialNo={initialNo} name={name} meId={meId} />
+      <EventCard s={s} initialNo={initialNo} name={name} meId={meId} cardDelay={view3d ? DRAW_ANIM_MS : 500} onActive={setCardUp} />
     </div>
   )
 }

@@ -9503,9 +9503,16 @@ revoke all on function public.game_qui_suis_je_action(jsonb, jsonb, uuid, boolea
 -- 2 taxes (4 : 200, 38 : 100), cartes Hasard (7/22/36) et Entre potes (2/17/33).
 --
 -- TOUR : phase roll (dés serveur ; double = rejoue ; 3e double = violon)
---   -> déplacement -> résolution (loyer / taxe / carte automatiques ; lieu libre
---   -> phase buy) -> phase manage (construire / vendre, puis end_turn) ou de
---   nouveau roll après un double. Construire / vendre aussi en roll et jail.
+--   -> déplacement -> résolution (loyer / taxe automatiques ; lieu libre
+--   -> phase buy ; case Hasard / Entre potes -> phase card) -> phase manage
+--   (construire / vendre, puis end_turn) ou de nouveau roll après un double.
+--   Construire / vendre aussi en roll et jail (pas en buy / card).
+-- CARTES : arrivé sur une case carte DIRECTEMENT par les dés (lancer normal ou
+--   sortie du violon en lançant), le joueur passe en phase card
+--   (pending = {cell, deck}) et pioche lui-même avec {"type":"draw"} ; la
+--   carte est alors appliquée (déplacement, achat -> buy, loyer, violon…).
+--   Une carte qui renvoie sur une autre case carte est appliquée aussitôt
+--   (chaîne limitée à 4 cartes, pas de nouvelle phase card).
 -- VIOLON : phase jail en début de tour : pay_jail (50), use_card, ou roll (tenter
 --   un double ; au 3e échec on paie 50 et on avance du total des dés).
 -- DETTE : argent négatif du joueur au trait -> phase debt (vendre des bâtiments
@@ -9519,7 +9526,7 @@ revoke all on function public.game_qui_suis_je_action(jsonb, jsonb, uuid, boolea
 --   (N tours de table), classique (dernier en lice ; filet 3 h). Classement par
 --   fortune = argent + prix des lieux + prix des bâtiments.
 -- MINUTEUR : deadline + {"type":"tick"} (action automatique : lancer, tenter le
---   double, passer l'achat, finir le tour, vendre / faillite). turn_seconds = 0
+--   double, piocher, passer l'achat, finir le tour, vendre / faillite). turn_seconds = 0
 --   -> pas de minuteur. L'hôte : {"type":"skip"} = joueur absent (marqué away,
 --   ses tours sont joués automatiquement jusqu'à ce qu'il agisse / {"type":"back"}).
 -- PRÉVU PLUS TARD (non implémenté) : hypothèques, enchères, échanges. Points
@@ -9867,6 +9874,8 @@ begin
 end $$;
 
 -- Résolution de la case où se trouve p_p. g = {s: state, v: server}.
+-- p_depth = 0 : case atteinte par les dés (case carte -> phase card) ;
+-- > 0 : déplacement par carte (case carte -> pioche immédiate, jusqu'à 4).
 create or replace function public._tdp_land(g jsonb, p_p text, p_depth integer, p_mode text)
 returns jsonb language plpgsql volatile
 set search_path = public, extensions
@@ -9903,7 +9912,12 @@ begin
     s := public._tdp_log(s, jsonb_build_object('player', p_p, 'kind', 'tax', 'cell', i, 'amount', amt));
     s := public._tdp_le(s, jsonb_build_object('tax', amt));
   elsif t in ('hasard', 'entre_potes') then
-    if p_depth < 4 then
+    if p_depth = 0 then
+      -- Atteinte directement par les dés : le joueur piochera lui-même (draw).
+      s := s || jsonb_build_object('phase', 'card',
+                                   'pending', jsonb_build_object('cell', i,
+                                     'deck', case t when 'hasard' then 'hasard' else 'potes' end));
+    elsif p_depth < 4 then
       return public._tdp_card(jsonb_build_object('s', s, 'v', v), p_p,
                               case t when 'hasard' then 'hasard' else 'potes' end, p_depth);
     end if;
@@ -10190,8 +10204,9 @@ begin
   return jsonb_build_object('s', s, 'v', g->'v');
 end $$;
 
--- Après une résolution (lancer, achat, vente en dette…) : dettes des autres
--- joueurs (vente auto / faillite), puis phase du joueur au trait.
+-- Après une résolution (lancer, pioche, achat, vente en dette…) : dettes des
+-- autres joueurs (vente auto / faillite), puis phase du joueur au trait
+-- (buy / card conservées, sinon roll après un double, sinon manage).
 create or replace function public._tdp_settle(g jsonb)
 returns jsonb language plpgsql stable
 set search_path = public, extensions
@@ -10217,6 +10232,8 @@ begin
       s := public._tdp_log(s, jsonb_build_object('player', t, 'kind', 'pass_buy',
                                                  'cell', (s->'pending'->>'cell')::integer));
       s := s || jsonb_build_object('pending', null);
+    elsif s->>'phase' = 'card' then
+      s := s || jsonb_build_object('pending', null);  -- (ne devrait pas arriver) pas de pioche endetté
     end if;
     if (s->'cash'->>t)::integer + public._tdp_sale_value(s, t) < 0 then
       g := public._tdp_bankrupt(jsonb_build_object('s', s, 'v', g->'v'), t);
@@ -10225,7 +10242,7 @@ begin
     s := s || jsonb_build_object('phase', 'debt');
     s := public._tdp_log(s, jsonb_build_object('player', t, 'kind', 'debt',
                                                'amount', -(s->'cash'->>t)::integer));
-  elsif s->>'phase' <> 'buy' then
+  elsif s->>'phase' not in ('buy', 'card') then
     s := s || jsonb_build_object('phase',
       case when coalesce((s->>'doubles')::integer, 0) > 0 and not (coalesce(s->'jail', '{}'::jsonb) ? t)
            then 'roll' else 'manage' end);
@@ -10348,6 +10365,22 @@ begin
   return public._tdp_settle(jsonb_build_object('s', s, 'v', g->'v'));
 end $$;
 
+-- Pioche de la carte en attente (phase card) puis suite du tour.
+create or replace function public._tdp_draw(g jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  t    text := g->'s'->>'turn';
+  deck text := g->'s'->'pending'->>'deck';
+begin
+  g := jsonb_set(g, '{s}', (g->'s') || jsonb_build_object('phase', 'resolved', 'pending', null));
+  if deck in ('hasard', 'potes') then
+    g := public._tdp_card(g, t, deck, 0);
+  end if;
+  return public._tdp_settle(g);
+end $$;
+
 -- Une décision automatique pour le joueur au trait (minuteur / absent).
 create or replace function public._tdp_auto_step(g jsonb)
 returns jsonb language plpgsql volatile
@@ -10362,6 +10395,8 @@ begin
     return public._tdp_do_roll(g);
   elsif ph = 'jail' then
     return public._tdp_jail_roll(g);
+  elsif ph = 'card' then
+    return public._tdp_draw(g);
   elsif ph = 'buy' then
     return public._tdp_decide_buy(g, false);
   elsif ph = 'manage' then
@@ -10494,7 +10529,7 @@ begin
 end $$;
 
 -- -----------------------------------------------------------------------------
--- Actions (joueur au trait) : roll | pay_jail | use_card | buy | pass |
+-- Actions (joueur au trait) : roll | pay_jail | use_card | draw | buy | pass |
 --   build {cell} | sell {cell} | end_turn.  Tous : tick.  Hôte : skip.
 --   Joueur absent : back.  (abort : moteur.)
 -- -----------------------------------------------------------------------------
@@ -10518,7 +10553,7 @@ declare
   lvl     integer;
   x       integer;
 begin
-  if v_phase is null or v_phase not in ('roll', 'jail', 'buy', 'manage', 'debt') then raise exception 'wrong_phase'; end if;
+  if v_phase is null or v_phase not in ('roll', 'jail', 'card', 'buy', 'manage', 'debt') then raise exception 'wrong_phase'; end if;
 
   if v_type = 'tick' then
     if p_state->>'deadline' is null or now() < (p_state->>'deadline')::timestamptz then
@@ -10528,7 +10563,7 @@ begin
     if not p_is_host then raise exception 'not_host'; end if;
   elsif v_type = 'back' then
     if not ((p_state->'players') ? v_me) then raise exception 'not_a_player'; end if;
-  elsif v_type in ('roll', 'pay_jail', 'use_card', 'buy', 'pass', 'build', 'sell', 'end_turn') then
+  elsif v_type in ('roll', 'pay_jail', 'use_card', 'draw', 'buy', 'pass', 'build', 'sell', 'end_turn') then
     if not ((p_state->'players') ? v_me) then raise exception 'not_a_player'; end if;
     if not ((p_state->'alive') ? v_me) then raise exception 'not_alive'; end if;
     if t is distinct from v_me then raise exception 'not_your_turn'; end if;
@@ -10588,6 +10623,10 @@ begin
     s := s || jsonb_build_object('jail', (s->'jail') - t, 'phase', 'roll');
     s := public._tdp_deadline(s, 0);
     g := jsonb_set(g, '{s}', s);
+
+  elsif v_type = 'draw' then
+    if v_phase <> 'card' then raise exception 'wrong_phase'; end if;
+    g := public._tdp_draw(g);
 
   elsif v_type in ('buy', 'pass') then
     if v_phase <> 'buy' then raise exception 'wrong_phase'; end if;
@@ -10682,6 +10721,7 @@ revoke all on function public._tdp_new_event(jsonb, text, integer) from public, 
 revoke all on function public._tdp_do_roll(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_jail_roll(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_decide_buy(jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._tdp_draw(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_auto_step(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_auto_turn(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_run_away(jsonb) from public, anon, authenticated;
