@@ -24,6 +24,8 @@ export interface TenueDef {
   duel?: boolean
   /** Dossier des illustrations (public/chibis/<slug>/<art>/ + portraits/<art>.webp) ; absent = pas d'illustration. */
   art?: string
+  /** Dossier propre à cette tenue, prioritaire sur `art` pour les persos qui l'ont (ex. Star à paillettes vs Star de cinéma). */
+  artOwn?: string
   /** true = débloquée d'office */
   default?: boolean
 }
@@ -51,10 +53,10 @@ export const DEFAULT_TENUE: TenueId = 'default'
 
 export const TENUES: TenueDef[] = [
   { id: 'default', label: 'Tenue de soirée', emoji: '🎉', gameId: null, threshold: 0, condition: 'Débloquée d\'office', default: true, art: 'default' },
-  { ...wins('star', 'Star', '🌟', 'qui-de-nous', 'Qui de nous ?'), art: 'cinema' },
+  { ...wins('star', 'Star', '🌟', 'qui-de-nous', 'Qui de nous ?'), art: 'cinema', artOwn: 'star' },
   { ...wins('espion', 'Espion', '🕵️', 'undercover', 'Undercover'), art: 'spy' },
   { ...wins('croupier', 'Croupier', '🃏', 'pas-de-bol', 'Pas de bol !'), art: 'croupier' },
-  { ...wins('prof', 'Prof', '🎓', 'cerveau-en-fete', 'Cerveau en fête'), art: 'student' },
+  { ...wins('prof', 'Prof', '🎓', 'cerveau-en-fete', 'Cerveau en fête'), art: 'student', artOwn: 'teacher' },
   { ...wins('ecolier', 'Écolier', '🎒', 'petit-bac', 'Petit bac'), art: 'student' },
   { ...wins('artiste', 'Artiste', '🎨', 'dessine-devine', 'Dessine & devine'), art: 'painter' },
   { ...wins('loup', 'Loup', '🐺', 'loup-garou', 'Loup-garou'), art: 'werewolf' },

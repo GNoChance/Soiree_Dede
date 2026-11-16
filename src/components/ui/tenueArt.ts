@@ -22,17 +22,21 @@ let version = 0
 const key = (slug: string, tenue: string) => `${slug}/${tenue}`
 
 /** Dossier d'illustrations d'une tenue (undefined = pas d'illustration). */
-export const tenueArtDir = (tenue: string): string | undefined => getTenue(tenue)?.art
+export function tenueArtDir(tenue: string, slug?: string): string | undefined {
+  const def = getTenue(tenue)
+  if (def?.artOwn && slug && known.has(key(slug, def.artOwn))) return def.artOwn
+  return def?.art
+}
 
 export function hasTenueArt(slug: string, tenue: string): boolean {
   if (tenue === DEFAULT_TENUE) return true
-  const dir = tenueArtDir(tenue)
+  const dir = tenueArtDir(tenue, slug)
   return Boolean(dir && known.has(key(slug, dir)) && !failed.has(key(slug, tenue)))
 }
 
 /** URL du portrait de tenue (carte de succès), ou null. */
 export function tenuePortraitUrl(slug: string, tenue: string, thumb = false): string | null {
-  const dir = tenueArtDir(tenue)
+  const dir = tenueArtDir(tenue, slug)
   if (!dir || !portraits.has(key(slug, dir))) return null
   return `/chibis/${slug}/portraits/${dir}${thumb ? '@thumb' : ''}.webp`
 }
@@ -40,7 +44,7 @@ export function tenuePortraitUrl(slug: string, tenue: string, thumb = false): st
 /** Expressions dessinées pour ce perso dans cette tenue (tenue sans illustration -> planche de base). */
 export function tenuePalette(slug: string, tenue: string): readonly string[] {
   if (tenue === DEFAULT_TENUE || !hasTenueArt(slug, tenue)) return getCharacter(slug)?.expressions ?? ['joie']
-  const dir = tenueArtDir(tenue)!
+  const dir = tenueArtDir(tenue, slug)!
   return COSTUME_EXPRESSIONS.filter((e) => !bad.has(`${slug}/${dir}/${e}`))
 }
 
@@ -72,7 +76,7 @@ export function useTenueArt(slug: string, tenue: string | undefined, expression 
     /** Tenue affichée (id). */
     tenue: shown,
     /** Dossier des images. */
-    dir: shown === DEFAULT_TENUE ? 'default' : tenueArtDir(shown)!,
+    dir: shown === DEFAULT_TENUE ? 'default' : tenueArtDir(shown, slug)!,
     /** Expression à afficher. */
     expression: expressionIn(tenuePalette(slug, shown), expression),
     /** Emoji à afficher en coin quand la tenue équipée n'a pas (encore) d'illustration. */

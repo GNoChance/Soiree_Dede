@@ -14,15 +14,17 @@ const BAD = [
   'carole/actor/pouces',
   'cecile/pyro/colere',
   'cecile/philosopher/pouces',
-  'nini/coach/pouces',
-  'nini/croupier/pleurs',
 ];
 
+const EXPR = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine'.split(' ');
 const art = [];
 const portraits = [];
 for (const slug of Object.keys(manifest).sort()) {
   for (const c of manifest[slug].costumes ?? []) {
-    if (fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, 'joie.webp'))) art.push(`${slug}/${c}`);
+    if (!fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, 'joie.webp'))) continue;
+    art.push(`${slug}/${c}`);
+    // expressions non dessinées sur la planche : écartées (repli sur une voisine)
+    for (const e of EXPR) if (!fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, `${e}.webp`)) && !BAD.includes(`${slug}/${c}/${e}`)) BAD.push(`${slug}/${c}/${e}`);
   }
   for (const c of manifest[slug].portraits ?? []) {
     if (fs.existsSync(path.join(ROOT, 'public/chibis', slug, 'portraits', c + '.webp'))) portraits.push(`${slug}/${c}`);

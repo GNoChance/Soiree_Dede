@@ -242,29 +242,38 @@
   },
   "nini": {
     "costumes": [
-      "spy",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star",
       "cinema",
-      "student",
-      "croupier",
-      "painter",
-      "pirate",
-      "philosopher",
-      "actor",
-      "coach"
-    ],
-    "portraits": [
       "spy",
-      "cinema",
-      "student",
       "croupier",
+      "teacher",
+      "student",
       "painter",
       "werewolf",
-      "pyro",
       "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach"
+      "philosopher"
+    ],
+    "portraits": [
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star",
+      "cinema",
+      "spy",
+      "croupier",
+      "teacher",
+      "student",
+      "painter",
+      "werewolf",
+      "pirate",
+      "philosopher"
     ]
   }
 }
