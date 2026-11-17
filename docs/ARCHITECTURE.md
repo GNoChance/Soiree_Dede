@@ -233,7 +233,7 @@ Course de karts 3D arcade, **3 à 12 joueurs, tous en même temps**, chacun sur 
 - Contrôles : glisser/toucher gauche-droite pour tourner, accélération automatique, bouton Drift, bouton Objet. Clavier sur ordinateur (flèches/ZQSD, Espace, Entrée).
 - **Coupe de 3 circuits**, points par place à chaque course ; option « 1 seule course ».
 - Bonus avec **rattrapage** : le tirage dépend de ta place (les derniers reçoivent les gros bonus).
-- **Bots** : nombre choisi par l'hôte (option `bots`, total ≤ 12). Les bots tournent côté client de l'hôte, sur la spline du circuit.
+- **Bots** : nombre choisi par l'hôte (option `fill`, total ≤ 12). Ils sont conduits par le **premier joueur présent** (ordre de `players`, présence = positions reçues depuis < 2,5 s ; pendant le décompte, tout le monde est supposé présent). Si ce joueur disparaît, le suivant reprend les bots depuis leur dernier état (`Game.setBotDriver`, champs `l`/`c` du broadcast). N'importe quel joueur peut envoyer les actions d'un bot (`"bot":"botK"`) ; un tour de bot décalé est ignoré sans erreur.
 - **Stats identiques** pour tous. Chaque perso a son kart (sprite chibi de sa tenue équipée dans un kart de sa couleur) et son klaxon ; rien qui change la vitesse.
 
 ### Options (hôte)

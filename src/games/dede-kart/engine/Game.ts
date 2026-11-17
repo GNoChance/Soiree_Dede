@@ -69,6 +69,9 @@ export interface KartSnap {
   b: number
   /** progression (classement en direct) */
   p: number
+  /** tour / dernier checkpoint (reprise des bots par un autre téléphone) */
+  l?: number
+  c?: number
   /** temps d'arrivée (s) ou null */
   f: number | null
   /** effets visibles (bits E_*) */
@@ -86,6 +89,8 @@ export interface GameOptions {
   meId: string | null
   /** Bots simulés sur CE téléphone (l'hôte en multi). Les autres karts non locaux sont distants. */
   localBots: string[]
+  /** Tous les bots de la course (leur conducteur peut changer en cours de route). */
+  botIds?: string[]
   /** Feu vert (ms, horloge `now`). */
   goAt: number
   /** Horloge commune (serverNow en multi). */
@@ -296,6 +301,8 @@ export class Game {
         d: r.driftDir,
         b: r.boost > 0 ? 1 : 0,
         p: Math.round(this.progress(r)),
+        l: r.lap,
+        c: r.cp,
         f: r.finish,
         e: (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0) | (r.air > 0 ? E_AIR : 0),
         t,
@@ -469,6 +476,38 @@ export class Game {
     r.netP = s.p
     r.finish = s.f
     r.e = s.e ?? 0
+    if (typeof s.l === 'number') r.lap = s.l
+    if (typeof s.c === 'number') r.cp = s.c
+  }
+
+  /**
+   * Ce téléphone conduit-il les bots ? (le premier joueur présent, cf. Play).
+   * Reprise : on part du dernier état reçu (position, cap, vitesse, tour, checkpoint).
+   * Abandon : les bots redeviennent distants et suivent les paquets du nouveau conducteur.
+   */
+  setBotDriver(on: boolean) {
+    for (const id of this.o.botIds ?? []) {
+      const r = this.byId.get(id)
+      if (!r || r.kind === 'me' || (on ? r.kind === 'bot' : r.kind === 'remote')) continue
+      if (on) {
+        const last = r.buf[r.buf.length - 1]
+        if (last) {
+          r.x = last.x
+          r.z = last.z
+          r.heading = last.h
+          r.speed = last.s
+        }
+        r.idx = this.track.locate(r.x, r.z, -1).i
+        r.lat = this.track.locate(r.x, r.z, r.idx).lat
+        r.driftDir = 0
+        r.charge = 0
+        r.kind = 'bot'
+      } else {
+        r.netP = this.progress(r)
+        r.kind = 'remote'
+      }
+      r.buf = []
+    }
   }
 
   dispose() {

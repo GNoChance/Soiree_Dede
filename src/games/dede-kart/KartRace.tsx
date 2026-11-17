@@ -9,6 +9,8 @@ interface Props {
   drivers: Driver[]
   /** Mon kart (null = spectateur). */
   meId: string | null
+  /** Tous les bots (conducteur variable, cf. Game.setBotDriver). */
+  botIds?: string[]
   /** Bots simulés sur ce téléphone. */
   localBots: string[]
   /** Feu vert (ms, horloge `now`). */
@@ -45,7 +47,7 @@ export default function KartRace(p: Props) {
   useEffect(() => {
     if (!host.current) return
     const g = new Game(host.current, {
-      track, laps, drivers, meId, localBots, goAt, now, autopilot,
+      track, laps, drivers, meId, localBots, goAt, now, autopilot, botIds: p.botIds,
       onHud: setHud,
       onLap: (id, n) => cb.current.onLap?.(id, n),
       onUse: (id, u) => cb.current.onUse?.(id, u),

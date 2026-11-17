@@ -26,18 +26,44 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
     [roster],
   )
   const track = TRACKS[s.track % TRACKS.length]
-  const localBots = useMemo(() => (isHost ? s.bots : []), [isHost, s.bots])
+  // Conducteur des bots = le premier joueur (ordre de s.players) réellement présent.
+  // Au départ : le 1er joueur ; ensuite on suit qui envoie des positions.
+  const firstDriver = s.players[0] === meId
+  const localBots = useMemo(() => (firstDriver ? s.bots : []), [firstDriver, s.bots])
   const goAt = useMemo(() => Date.parse(s.go_at), [s.go_at])
 
   // réseau : ~8 envois/s (un peu moins quand on est nombreux)
   const game = useRef<Game | null>(null)
+  const seen = useRef(new Map<string, number>())
   const period = s.players.length > 8 ? 150 : 120
   useKartNet(
     matchId,
     period,
     () => (s.phase === 'racing' ? game.current?.snapshots() ?? [] : []),
-    (snaps: KartSnap[]) => snaps.forEach((k) => game.current?.applyRemote(k)),
+    (snaps: KartSnap[]) => {
+      const now = Date.now()
+      for (const k of snaps) {
+        if (s.players.includes(k.id)) seen.current.set(k.id, now)
+        game.current?.applyRemote(k)
+      }
+    },
   )
+  useEffect(() => {
+    if (s.phase !== 'racing' || !s.bots.length) return
+    const elect = () => {
+      const now = Date.now()
+      // pendant le décompte, tout le monde est supposé présent (le temps de se voir)
+      const grace = serverNow() < goAt - 2000
+      const driver = s.players.find(
+        (id) =>
+          grace ||
+          (id === meId ? document.visibilityState === 'visible' : (seen.current.get(id) ?? 0) > now - 2500),
+      )
+      game.current?.setBotDriver(driver === meId)
+    }
+    const t = setInterval(elect, 500)
+    return () => clearInterval(t)
+  }, [s.phase, s.players, s.bots, meId, goAt])
   // objets : pièges/projectiles et effets du state transmis au moteur
   const hazards = s.hazards
   const fx = s.fx
@@ -51,13 +77,13 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
     g?.syncItems(items.current.hazards ?? [], items.current.fx ?? [])
   }, [])
 
-  // actions d'un kart : le mien, ou un bot (seul l'hôte en a)
+  // actions d'un kart : le mien, ou un bot que ce téléphone conduit
   const send = useCallback(
     (id: string, a: Record<string, unknown> & { type: string }) => {
       if (id === meId) void act(a)
-      else if (isHost) void act({ ...a, bot: id })
+      else if (s.bots.includes(id)) void act({ ...a, bot: id })
     },
-    [act, isHost, meId],
+    [act, meId, s.bots],
   )
   const onLap = useCallback((id: string, completed: number) => send(id, dkActions.lap(completed)), [send])
   const onUse = useCallback((id: string, u: UsePayload) => send(id, dkActions.use(u)), [send])
@@ -122,6 +148,7 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
       drivers={drivers}
       meId={isPlayer ? meId : null}
       localBots={localBots}
+      botIds={s.bots}
       goAt={goAt}
       now={serverNow}
       showResults={false}

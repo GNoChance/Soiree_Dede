@@ -48,14 +48,15 @@ begin
     'fx', '[]'::jsonb);
 end $$;
 
--- Auteur d'une action : le joueur, ou un bot (champ "bot", réservé à l'hôte).
+-- Auteur d'une action : le joueur, ou un bot (champ "bot"). Les bots sont conduits par
+-- le premier joueur présent (cf. Play.tsx) : n'importe quel joueur (ou l'hôte) peut agir pour eux.
 create or replace function public._dk_actor(p_state jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
 returns text language plpgsql stable
 set search_path = public, extensions
 as $$
 begin
   if p_action ? 'bot' then
-    if not p_is_host then raise exception 'not_host'; end if;
+    if not (p_is_host or (p_state->'players') ? p_actor::text) then raise exception 'not_a_player'; end if;
     if not ((p_state->'bots') ? (p_action->>'bot')) then raise exception 'invalid_action'; end if;
     return p_action->>'bot';
   end if;
@@ -233,7 +234,11 @@ begin
     if v_lap <= v_done or (p_state->'finish') ? v_id then
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
-    if v_lap <> v_done + 1 then raise exception 'wrong_lap'; end if;
+    if v_lap <> v_done + 1 then
+      -- bot repris par un autre téléphone : compteur décalé, ignoré sans erreur
+      if p_action ? 'bot' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+      raise exception 'wrong_lap';
+    end if;
     v_prev := coalesce((p_state->'lap_at'->>v_id)::timestamptz, (p_state->>'go_at')::timestamptz);
     if now() - v_prev < make_interval(secs => public._dk_min_lap_ms((p_state->>'track')::integer) / 1000.0) then
       raise exception 'too_fast';
