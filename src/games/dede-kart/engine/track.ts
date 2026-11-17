@@ -73,6 +73,11 @@ export class Track {
     return this.def.boosts.some(([a, b]) => f >= a && f <= b)
   }
 
+  isJump(i: number) {
+    const f = i / this.n
+    return this.def.jumps.some(([a, b]) => f >= a && f <= b)
+  }
+
   /** Ruban le long de la piste entre deux écarts latéraux. */
   private ribbon(i0: number, i1: number, a: number, b: number, y: number, col: (k: number) => THREE.Color) {
     const pos: number[] = []
@@ -124,6 +129,18 @@ export class Track {
     for (const [f0, f1] of this.def.boosts) {
       add(this.ribbon(Math.floor(f0 * this.n), Math.ceil(f1 * this.n), -h * 0.55, h * 0.55, 0.05, (k) => (k % 2 ? padA : padB)))
     }
+    // tremplins : rampe rayée noir/jaune sur toute la largeur
+    const rampA = new THREE.Color('#1B1B2F')
+    const rampB = new THREE.Color('#FFD23F')
+    for (const [f0, f1] of this.def.jumps) {
+      const i0 = Math.floor(f0 * this.n)
+      const i1 = Math.ceil(f1 * this.n)
+      const ramp = this.ribbon(i0, i1, -h, h, 0.06, (k) => (k % 2 ? rampA : rampB))
+      // la rampe monte jusqu'au bord de saut
+      const pos = ramp.getAttribute('position')
+      for (let v = 0; v < pos.count; v++) pos.setY(v, 0.06 + (Math.floor(v / 2) / Math.max(1, i1 - i0)) * 0.9)
+      add(ramp)
+    }
     // sol
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.MeshBasicMaterial({ color: c.ground }))
     ground.rotation.x = -Math.PI / 2
@@ -140,16 +157,32 @@ export class Track {
         spots.push({ x, z, s: 1.5 + rnd() * 3.5 })
       }
     }
-    const decor = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), spots.length)
+    // décor en instancing (un seul appel de rendu par forme) : cubes de jouets, parasols ou sapins
+    const parts: { geo: THREE.BufferGeometry; y: (s: number) => number; scale: (s: number) => THREE.Vector3; color: (k: number) => string }[] =
+      this.def.decor === 'parasols'
+        ? [
+            { geo: new THREE.CylinderGeometry(0.12, 0.12, 1, 6), y: (s) => s * 0.6, scale: (s) => new THREE.Vector3(1, s * 1.2, 1), color: () => '#FFFFFF' },
+            { geo: new THREE.ConeGeometry(1, 0.6, 10), y: (s) => s * 1.25, scale: (s) => new THREE.Vector3(s * 0.9, s * 0.6, s * 0.9), color: (k) => c.decor[k % c.decor.length] },
+          ]
+        : this.def.decor === 'pines'
+          ? [
+              { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 1.1, scale: (s) => new THREE.Vector3(s * 0.75, s * 2.2, s * 0.75), color: (k) => c.decor[k % c.decor.length] },
+              { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 2.0, scale: (s) => new THREE.Vector3(s * 0.32, s * 0.5, s * 0.32), color: () => '#FFFFFF' },
+            ]
+          : [{ geo: new THREE.BoxGeometry(1, 1, 1), y: (s) => s / 2, scale: (s) => new THREE.Vector3(s, s, s), color: (k) => c.decor[k % c.decor.length] }]
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
-    spots.forEach((p, k) => {
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI)
-      m.compose(new THREE.Vector3(p.x, p.s / 2, p.z), q, new THREE.Vector3(p.s, p.s, p.s))
-      decor.setMatrixAt(k, m)
-      decor.setColorAt(k, new THREE.Color(c.decor[k % c.decor.length]))
-    })
-    group.add(decor)
+    const angles = spots.map(() => rnd() * Math.PI)
+    for (const part of parts) {
+      const mesh = new THREE.InstancedMesh(part.geo, new THREE.MeshLambertMaterial(), spots.length)
+      spots.forEach((p, k) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angles[k])
+        m.compose(new THREE.Vector3(p.x, part.y(p.s), p.z), q, part.scale(p.s))
+        mesh.setMatrixAt(k, m)
+        mesh.setColorAt(k, new THREE.Color(part.color(k)))
+      })
+      group.add(mesh)
+    }
     return group
   }
 }

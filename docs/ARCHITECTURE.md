@@ -240,9 +240,10 @@ Course de karts 3D arcade, **3 à 12 joueurs, tous en même temps**, chacun sur 
 `{ "cup": true|false, "laps": 2|3, "bots": 0..11 }` (défaut : coupe, 3 tours, 0 bot).
 
 ### Circuits (`src/games/dede-kart/tracks.ts`, géométrie côté client ; le serveur ne connaît que `checkpoints` et `min_cp_ms`)
-1. **Circuit du Salon** : boucle facile, tapis (hors-piste lent), 2 dalles turbo.
-2. **Plage Tongs-Palace** : sable, parasols, un saut sur la jetée.
-3. **Montagne Raclette** : virages serrés, neige, rampe, raccourci risqué.
+1. **Circuit du Salon** 🛋️ : décor de cubes-jouets, 2 dalles turbo.
+2. **Plage Tongs-Palace** 🏖️ : route en planches, parasols, 2 dalles turbo, 1 tremplin.
+3. **Montagne Raclette** 🏔️ : neige, sapins, 2 dalles turbo, 2 tremplins.
+Tracés vérifiés : rayon de virage ≥ 22 et portions de piste espacées de ≥ 30 (sinon le ruban de piste se replie et le repérage des karts déraille). Tremplin : saut de 0,75 s si on arrive vite (on passe au-dessus de la glue), bit `E_AIR` dans le broadcast. Karts : 3 formes (classique, bolide, buggy) selon le perso (`kartOf`), couleur du perso. Tenue `pilote` 🏎️ (10 victoires, dossier d'art `racer` à fournir : planches + portraits).
 
 ### Course
 Phases : `countdown` (3-2-1, `deadline` = feu vert) → `racing` → `results` (classement de la course + points) → course suivante ou `finished`. Course terminée quand tous ont fini, ou 30 s après l'arrivée du 1er (les autres classés à leur progression), ou l'hôte la coupe.

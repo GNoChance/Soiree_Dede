@@ -76,6 +76,9 @@ export class Sfx {
   hit() {
     this.tone(700, 90, 0.6, 'sawtooth', 0.08)
   }
+  jump() {
+    this.tone(300, 700, 0.3, 'triangle', 0.07)
+  }
   pop() {
     this.tone(1200, 300, 0.12, 'triangle', 0.08)
   }

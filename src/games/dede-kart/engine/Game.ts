@@ -8,6 +8,8 @@ export interface Driver {
   id: string
   name: string
   color: string
+  /** Forme du kart (0 classique, 1 bolide, 2 buggy). */
+  kart?: number
   /** Image du pilote (chibi). */
   sprite: string
 }
@@ -48,6 +50,9 @@ const E_STAR = 1
 const E_BUBBLE = 2
 const E_SPIN = 4
 const E_SLOW = 8
+const E_AIR = 16
+/** Durée d'un saut de tremplin (s). */
+const AIR = 0.75
 
 /** État d'un kart diffusé en broadcast (~8 Hz). */
 export interface KartSnap {
@@ -150,6 +155,9 @@ interface Racer {
   reverse: number
   confetti: number
   spinA: number
+  /** saut en cours (s restantes) */
+  air: number
+  prevE: number
   /** effets distants (bits E_*) */
   e: number
   body: THREE.MeshLambertMaterial
@@ -222,7 +230,7 @@ export class Game {
         skill: 0.84 + ((k * 37) % 13) / 100,
         botLat: lat * 0.9,
         buf: [], netP: 0,
-        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, e: 0,
+        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, air: 0, prevE: 0, e: 0,
         ...this.makeKart(d, loader),
       }
       r.netP = this.progress(r)
@@ -281,7 +289,7 @@ export class Game {
         b: r.boost > 0 ? 1 : 0,
         p: Math.round(this.progress(r)),
         f: r.finish,
-        e: (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0),
+        e: (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0) | (r.air > 0 ? E_AIR : 0),
         t,
       }))
   }
@@ -424,7 +432,7 @@ export class Game {
       const hx = v.ball ? v.ball.x : v.hz.x
       const hz = v.ball ? v.ball.z : v.hz.z
       for (const r of this.racers) {
-        if (r.kind === 'remote' || r.finish !== null || r.spin > 0) continue
+        if (r.kind === 'remote' || r.finish !== null || r.spin > 0 || r.air > 0) continue
         // son propre objet ne touche qu'après un court délai
         if (r.d.id === v.hz.owner && age < (v.ball ? 0.6 : 1.5)) continue
         if ((r.x - hx) ** 2 + (r.z - hz) ** 2 > (v.ball ? 4 : 5.3)) continue
@@ -474,9 +482,28 @@ export class Game {
       mesh.position.set(x, y, 0)
       g.add(mesh)
     }
-    box(2.4, 0.45, 1.3, 0, 0.55, body)
-    box(0.9, 0.3, 1.5, 1.1, 0.5, dark)
-    box(0.35, 0.8, 1.2, -0.95, 0.95, body)
+    const stripe = new THREE.MeshLambertMaterial({ color: new THREE.Color(d.color).lerp(new THREE.Color('#FFFFFF'), 0.55) })
+    const v = d.kart ?? 0
+    if (v === 1) {
+      // bolide : long et bas, grand aileron
+      box(2.8, 0.38, 1.25, 0, 0.5, body)
+      box(1.2, 0.22, 1.32, 1.0, 0.45, dark)
+      box(2.8, 0.06, 0.3, 0, 0.72, stripe)
+      box(0.25, 0.7, 0.12, -1.3, 0.95, dark)
+      box(0.55, 0.1, 1.9, -1.35, 1.32, body)
+    } else if (v === 2) {
+      // buggy : haut sur pattes, arceau
+      box(2.2, 0.6, 1.4, 0, 0.7, body)
+      box(0.8, 0.3, 1.5, 1.05, 0.55, stripe)
+      box(0.12, 1.1, 0.12, -1.05, 1.2, dark)
+      box(0.12, 0.12, 1.3, -1.05, 1.75, dark)
+    } else {
+      // classique
+      box(2.4, 0.45, 1.3, 0, 0.55, body)
+      box(0.9, 0.3, 1.5, 1.1, 0.5, dark)
+      box(0.35, 0.8, 1.2, -0.95, 0.95, body)
+      box(2.4, 0.06, 0.28, 0, 0.8, stripe)
+    }
     const wheel = new THREE.CylinderGeometry(0.42, 0.42, 0.36, 12)
     wheel.rotateX(Math.PI / 2)
     const sparks: THREE.Mesh[] = []
@@ -565,7 +592,7 @@ export class Game {
   private step(r: Racer, steer: number, drift: boolean, brake: boolean, dt: number) {
     const tr = this.track
     const isMe = r === this.me
-    const off = Math.abs(r.lat) > tr.half && r.star <= 0
+    const off = Math.abs(r.lat) > tr.half && r.star <= 0 && r.air <= 0
     let max = (off ? OFFROAD : MAX) * (r.kind === 'bot' ? r.skill : 1)
     if (r.boost > 0) {
       r.boost -= dt
@@ -623,6 +650,12 @@ export class Game {
     if (!off && tr.isBoost(r.idx) && r.boost < 1) {
       if (isMe && r.boost <= 0) this.sfx.boost(1)
       r.boost = 1
+    }
+    // tremplin : saut si on arrive vite (en l'air : on garde le cap)
+    if (r.air > 0) r.air = Math.max(0, r.air - dt)
+    else if (tr.isJump(r.idx) && r.speed > 15) {
+      r.air = AIR
+      if (isMe) this.sfx.jump()
     }
     // checkpoints et tours (le 1er passage de la ligne = départ, pas un tour bouclé)
     const c = Math.floor((r.idx / tr.n) * CHECKPOINTS)
@@ -746,10 +779,17 @@ export class Game {
     }
 
     for (const r of this.racers) {
-      const e = r.kind === 'remote' ? r.e : (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0)
-      if (r.kind === 'remote') r.spinA = e & E_SPIN ? r.spinA + dt * 14 : 0
+      const e = r.kind === 'remote' ? r.e : (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0) | (r.air > 0 ? E_AIR : 0)
+      if (r.kind === 'remote') {
+        r.spinA = e & E_SPIN ? r.spinA + dt * 14 : 0
+        // saut distant : déclenché sur le front montant du bit E_AIR
+        if (e & E_AIR && !(r.prevE & E_AIR)) r.air = AIR
+        else r.air = Math.max(0, r.air - dt)
+        r.prevE = e
+      }
+      const lift = r.air > 0 ? Math.sin(Math.PI * (1 - r.air / AIR)) * 2.6 : 0
       r.yaw += (r.driftDir * 0.4 - r.yaw) * Math.min(1, 10 * dt)
-      r.mesh.position.set(r.x, r.driftDir ? 0.08 : 0, r.z)
+      r.mesh.position.set(r.x, (r.driftDir ? 0.08 : 0) + lift, r.z)
       r.mesh.rotation.y = -(r.heading + r.yaw + r.spinA)
       if (e & E_STAR) r.body.color.setHSL((performance.now() / 400) % 1, 0.9, 0.55)
       else r.body.color.set(r.d.color)

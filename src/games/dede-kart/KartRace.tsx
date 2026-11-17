@@ -101,9 +101,12 @@ export default function KartRace(p: Props) {
             </div>
           </div>
 
-          {hud.phase === 'countdown' && hud.count > 0 && (
-            <div className="pointer-events-none absolute inset-0 grid place-items-center font-display text-9xl font-extrabold text-white [text-shadow:6px_6px_0_#1B1B2F]">
-              {hud.count}
+          {hud.phase === 'countdown' && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-white [text-shadow:4px_4px_0_#1B1B2F]">
+              <div className="font-display text-3xl font-extrabold">
+                {track.emoji} {track.name}
+              </div>
+              {hud.count > 0 && <div className="font-display text-9xl font-extrabold">{hud.count}</div>}
             </div>
           )}
           {hud.phase === 'racing' && hud.time < 1 && (
