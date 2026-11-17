@@ -37,6 +37,7 @@ export default function KartRace(p: Props) {
   const game = useRef<Game | null>(null)
   const [hud, setHud] = useState<Hud | null>(null)
   const done = useRef(false)
+  const [muted, setMuted] = useState(false)
   // callbacks dans une ref : un nouveau rendu du parent ne recrée pas la scène
   const cb = useRef(p)
   cb.current = p
@@ -51,6 +52,7 @@ export default function KartRace(p: Props) {
       onHit: (id, h) => cb.current.onHit?.(id, h),
     })
     game.current = g
+    setMuted(g.muted)
     done.current = false
     cb.current.onReady?.(g)
     return () => {
@@ -188,6 +190,18 @@ export default function KartRace(p: Props) {
           )}
         </>
       )}
+      <button
+        type="button"
+        onClick={() => {
+          const m = !muted
+          game.current?.setMuted(m)
+          setMuted(m)
+        }}
+        aria-label={muted ? 'Remettre le son' : 'Couper le son'}
+        className="absolute left-3 top-20 z-10 grid size-11 place-items-center rounded-full border-[3px] border-ink bg-surface text-xl shadow-sticker-sm"
+      >
+        {muted ? '🔇' : '🔊'}
+      </button>
       {children}
     </div>
   )

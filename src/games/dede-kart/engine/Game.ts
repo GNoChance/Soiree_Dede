@@ -269,6 +269,14 @@ export class Game {
     this.raf = requestAnimationFrame(this.frame)
   }
 
+  get muted() {
+    return this.sfx.muted
+  }
+
+  setMuted(m: boolean) {
+    this.sfx.setMuted(m)
+  }
+
   /** Bouton Drift de l'écran tactile. */
   setDrift(on: boolean) {
     this.driftBtn = on
