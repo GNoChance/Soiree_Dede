@@ -55,7 +55,7 @@ export function InventoryPage() {
   if (!profile) return null
 
   // Stickers bonus (extra1…) : libres dès que la tenue est portée.
-  const isUnlocked = (id: string) => /^extrad+$/.test(id) || Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
+  const isUnlocked = (id: string) => /^extra\d+$/.test(id) || Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
   // Palette de la tenue portée : la tenue débloque la planche, chaque expression garde son défi.
   const tenue = profile.equipped_tenue ?? 'default'
   const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
