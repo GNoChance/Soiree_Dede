@@ -1,8 +1,25 @@
 // Liste des tutos disponibles : chaque entrée devient la composition `Tuto-<id>`.
 // Ajouter un jeu = un fichier games/<id>.tsx qui exporte un TutoSpec, puis l'ajouter ici.
+import { batailleNavale } from './games/bataille-navale'
 import { dessineDevine } from './games/dessine-devine'
 import { morpion } from './games/morpion'
+import { quatreALaSuite } from './games/quatre-a-la-suite'
 import { undercover } from './games/undercover'
+import { quiDeNous } from './games/qui-de-nous'
+import { tuPreferes } from './games/tu-preferes'
+import { lePlusProche } from './games/le-plus-proche'
+import { cerveauEnFete } from './games/cerveau-en-fete'
+import { petitBac } from './games/petit-bac'
+import { actionOuVerite } from './games/action-ou-verite'
+import { quiSuisJe } from './games/qui-suis-je'
+import { devineEnEquipe } from './games/devine-en-equipe'
+import { pasDeBol } from './games/pas-de-bol'
+import { bombeAMots } from './games/bombe-a-mots'
+import { menteur } from './games/menteur'
+import { loupGarou } from './games/loup-garou'
+import { bowling } from './games/bowling'
+import { tourDesPotes } from './games/tour-des-potes'
+import { dedeKart } from './games/dede-kart'
 import type { TutoSpec } from './types'
 
-export const TUTOS: TutoSpec[] = [morpion, undercover, dessineDevine]
+export const TUTOS: TutoSpec[] = [morpion, undercover, dessineDevine, quatreALaSuite, batailleNavale, quiDeNous, tuPreferes, lePlusProche, cerveauEnFete, petitBac, actionOuVerite, quiSuisJe, devineEnEquipe, pasDeBol, bombeAMots, menteur, loupGarou, bowling, tourDesPotes, dedeKart]

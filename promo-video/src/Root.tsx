@@ -3,6 +3,7 @@ import { Promo } from './Promo'
 import { FPS, HEIGHT, TOTAL_FRAMES, WIDTH } from './timeline'
 import { TFPS, TH, TW } from './tuto/kit'
 import { TUTOS } from './tuto/registry'
+import { Sheet } from './tuto/Sheet'
 import { Tuto, tutoDuration } from './tuto/Tuto'
 
 export const RemotionRoot = () => (
@@ -11,6 +12,10 @@ export const RemotionRoot = () => (
     {/* Vidéos « Comment on joue ? » : une composition par jeu (720×1280, 30 FPS). */}
     {TUTOS.map((spec) => (
       <Composition key={spec.id} id={`Tuto-${spec.id}`} component={Tuto} defaultProps={{ id: spec.id }} durationInFrames={tutoDuration(spec)} fps={TFPS} width={TW} height={TH} />
+    ))}
+    {/* Planches de contrôle (dev) : étapes côte à côte, frame = % d'avancement. */}
+    {TUTOS.map((spec) => (
+      <Composition key={spec.id} id={`Sheet-${spec.id}`} component={Sheet} defaultProps={{ id: spec.id }} durationInFrames={101} fps={TFPS} width={TW * spec.steps.length} height={TH} />
     ))}
   </>
 )
