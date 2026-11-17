@@ -76,7 +76,7 @@ export const TRACKS: TrackDef[] = [
     jumps: [[0.4, 0.41], [0.9, 0.91]],
     decor: 'pines',
     colors: {
-      sky: '#BFE3FF',
+      sky: '#8EC5F4',
       ground: '#EEF4FF',
       road: '#5B5F77',
       kerbA: '#3A86FF',

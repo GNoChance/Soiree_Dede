@@ -170,7 +170,7 @@ interface Racer {
   prevE: number
   /** effets distants (bits E_*) */
   e: number
-  body: THREE.MeshLambertMaterial
+  body: THREE.MeshToonMaterial
   bubbleMesh: THREE.Mesh
   cloudMesh: THREE.Group
   chassis: THREE.Group
@@ -209,7 +209,7 @@ export class Game {
   private tmp = new THREE.Vector3()
   /** Cadre de la mini-carte : [x0, z0, côté]. */
   private box: [number, number, number] = [0, 0, 1]
-  private dust = new Particles(500, 1.1)
+  private dust = new Particles(500, 0.75, false, 0.45)
   private glow = new Particles(300, 0.55, true)
   private hudAt = 0
   private keys = new Set<string>()

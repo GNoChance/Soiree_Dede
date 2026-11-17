@@ -29,7 +29,7 @@ export class Particles {
   private next = 0
   private c = new THREE.Color()
 
-  constructor(n = 400, size = 0.9, additive = false) {
+  constructor(n = 400, size = 0.9, additive = false, opacity = 1) {
     this.n = n
     this.pos = new Float32Array(n * 3)
     this.col = new Float32Array(n * 3)
@@ -49,6 +49,7 @@ export class Particles {
         vertexColors: true,
         transparent: true,
         depthWrite: false,
+        opacity,
         blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       }),
     )

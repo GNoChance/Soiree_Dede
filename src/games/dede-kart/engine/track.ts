@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { TrackDef } from '../tracks'
+import { toon } from './toon'
 
 /** Marge roulable (lente) de chaque côté de la piste avant le mur invisible. */
 export const WALL_MARGIN = 7
@@ -149,52 +150,113 @@ export class Track {
       for (let v = 0; v < pos.count; v++) pos.setY(v, 0.06 + (Math.floor(v / 2) / Math.max(1, i1 - i0)) * 0.9)
       add(ramp)
     }
-    // sol
-    const groundTex = noiseTexture(210, 255, 1800)
-    groundTex.repeat.set(140, 140)
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.MeshBasicMaterial({ color: c.ground, map: groundTex }))
+    // lignes blanches de bord de piste
+    const edge = new THREE.Color('#F4F4F4')
+    add(this.ribbon(0, this.n, -h + 0.35, -h + 0.65, 0.034, () => edge))
+    add(this.ribbon(0, this.n, h - 0.65, h - 0.35, 0.034, () => edge))
+    // sol : grain + grandes taches claires/sombres pour casser l'aplat
+    const groundTex = groundTexture()
+    groundTex.repeat.set(9, 9)
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshBasicMaterial({ color: c.ground, map: groundTex }))
     ground.rotation.x = -Math.PI / 2
     group.add(ground)
-    // décor : cubes de couleur en instancing, hors de la piste
-    const spots: { x: number; z: number; s: number }[] = []
+
+    // décor : emplacements hors de la piste (jamais dans une autre portion du circuit)
+    const spots: { x: number; z: number; s: number; a: number }[] = []
     let seed = 7
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-    for (let i = 0; i < this.n; i += 5) {
+    for (let i = 0; i < this.n; i += 4) {
       for (const side of [-1, 1]) {
-        if (rnd() < 0.35) continue
-        const [x, z] = this.pointAt(i, side * (h + WALL_MARGIN + 3 + rnd() * 22))
-        if (Math.abs(this.locate(x, z).lat) < h + WALL_MARGIN + 2) continue
-        spots.push({ x, z, s: 1.5 + rnd() * 3.5 })
+        if (rnd() < 0.3) continue
+        const [x, z] = this.pointAt(i, side * (h + WALL_MARGIN + 3 + rnd() * 30))
+        if (Math.abs(this.locate(x, z).lat) < h + WALL_MARGIN + 2.5) continue
+        spots.push({ x, z, s: 1.6 + rnd() * 3, a: rnd() * Math.PI * 2 })
       }
     }
-    // décor en instancing (un seul appel de rendu par forme) : cubes de jouets, parasols ou sapins
-    const parts: { geo: THREE.BufferGeometry; y: (s: number) => number; scale: (s: number) => THREE.Vector3; color: (k: number) => string }[] =
+    // chaque thème a ses objets ; un objet = plusieurs formes, chacune instanciée une seule fois
+    const pal = (k: number) => c.decor[k % c.decor.length]
+    const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z)
+    type Part = { geo: THREE.BufferGeometry; y: (s: number) => number; scale: (s: number) => THREE.Vector3; color: (k: number) => string }
+    const roof = new THREE.ConeGeometry(1, 1, 4)
+    roof.rotateY(Math.PI / 4)
+    const props: Part[][] =
       this.def.decor === 'parasols'
         ? [
-            { geo: new THREE.CylinderGeometry(0.12, 0.12, 1, 6), y: (s) => s * 0.6, scale: (s) => new THREE.Vector3(1, s * 1.2, 1), color: () => '#FFFFFF' },
-            { geo: new THREE.ConeGeometry(1, 0.6, 10), y: (s) => s * 1.25, scale: (s) => new THREE.Vector3(s * 0.9, s * 0.6, s * 0.9), color: (k) => c.decor[k % c.decor.length] },
+            // parasol
+            [
+              { geo: new THREE.CylinderGeometry(0.1, 0.1, 1, 6), y: (s) => s * 0.6, scale: (s) => V(1, s * 1.2, 1), color: () => '#FFFFFF' },
+              { geo: new THREE.ConeGeometry(1, 0.55, 12), y: (s) => s * 1.25, scale: (s) => V(s * 0.95, s * 0.6, s * 0.95), color: pal },
+            ],
+            // palmier
+            [
+              { geo: new THREE.CylinderGeometry(0.16, 0.26, 1, 7), y: (s) => s * 1.1, scale: (s) => V(1, s * 2.2, 1), color: () => '#9C6B4A' },
+              { geo: new THREE.IcosahedronGeometry(1, 0), y: (s) => s * 2.3, scale: (s) => V(s * 1.15, s * 0.32, s * 1.15), color: (k) => (k % 2 ? '#2FA36B' : '#3DBB7E') },
+            ],
+            // ballon de plage
+            [{ geo: new THREE.SphereGeometry(1, 14, 10), y: (s) => s * 0.3, scale: (s) => V(s * 0.3, s * 0.3, s * 0.3), color: pal }],
           ]
         : this.def.decor === 'pines'
           ? [
-              { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 1.1, scale: (s) => new THREE.Vector3(s * 0.75, s * 2.2, s * 0.75), color: (k) => c.decor[k % c.decor.length] },
-              { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 2.0, scale: (s) => new THREE.Vector3(s * 0.32, s * 0.5, s * 0.32), color: () => '#FFFFFF' },
+              // sapin enneigé
+              [
+                { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 1.1, scale: (s) => V(s * 0.75, s * 2.2, s * 0.75), color: pal },
+                { geo: new THREE.ConeGeometry(1, 1, 8), y: (s) => s * 2.0, scale: (s) => V(s * 0.32, s * 0.5, s * 0.32), color: () => '#FFFFFF' },
+              ],
+              // chalet au toit enneigé
+              [
+                { geo: new THREE.BoxGeometry(1, 1, 1), y: (s) => s * 0.4, scale: (s) => V(s * 1.3, s * 0.8, s * 1.1), color: (k) => (k % 2 ? '#8A5A3B' : '#A46B45') },
+                { geo: roof, y: (s) => s * 1.1, scale: (s) => V(s * 1.15, s * 0.65, s * 1.0), color: () => '#FFFFFF' },
+              ],
+              // bonhomme de neige
+              [
+                { geo: new THREE.SphereGeometry(1, 12, 10), y: (s) => s * 0.3, scale: (s) => V(s * 0.32, s * 0.32, s * 0.32), color: () => '#FFFFFF' },
+                { geo: new THREE.SphereGeometry(1, 12, 10), y: (s) => s * 0.72, scale: (s) => V(s * 0.21, s * 0.21, s * 0.21), color: () => '#FFFFFF' },
+              ],
             ]
-          : [{ geo: new THREE.BoxGeometry(1, 1, 1), y: (s) => s / 2, scale: (s) => new THREE.Vector3(s, s, s), color: (k) => c.decor[k % c.decor.length] }]
+          : [
+              // cube de jouet
+              [{ geo: new THREE.BoxGeometry(1, 1, 1), y: (s) => s / 2, scale: (s) => V(s, s, s), color: pal }],
+              // ballon
+              [{ geo: new THREE.SphereGeometry(1, 14, 10), y: (s) => s * 0.5, scale: (s) => V(s * 0.5, s * 0.5, s * 0.5), color: pal }],
+              // crayon de couleur géant
+              [
+                { geo: new THREE.CylinderGeometry(0.3, 0.3, 1, 8), y: (s) => s * 0.9, scale: (s) => V(1, s * 1.8, 1), color: pal },
+                { geo: new THREE.ConeGeometry(0.3, 0.6, 8), y: (s) => s * 1.8 + 0.3, scale: () => V(1, 1, 1), color: () => '#F3D9B1' },
+              ],
+            ]
+    const weights = [3, 2, 1]
+    const kindOf = (k: number) => {
+      const r = (k * 7) % 6
+      return r < weights[0] ? 0 : r < weights[0] + weights[1] ? 1 : 2
+    }
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
-    const angles = spots.map(() => rnd() * Math.PI)
-    for (const part of parts) {
-      const mesh = new THREE.InstancedMesh(part.geo, new THREE.MeshLambertMaterial(), spots.length)
-      spots.forEach((p, k) => {
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angles[k])
-        m.compose(new THREE.Vector3(p.x, part.y(p.s), p.z), q, part.scale(p.s))
-        mesh.setMatrixAt(k, m)
-        mesh.setColorAt(k, new THREE.Color(part.color(k)))
-      })
-      group.add(mesh)
-    }
+    const up = new THREE.Vector3(0, 1, 0)
+    props.forEach((parts, kind) => {
+      const mine = spots.filter((_, k) => kindOf(k) === kind)
+      for (const part of parts) {
+        const mesh = new THREE.InstancedMesh(part.geo, toon(), mine.length)
+        mine.forEach((p, k) => {
+          q.setFromAxisAngle(up, p.a)
+          m.compose(new THREE.Vector3(p.x, part.y(p.s), p.z), q, part.scale(p.s))
+          mesh.setMatrixAt(k, m)
+          mesh.setColorAt(k, new THREE.Color(part.color(k)))
+        })
+        group.add(mesh)
+      }
+    })
     this.addWalls(group, rnd)
     this.addGantry(group)
+    // horizon : relief lointain (collines / îles + mer / sommets), nuages, soleil
+    let cx = 0
+    let cz = 0
+    for (let i = 0; i < this.n; i++) {
+      cx += this.px[i] / this.n
+      cz += this.pz[i] / this.n
+    }
+    const far = backdrop(this.def.decor, c.sky)
+    far.position.set(cx, 0, cz)
+    group.add(far)
     group.add(skyDome(c.sky))
     return group
   }
@@ -308,4 +370,132 @@ function skyDome(horizon: string) {
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }))
+}
+
+/** Sol : grain fin + grandes taches douces (clair / sombre). */
+function groundTexture() {
+  const c = document.createElement('canvas')
+  c.width = c.height = 512
+  const g = c.getContext('2d')!
+  g.fillStyle = '#F2F2F2'
+  g.fillRect(0, 0, 512, 512)
+  let seed = 11
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  for (let i = 0; i < 46; i++) {
+    const x = rnd() * 512
+    const y = rnd() * 512
+    const r = 30 + rnd() * 70
+    const dark = rnd() < 0.55
+    // répété sur les bords pour que la texture se raccorde
+    for (const dx of [-512, 0, 512]) {
+      for (const dy of [-512, 0, 512]) {
+        const grad = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r)
+        grad.addColorStop(0, dark ? 'rgba(170,170,170,0.5)' : 'rgba(255,255,255,0.7)')
+        grad.addColorStop(1, 'rgba(255,255,255,0)')
+        g.fillStyle = grad
+        g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2)
+      }
+    }
+  }
+  for (let i = 0; i < 9000; i++) {
+    const v = Math.round(205 + rnd() * 50)
+    g.fillStyle = `rgba(${v},${v},${v},0.6)`
+    g.fillRect(Math.floor(rnd() * 512), Math.floor(rnd() * 512), 2, 2)
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return t
+}
+
+/** Anneau de relief lointain : silhouette douce ou pointue, teintée vers le ciel (perspective atmosphérique). */
+function ridge(radius: number, base: number, amp: number, sharp: number, low: THREE.Color, high: THREE.Color, seed: number) {
+  const N = 120
+  const pos: number[] = []
+  const col: number[] = []
+  const idx: number[] = []
+  const height = (a: number) => {
+    const n = Math.sin(a * 3 + seed) * 0.5 + Math.sin(a * 7 + seed * 2.3) * 0.3 + Math.sin(a * 13 + seed * 0.7) * 0.2
+    return base + amp * Math.pow(Math.abs(n), sharp)
+  }
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2
+    const x = Math.cos(a) * radius
+    const z = Math.sin(a) * radius
+    pos.push(x, -2, z, x, height(a), z)
+    col.push(low.r, low.g, low.b, high.r, high.g, high.b)
+    if (i) {
+      const v = i * 2
+      idx.push(v - 2, v, v - 1, v - 1, v, v + 1)
+    }
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+  g.setIndex(idx)
+  return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: false }))
+}
+
+/** Horizon du circuit : relief lointain selon le thème, nuages et soleil. */
+function backdrop(kind: TrackDef['decor'], sky: string) {
+  const group = new THREE.Group()
+  const air = new THREE.Color(sky)
+  const tint = (hex: string, f: number) => new THREE.Color(hex).lerp(air, f)
+  if (kind === 'pines') {
+    // deux rangées de sommets enneigés
+    group.add(ridge(500, 50, 170, 0.8, tint('#5F7FAE', 0.3), tint('#FFFFFF', 0), 1.7))
+    group.add(ridge(430, 20, 95, 1.1, tint('#3F5F92', 0.15), tint('#DCE9FB', 0), 4.2))
+  } else if (kind === 'parasols') {
+    // la mer jusqu'à l'horizon, un liseré d'écume, puis des îles
+    const sea = new THREE.Mesh(new THREE.RingGeometry(300, 700, 64), new THREE.MeshBasicMaterial({ color: tint('#1FA7D6', 0.15), fog: false }))
+    sea.rotation.x = -Math.PI / 2
+    sea.position.y = 0.25
+    group.add(sea)
+    const foam = new THREE.Mesh(new THREE.RingGeometry(296, 303, 64), new THREE.MeshBasicMaterial({ color: '#FFFFFF', fog: false }))
+    foam.rotation.x = -Math.PI / 2
+    foam.position.y = 0.27
+    group.add(foam)
+    group.add(ridge(520, 0, 70, 2.0, tint('#2E8A5C', 0.25), tint('#7BD39A', 0.15), 2.9))
+  } else {
+    // collines pastel de pays des jouets
+    group.add(ridge(500, 30, 90, 1.2, tint('#A77BD9', 0.25), tint('#F2A9D8', 0.15), 0.6))
+    group.add(ridge(430, 12, 50, 1.4, tint('#5FC08A', 0.15), tint('#B6EBA0', 0.1), 3.3))
+  }
+  // nuages : petits amas de boules aplaties
+  const puff = new THREE.SphereGeometry(1, 8, 6)
+  const clouds = new THREE.InstancedMesh(puff, new THREE.MeshBasicMaterial({ color: '#FFFFFF', fog: false, transparent: true, opacity: 0.92 }), 16 * 3)
+  const m = new THREE.Matrix4()
+  const q = new THREE.Quaternion()
+  let seed = 23
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  for (let n = 0; n < 16; n++) {
+    const a = rnd() * Math.PI * 2
+    const r = 220 + rnd() * 220
+    const y = 95 + rnd() * 60
+    const s = 16 + rnd() * 16
+    for (let k = 0; k < 3; k++) {
+      m.compose(
+        new THREE.Vector3(Math.cos(a) * r + (k - 1) * s * 0.9, y + (k === 1 ? s * 0.25 : 0), Math.sin(a) * r),
+        q,
+        new THREE.Vector3(s * (k === 1 ? 1.2 : 0.9), s * 0.5, s * 0.8),
+      )
+      clouds.setMatrixAt(n * 3 + k, m)
+    }
+  }
+  group.add(clouds)
+  // soleil avec halo
+  const c = document.createElement('canvas')
+  c.width = c.height = 128
+  const g = c.getContext('2d')!
+  const grad = g.createRadialGradient(64, 64, 6, 64, 64, 64)
+  grad.addColorStop(0, 'rgba(255,255,240,1)')
+  grad.addColorStop(0.3, 'rgba(255,240,170,0.95)')
+  grad.addColorStop(0.45, 'rgba(255,225,140,0.35)')
+  grad.addColorStop(1, 'rgba(255,225,140,0)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 128, 128)
+  const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), fog: false, depthWrite: false }))
+  sun.scale.set(150, 150, 1)
+  sun.position.set(260, 230, -330)
+  group.add(sun)
+  return group
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { outline, toon } from './toon'
 
 /** Couleurs des étincelles de dérapage (bleu, orange, violet). */
 export const SPARKS = ['#4CC9F0', '#FF8C42', '#B388FF']
@@ -8,7 +9,7 @@ export interface KartModel {
   root: THREE.Group
   /** Châssis : inclinaison (roulis / tangage) et saut. */
   chassis: THREE.Group
-  bodyMat: THREE.MeshLambertMaterial
+  bodyMat: THREE.MeshToonMaterial
   /** Les 4 roues (rotation autour de l'axe). */
   wheels: THREE.Group[]
   /** Pivots des roues avant (braquage). */
@@ -76,11 +77,11 @@ function makeShared() {
     bubble: new THREE.SphereGeometry(2.1, 20, 14),
     puff: new THREE.SphereGeometry(1, 10, 8),
     shadow: new THREE.PlaneGeometry(3.4, 2.2),
-    dark: new THREE.MeshLambertMaterial({ color: '#23232F' }),
-    rubber: new THREE.MeshLambertMaterial({ color: '#1A1A20' }),
-    metal: new THREE.MeshLambertMaterial({ color: '#C9CED8' }),
-    seat: new THREE.MeshLambertMaterial({ color: '#33333F' }),
-    grey: new THREE.MeshLambertMaterial({ color: '#6B6F85' }),
+    dark: toon('#2E2E3C'),
+    rubber: toon('#22222A'),
+    metal: toon('#D5DAE3'),
+    seat: toon('#3C3C4A'),
+    grey: toon('#6B6F85'),
     shadowMat: new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }),
   }
 }
@@ -91,8 +92,8 @@ export function buildKart(color: string, sprite: string, variant: number, loader
   const root = new THREE.Group()
   const chassis = new THREE.Group()
   root.add(chassis)
-  const bodyMat = new THREE.MeshLambertMaterial({ color })
-  const accent = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).lerp(new THREE.Color('#FFFFFF'), 0.5) })
+  const bodyMat = toon(color)
+  const accent = toon(new THREE.Color(color).lerp(new THREE.Color('#FFFFFF'), 0.5))
 
   const put = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, parent: THREE.Object3D = chassis) => {
     const m = new THREE.Mesh(geo, mat)
@@ -103,7 +104,7 @@ export function buildKart(color: string, sprite: string, variant: number, loader
   }
 
   // carrosserie + pontons latéraux + pare-chocs
-  put(S.body, bodyMat, 0, 0.32, 0)
+  put(S.body, bodyMat, 0, 0.32, 0).add(outline(S.body, 1.05))
   for (const z of [-0.66, 0.66]) {
     const pod = put(S.capsule, accent, -0.1, 0.42, z, 0.17, 0.55, 0.17)
     pod.rotation.z = Math.PI / 2
@@ -145,7 +146,7 @@ export function buildKart(color: string, sprite: string, variant: number, loader
   for (const [x, z, front] of [[0.9, 0.8, true], [0.9, -0.8, true], [-0.88, 0.84, false], [-0.88, -0.84, false]] as const) {
     const r = (front ? 0.32 : 0.38) * big
     const w = new THREE.Group()
-    put(S.tire, S.rubber, 0, 0, 0, r, r, front ? 0.26 : 0.32, w)
+    put(S.tire, S.rubber, 0, 0, 0, r, r, front ? 0.26 : 0.32, w).add(outline(S.tire, 1.1))
     put(S.rim, S.metal, 0, 0, 0, r * 0.55, r * 0.55, (front ? 0.26 : 0.32) + 0.02, w)
     put(S.box, S.dark, 0, 0, 0, r * 1.5, r * 0.25, (front ? 0.26 : 0.32) + 0.04, w)
     if (front) {
