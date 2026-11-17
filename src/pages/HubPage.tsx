@@ -1,7 +1,10 @@
 import { motion } from 'framer-motion'
 import { History, Trophy } from 'lucide-react'
 import { useNavigate } from 'react-router'
+import { useState } from 'react'
 import { GAMES } from '@/games/registry'
+import type { GameDefinition } from '@/games/types'
+import { GameInfoModal } from '@/features/tutos/GameInfoModal'
 import { SoireeLauncher } from '@/features/soiree/SoireeLauncher'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -10,7 +13,6 @@ import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { XpBar } from '@/components/ui/XpBar'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { useSession } from '@/store/session'
-import { toast } from '@/store/toast'
 import { xpProgress } from '@/lib/xp'
 
 export function HubPage() {
@@ -18,6 +20,7 @@ export function HubPage() {
   const profile = useSession((s) => s.profile)
   const stats = useSession((s) => s.stats)
   const level = profile ? xpProgress(profile.xp).level : 1
+  const [infoGame, setInfoGame] = useState<GameDefinition | null>(null)
 
   return (
     <StaggerList className="flex flex-col gap-4">
@@ -62,7 +65,7 @@ export function HubPage() {
           <Card
             tilt
             accent={g.color}
-            onClick={() => toast('Lance une soirée pour jouer !', { kind: 'info' })}
+            onClick={() => setInfoGame(g)}
             className="flex items-center gap-4 text-[#1f1b2e]"
           >
             <motion.span
@@ -80,6 +83,7 @@ export function HubPage() {
           </Card>
         </StaggerItem>
       ))}
+      <GameInfoModal game={infoGame} onClose={() => setInfoGame(null)} />
     </StaggerList>
   )
 }
