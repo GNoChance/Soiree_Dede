@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { CHECKPOINTS, type TrackDef } from '../tracks'
 import { BallSim, BOX_ROWS, boxMaterial, rollItem, type Fx, type Hazard, type ItemId, type UsePayload } from './items'
+import { buildKart, SPARKS } from './kart'
 import { Sfx } from './sfx'
 import { Track, WALL_MARGIN } from './track'
 
@@ -53,6 +54,8 @@ const E_SLOW = 8
 const E_AIR = 16
 /** Durée d'un saut de tremplin (s). */
 const AIR = 0.75
+/** Durée d'un tête-à-queue (s). */
+const SPIN = 1.1
 
 /** État d'un kart diffusé en broadcast (~8 Hz). */
 export interface KartSnap {
@@ -119,7 +122,6 @@ const OFFROAD = 13
 const BOOST = 43
 const DRIFT_LEVELS = [0.7, 1.6, 2.6]
 const DRIFT_BOOST = [0, 0.6, 1.2, 1.9]
-const SPARKS = ['#4CC9F0', '#FF8C42', '#B388FF']
 /** Retard d'affichage des karts distants (ms) : on interpole entre deux paquets reçus. */
 const INTERP_DELAY = 220
 
@@ -168,6 +170,13 @@ interface Racer {
   body: THREE.MeshLambertMaterial
   bubbleMesh: THREE.Mesh
   cloudMesh: THREE.Group
+  chassis: THREE.Group
+  wheels: THREE.Group[]
+  steerPivots: THREE.Group[]
+  shadow: THREE.Mesh
+  /** direction lissée (-1..1) et vitesse précédente (tangage) */
+  steerS: number
+  prevSpeed: number
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
@@ -189,6 +198,10 @@ export class Game {
   private count = -1
   private time = 0
   private camHeading = 0
+  private camPos = new THREE.Vector3()
+  private camLook = new THREE.Vector3()
+  private camSnap = true
+  private tmp = new THREE.Vector3()
   private hudAt = 0
   private keys = new Set<string>()
   private pointer: { id: number; steer: number } | null = null
@@ -235,7 +248,7 @@ export class Game {
         skill: 0.84 + ((k * 37) % 13) / 100,
         botLat: lat * 0.9,
         buf: [], netP: 0,
-        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, air: 0, prevE: 0, e: 0,
+        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, air: 0, prevE: 0, e: 0, steerS: 0, prevSpeed: 0,
         ...this.makeKart(d, loader),
       }
       r.netP = this.progress(r)
@@ -454,7 +467,7 @@ export class Game {
         v.gone = true
         this.o.onHit?.(r.d.id, v.hz.id)
         if (this.protect(r)) {
-          r.spin = 1.3
+          r.spin = SPIN
           r.speed *= 0.3
           r.driftDir = 0
           r.charge = 0
@@ -521,80 +534,11 @@ export class Game {
   }
 
   private makeKart(d: Driver, loader: THREE.TextureLoader) {
-    const g = new THREE.Group()
-    const body = new THREE.MeshLambertMaterial({ color: d.color })
-    const dark = new THREE.MeshLambertMaterial({ color: '#1B1B2F' })
-    const box = (w: number, h: number, l: number, x: number, y: number, m: THREE.Material) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m)
-      mesh.position.set(x, y, 0)
-      g.add(mesh)
+    const k = buildKart(d.color, d.sprite, d.kart ?? 0, loader)
+    return {
+      mesh: k.root, chassis: k.chassis, wheels: k.wheels, steerPivots: k.steer, shadow: k.shadow,
+      sparks: k.sparks, flame: k.flame, body: k.bodyMat, bubbleMesh: k.bubbleMesh, cloudMesh: k.cloudMesh,
     }
-    const stripe = new THREE.MeshLambertMaterial({ color: new THREE.Color(d.color).lerp(new THREE.Color('#FFFFFF'), 0.55) })
-    const v = d.kart ?? 0
-    if (v === 1) {
-      // bolide : long et bas, grand aileron
-      box(2.8, 0.38, 1.25, 0, 0.5, body)
-      box(1.2, 0.22, 1.32, 1.0, 0.45, dark)
-      box(2.8, 0.06, 0.3, 0, 0.72, stripe)
-      box(0.25, 0.7, 0.12, -1.3, 0.95, dark)
-      box(0.55, 0.1, 1.9, -1.35, 1.32, body)
-    } else if (v === 2) {
-      // buggy : haut sur pattes, arceau
-      box(2.2, 0.6, 1.4, 0, 0.7, body)
-      box(0.8, 0.3, 1.5, 1.05, 0.55, stripe)
-      box(0.12, 1.1, 0.12, -1.05, 1.2, dark)
-      box(0.12, 0.12, 1.3, -1.05, 1.75, dark)
-    } else {
-      // classique
-      box(2.4, 0.45, 1.3, 0, 0.55, body)
-      box(0.9, 0.3, 1.5, 1.1, 0.5, dark)
-      box(0.35, 0.8, 1.2, -0.95, 0.95, body)
-      box(2.4, 0.06, 0.28, 0, 0.8, stripe)
-    }
-    const wheel = new THREE.CylinderGeometry(0.42, 0.42, 0.36, 12)
-    wheel.rotateX(Math.PI / 2)
-    const sparks: THREE.Mesh[] = []
-    for (const [x, z] of [[0.85, 0.82], [0.85, -0.82], [-0.85, 0.82], [-0.85, -0.82]]) {
-      const w = new THREE.Mesh(wheel, dark)
-      w.position.set(x, 0.42, z)
-      g.add(w)
-      if (x < 0) {
-        const s = new THREE.Mesh(new THREE.OctahedronGeometry(0.32), new THREE.MeshBasicMaterial({ color: SPARKS[0] }))
-        s.position.set(x - 0.5, 0.25, z)
-        s.visible = false
-        g.add(s)
-        sparks.push(s)
-      }
-    }
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 8), new THREE.MeshBasicMaterial({ color: '#FFD23F' }))
-    flame.rotation.z = Math.PI / 2
-    flame.position.set(-2, 0.6, 0)
-    flame.visible = false
-    g.add(flame)
-    const tex = loader.load(d.sprite)
-    tex.colorSpace = THREE.SRGBColorSpace
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }))
-    sprite.scale.set(2.1, 2.1, 1)
-    sprite.position.set(-0.1, 1.75, 0)
-    g.add(sprite)
-    const bubbleMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(2.1, 20, 14),
-      new THREE.MeshBasicMaterial({ color: '#7FDBFF', transparent: true, opacity: 0.3, depthWrite: false }),
-    )
-    bubbleMesh.position.y = 1.2
-    bubbleMesh.visible = false
-    g.add(bubbleMesh)
-    const cloudMesh = new THREE.Group()
-    const grey = new THREE.MeshLambertMaterial({ color: '#6B6F85' })
-    for (const [x, z, s] of [[0, 0, 0.9], [0.7, 0.2, 0.7], [-0.7, -0.1, 0.75], [0.1, 0.6, 0.6]]) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(s, 10, 8), grey)
-      puff.position.set(x, 0, z)
-      cloudMesh.add(puff)
-    }
-    cloudMesh.position.y = 3.6
-    cloudMesh.visible = false
-    g.add(cloudMesh)
-    return { mesh: g, sparks, flame, body, bubbleMesh, cloudMesh }
   }
 
   private resize() {
@@ -648,12 +592,16 @@ export class Game {
     if (r.star > 0) max = Math.max(max, BOOST * 0.92)
     if (r.slow > 0) max *= 0.55
     if (r.spin > 0) {
-      // tête-à-queue : plus de contrôle, on ralentit fort
+      // tête-à-queue : un tour complet amorti, plus de contrôle, on ralentit fort
       max = 0
       steer = 0
       drift = false
-      r.spinA += dt * 14
+      const p = 1 - r.spin / SPIN
+      r.spinA = Math.PI * 2 * (1 - (1 - p) * (1 - p))
     } else r.spinA = 0
+    // direction progressive (plus de coups de volant secs)
+    r.steerS += (steer - r.steerS) * Math.min(1, dt * 9)
+    steer = r.steerS
     if (brake || r.finish !== null) max = r.finish !== null ? 8 : 0
     const rate = r.speed < max ? (r.boost > 0 || r.star > 0 ? 45 : 13) : r.spin > 0 ? 40 : 26
     r.speed += Math.sign(max - r.speed) * Math.min(Math.abs(max - r.speed), rate * dt)
@@ -677,7 +625,8 @@ export class Game {
       }
     }
     const grip = clamp(r.speed / 12, 0, 1)
-    const omega = r.driftDir ? r.driftDir * 1.15 + steer * 0.75 : steer * 1.75
+    // un peu moins vif à pleine vitesse, plus stable
+    const omega = r.driftDir ? r.driftDir * 1.1 + steer * 0.7 : steer * 1.7 * (1 - 0.2 * clamp(r.speed / MAX, 0, 1))
     r.heading += omega * grip * dt
     r.x += Math.cos(r.heading) * r.speed * dt
     r.z += Math.sin(r.heading) * r.speed * dt
@@ -828,16 +777,33 @@ export class Game {
     for (const r of this.racers) {
       const e = r.kind === 'remote' ? r.e : (r.star > 0 ? E_STAR : 0) | (r.bubble > 0 ? E_BUBBLE : 0) | (r.spin > 0 ? E_SPIN : 0) | (r.slow > 0 ? E_SLOW : 0) | (r.air > 0 ? E_AIR : 0)
       if (r.kind === 'remote') {
-        r.spinA = e & E_SPIN ? r.spinA + dt * 14 : 0
-        // saut distant : déclenché sur le front montant du bit E_AIR
+        // tête-à-queue et saut distants : déclenchés sur le front montant des bits
+        if (e & E_SPIN && !(r.prevE & E_SPIN)) r.spin = SPIN
+        else r.spin = Math.max(0, r.spin - dt)
+        const p = 1 - r.spin / SPIN
+        r.spinA = r.spin > 0 ? Math.PI * 2 * (1 - (1 - p) * (1 - p)) : 0
         if (e & E_AIR && !(r.prevE & E_AIR)) r.air = AIR
         else r.air = Math.max(0, r.air - dt)
         r.prevE = e
+        r.steerS += (clamp(angDiff(r.heading, r.mesh.userData.h ?? r.heading) / Math.max(dt, 1e-3) / 1.7, -1, 1) - r.steerS) * Math.min(1, dt * 6)
+        r.mesh.userData.h = r.heading
       }
       const lift = r.air > 0 ? Math.sin(Math.PI * (1 - r.air / AIR)) * 2.6 : 0
       r.yaw += (r.driftDir * 0.4 - r.yaw) * Math.min(1, 10 * dt)
-      r.mesh.position.set(r.x, (r.driftDir ? 0.08 : 0) + lift, r.z)
+      r.mesh.position.set(r.x, 0, r.z)
       r.mesh.rotation.y = -(r.heading + r.yaw + r.spinA)
+      // châssis : saut, roulis dans les virages (vers l'extérieur), tangage à l'accélération
+      const sp = clamp(r.speed / MAX, 0, 1.4)
+      const accel = clamp((r.speed - r.prevSpeed) / Math.max(dt, 1e-3) / 40, -1, 1)
+      r.prevSpeed = r.speed
+      r.chassis.position.y = lift + (r.driftDir ? 0.06 : 0)
+      r.chassis.rotation.x += (r.steerS * sp * 0.13 + r.driftDir * 0.05 - r.chassis.rotation.x) * Math.min(1, 8 * dt)
+      r.chassis.rotation.z += (accel * 0.05 - r.chassis.rotation.z) * Math.min(1, 6 * dt)
+      // roues : rotation selon la vitesse, braquage des roues avant
+      for (const w of r.wheels) w.rotation.z -= (r.speed * dt) / 0.35
+      for (const s of r.steerPivots) s.rotation.y = -r.steerS * 0.45
+      // ombre : se resserre pendant un saut
+      r.shadow.scale.setScalar(1 - lift * 0.15)
       if (e & E_STAR) r.body.color.setHSL((performance.now() / 400) % 1, 0.9, 0.55)
       else r.body.color.set(r.d.color)
       r.bubbleMesh.visible = Boolean(e & E_BUBBLE)
@@ -862,10 +828,16 @@ export class Game {
     const cx = Math.cos(this.camHeading)
     const cz = Math.sin(this.camHeading)
     const portrait = this.camera.aspect < 1
-    const back = portrait ? 9.5 : 8
-    this.camera.position.set(m.x - cx * back, portrait ? 5 : 4, m.z - cz * back)
-    this.camera.lookAt(m.x + cx * 6, 1.4, m.z + cz * 6)
-    const fov = (portrait ? 82 : 68) + (m.boost > 0 ? 12 : 0) + (m.speed / MAX) * 5
+    const back = portrait ? 8.6 : 7.4
+    const lift = m.air > 0 ? Math.sin(Math.PI * (1 - m.air / AIR)) * 1.6 : 0
+    // caméra sur ressort : suit le kart sans à-coups (position et point visé amortis)
+    const k = 1 - Math.exp(-13 * dt)
+    this.camPos.lerp(this.tmp.set(m.x - cx * back, (portrait ? 4.4 : 3.6) + lift, m.z - cz * back), this.camSnap ? 1 : k)
+    this.camLook.lerp(this.tmp.set(m.x + cx * 5, 1.3 + lift * 0.6, m.z + cz * 5), this.camSnap ? 1 : k)
+    this.camSnap = false
+    this.camera.position.copy(this.camPos)
+    this.camera.lookAt(this.camLook)
+    const fov = (portrait ? 80 : 66) + (m.boost > 0 ? 10 : 0) + (m.speed / MAX) * 5
     if (Math.abs(fov - this.camera.fov) > 0.05) {
       this.camera.fov += (fov - this.camera.fov) * Math.min(1, 6 * dt)
       this.camera.updateProjectionMatrix()
