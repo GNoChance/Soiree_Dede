@@ -23,6 +23,8 @@ const LABELS: Record<string, { label: string; emoji: string }[]> = {
   'marius/student': [{ label: 'Hourra, les vacances', emoji: '🎒' }, { label: 'A+ !', emoji: '💯' }],
   'marius/painter': [{ label: 'Éclaboussures', emoji: '🎨' }, { label: 'Chef-d\'œuvre', emoji: '🖼️' }],
   'marius/werewolf': [{ label: 'Pattes de loup', emoji: '🐾' }, { label: 'Grand saut', emoji: '🌲' }],
+  'nini/actor': [{ label: 'Rideau !', emoji: '🎭' }],
+  'nini/coach': [{ label: 'Au mégaphone', emoji: '📣' }],
   'marius/pyro': [{ label: 'Feu d\'artifice', emoji: '🎆' }, { label: 'Étincelle', emoji: '✨' }],
 }
 

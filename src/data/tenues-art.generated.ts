@@ -139,6 +139,10 @@ export const TENUE_ART: readonly string[] = [
   'nini/werewolf',
   'nini/pirate',
   'nini/philosopher',
+  'nini/pyro',
+  'nini/archer',
+  'nini/actor',
+  'nini/coach',
 ]
 
 // "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).
@@ -278,7 +282,9 @@ export const TENUE_EXTRAS: Readonly<Record<string, number>> = {
   "marius/student": 2,
   "marius/painter": 2,
   "marius/werewolf": 2,
-  "marius/pyro": 2
+  "marius/pyro": 2,
+  "nini/actor": 1,
+  "nini/coach": 1
 };
 
 // "slug/dossier/expression" ratés au découpage : repli sur une expression voisine.
@@ -297,25 +303,10 @@ export const TENUE_ART_BAD: readonly string[] = [
   'marius/painter/timide',
   'marius/werewolf/timide',
   'marius/pyro/timide',
-  'nini/admiral/pleurs',
-  'nini/admiral/dodo',
   'nini/tycoon/pleurs',
   'nini/tycoon/bisou',
   'nini/star/colere',
   'nini/star/reflexion',
-  'nini/spy/bisou',
-  'nini/croupier/surprise',
-  'nini/teacher/pleurs',
-  'nini/teacher/bisou',
-  'nini/student/colere',
-  'nini/student/bisou',
-  'nini/student/clin_oeil',
-  'nini/painter/colere',
-  'nini/painter/boude',
-  'nini/painter/reflexion',
-  'nini/painter/clin_oeil',
-  'nini/painter/timide',
-  'nini/werewolf/boude',
-  'nini/werewolf/reflexion',
-  'nini/werewolf/dodo',
+  'nini/actor/determine',
+  'nini/coach/determine',
 ]
