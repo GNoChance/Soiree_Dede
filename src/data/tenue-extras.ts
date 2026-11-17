@@ -25,6 +25,11 @@ const LABELS: Record<string, { label: string; emoji: string }[]> = {
   'marius/werewolf': [{ label: 'Pattes de loup', emoji: '🐾' }, { label: 'Grand saut', emoji: '🌲' }],
   'nini/actor': [{ label: 'Rideau !', emoji: '🎭' }],
   'nini/coach': [{ label: 'Au mégaphone', emoji: '📣' }],
+  'dede/painter': [{ label: 'Yeux étoilés', emoji: '🤩' }, { label: 'Inspiration', emoji: '💖' }, { label: 'Mains de peintre', emoji: '🖐️' }],
+  'dede/werewolf': [{ label: 'Hurlement à la lune', emoji: '🌕' }, { label: 'Gigot !', emoji: '🍖' }, { label: 'Feuilles mortes', emoji: '🍂' }],
+  'dede/pyro': [{ label: "Feu d'artifice", emoji: '🎆' }, { label: 'Bouquet final', emoji: '🎇' }, { label: 'La coupe !', emoji: '🏆' }],
+  'dede/philosopher': [{ label: 'Eurêka !', emoji: '💡' }, { label: 'Thé philosophique', emoji: '☕' }, { label: 'Grand discours', emoji: '📜' }, { label: 'Migraine existentielle', emoji: '🤯' }, { label: 'Méditation', emoji: '🧘' }, { label: 'Le grand livre', emoji: '📖' }],
+  'dede/pirate': [{ label: "Cap sur l'aventure", emoji: '⚓' }, { label: 'Trésor !', emoji: '💰' }, { label: 'Lancer de dés', emoji: '🎲' }, { label: 'Longue-vue', emoji: '🔭' }],
   'marius/pyro': [{ label: 'Feu d\'artifice', emoji: '🎆' }, { label: 'Étincelle', emoji: '✨' }],
 }
 

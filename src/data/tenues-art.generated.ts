@@ -62,6 +62,13 @@ export const TENUE_ART: readonly string[] = [
   'dede/archer',
   'dede/actor',
   'dede/coach',
+  'dede/bowler',
+  'dede/strategist',
+  'dede/tictactoe',
+  'dede/tycoon',
+  'dede/star',
+  'dede/admiral',
+  'dede/teacher',
   'kevin/spy',
   'kevin/cinema',
   'kevin/student',
@@ -272,6 +279,11 @@ export const TENUE_PORTRAITS: readonly string[] = [
 
 // Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.
 export const TENUE_EXTRAS: Readonly<Record<string, number>> = {
+  "dede/painter": 3,
+  "dede/werewolf": 3,
+  "dede/pyro": 3,
+  "dede/pirate": 4,
+  "dede/philosopher": 6,
   "kevin/croupier": 2,
   "marius/admiral": 2,
   "marius/tycoon": 2,

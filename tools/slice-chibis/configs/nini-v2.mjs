@@ -2,7 +2,7 @@
 const E = (s) => s.split(' ').map((x) => (x === '-' ? null : x));
 const STD = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine';
 const OLD = 'joie timide colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces determine';
-const NEW = 'tictactoe spy croupier teacher student painter werewolf pyro admiral archer actor coach'.split(' ');
+const NEW = 'strategist spy croupier teacher student painter werewolf pyro admiral archer actor coach'.split(' ');
 const SPECIAL = {
   actor: STD.replace(/determine$/, 'extra1'),
   coach: STD.replace(/determine$/, 'extra1'),
@@ -13,7 +13,7 @@ export default {
   src: 'assets-source/costumes/nini-v2',
   sheets: [
     { name: 'bowler', file: 'nini-bowler.png', n: 12, dir: 'bowler', map: E(OLD) },
-    { name: 'strategist', file: 'nini-strategist-combo.png', region: [0, 0, 1254, 708], n: 12, dir: 'strategist', map: E('joie clin_oeil reflexion surprise colere pleurs dodo bisou determine pouces boude timide') },
+    { name: 'tictactoe', file: 'nini-tictactoe.png', n: 12, dir: 'tictactoe', map: E('joie clin_oeil reflexion surprise colere pleurs dodo bisou timide pouces boude determine') },
     { name: 'tycoon', file: 'nini-tycoon.png', n: 12, dir: 'tycoon', map: E('joie clin_oeil reflexion surprise colere pouces dodo timide determine - boude -') },
     { name: 'star', file: 'nini-star.png', n: 12, dir: 'star', map: E('joie clin_oeil boude surprise timide bisou determine - pouces dodo pleurs -') },
     { name: 'pirate', file: 'nini-pirate.png', n: 12, dir: 'pirate', map: E(OLD) },
@@ -25,14 +25,14 @@ export default {
   ],
   portraits: [
     { file: 'nini-bowler-portrait.png', dir: 'bowler' },
-    { file: 'nini-strategist-combo.png', crop: [150, 714, 870, 1254], dir: 'strategist' },
+    { file: 'nini-strategist-portrait.png', dir: 'strategist', cutout: true },
     { file: 'nini-tycoon-portrait.png', dir: 'tycoon' },
     { file: 'nini-star-portrait.png', dir: 'star' },
     { file: 'nini-pirate-portrait.png', dir: 'pirate' },
     { file: 'nini-philosopher-combo.png', crop: [240, 684, 960, 1254], dir: 'philosopher' },
     { file: 'nini-cinema-portrait.png', dir: 'cinema' },
     { file: 'nini-admiral-portrait.png', dir: 'admiral' },
-    { file: 'nini-tictactoe-portrait.png', dir: 'tictactoe', cutout: true },
+    { file: 'nini-tictactoe-portrait.png', dir: 'tictactoe' },
     { file: 'nini-spy-portrait.png', dir: 'spy' },
     { file: 'nini-croupier-portrait.png', dir: 'croupier' },
   ],

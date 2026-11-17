@@ -122,7 +122,14 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "tycoon",
+      "star",
+      "admiral",
+      "teacher"
     ],
     "portraits": [
       "spy",
