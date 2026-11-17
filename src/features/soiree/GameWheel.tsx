@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import { Play, RotateCw, X } from 'lucide-react'
+import { DoorOpen, Play, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { burst } from '@/components/ui/confetti'
 import { fx } from '@/lib/feedback'
@@ -24,7 +24,7 @@ function polar(angleDeg: number, r: number) {
  * Roue des jeux plein écran : tout le monde la voit tourner et s'arrêter sur le même
  * jeu (le tirage vient du serveur). L'hôte peut « Lancer ce jeu » ou relancer.
  */
-export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: { spin: WheelSpin; isHost: boolean; busy: boolean; onLaunch: (gameId: string) => void; onRespin: () => void; onClose: () => void }) {
+export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose, onGoSalon }: { spin: WheelSpin; isHost: boolean; busy: boolean; onLaunch: (gameId: string) => void; onRespin: () => void; onClose: () => void; /** Joueur hors du salon : bouton pour y retourner. */ onGoSalon?: () => void }) {
   const reduce = useReducedMotion()
   const games = useMemo(() => spin.game_ids.map((id) => getGame(id)).filter((g): g is GameDefinition => Boolean(g)), [spin.game_ids])
   const n = games.length
@@ -133,6 +133,11 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: {
               ) : (
                 <div className="flex w-full flex-col gap-2">
                   <p className="font-display font-extrabold">L’hôte va lancer la partie…</p>
+                  {onGoSalon && (
+                    <Button size="lg" fullWidth icon={<DoorOpen className="size-6" />} onClick={onGoSalon}>
+                      Aller au salon
+                    </Button>
+                  )}
                   <Button size="sm" variant="secondary" onClick={onClose}>
                     Fermer
                   </Button>

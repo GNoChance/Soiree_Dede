@@ -9,6 +9,7 @@ import { ToastHost } from '@/components/ui/Toast'
 import { isSupabaseConfigured, SUPABASE_MISSING_MESSAGE } from '@/lib/supabase'
 import { LiveSoireeBanner } from '@/features/soiree/SoireeLive'
 import { SoireeChat } from '@/features/chat/SoireeChat'
+import { WheelWatcher } from '@/features/soiree/WheelWatcher'
 import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
@@ -36,6 +37,7 @@ export function Root() {
       <Outlet />
       <LiveSoireeBanner />
       <SoireeChat />
+      <WheelWatcher />
       <ToastHost />
       <UpdatePrompt />
     </MotionConfig>
