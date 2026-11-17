@@ -37,7 +37,11 @@ export default defineConfig({
         // Tous les fichiers JS sont pré-téléchargés, y compris les scènes 3D (bowling, Dédé Kart) :
         // une version installée est toujours complète, même après une nouvelle mise en ligne.
         // (Exclure un fichier le rend introuvable pour les anciennes versions dès qu'il change de nom.)
+        // Les vidéos « Comment on joue ? » (public/tutos/*.mp4) ne sont volontairement NI pré-téléchargées
+        // (pas de mp4 dans globPatterns) NI mises en cache par le service worker : lecture en streaming
+        // réseau, avec les requêtes « Range » gérées nativement par le navigateur.
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/tutos\//],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

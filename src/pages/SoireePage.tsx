@@ -25,6 +25,7 @@ import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/so
 import { errorCode, toastError } from '@/features/soiree/errors'
 import { SoireePodium, SoireeStandingsCard } from '@/features/stats/SoireeStandings'
 import { SoireeRecap } from '@/features/recap/RecapViewer'
+import { TutoButton } from '@/features/tutos/TutoButton'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -39,10 +40,10 @@ export function SoireePage() {
   /** Podium de fin de soirée : vu (fin reçue en temps réel) / à montrer avant la suite (fin déclenchée par moi). */
   const [podiumSeen, setPodiumSeen] = useState(false)
   const [hostPodium, setHostPodium] = useState<{ next: NewUnlocks | null } | null>(null)
-  /** Soirée terminée pendant que je suis dans le salon (temps réel) : raison de fin. */
   /** Récap « Wrapped » juste après le podium (hôte : avant les déblocages ; autres : avant l'écran de fin). */
   const [hostRecap, setHostRecap] = useState<{ next: NewUnlocks | null } | null>(null)
   const [recapSeen, setRecapSeen] = useState(false)
+  /** Soirée terminée pendant que je suis dans le salon (temps réel) : raison de fin. */
   const [ended, setEnded] = useState<{ reason: SoireeEndReason | null } | null>(null)
   const endingRef = useRef(false)
   /** Vrai dès que j'ai vu mon nom dans le salon : s'il disparaît ensuite, j'ai été exclu·e. */
@@ -260,7 +261,6 @@ export function SoireePage() {
           onDone={() => {
             setHostRecap({ next: hostPodium.next })
             setHostPodium(null)
-            if (next) setEndUnlocks(next)
           }}
         />
       )}
@@ -271,6 +271,7 @@ export function SoireePage() {
           onDone={() => {
             const next = hostRecap.next
             setHostRecap(null)
+            if (next) setEndUnlocks(next)
             else navigate('/', { replace: true })
           }}
         />
@@ -608,6 +609,8 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
       <AnimatePresence mode="wait">
         <motion.div key={game.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex flex-col gap-4">
           <p className="text-sm leading-snug">{game.rules ?? game.tagline}</p>
+          {/* Vidéo d'explication (seulement si elle existe : src/data/tutos.ts). */}
+          <TutoButton gameId={game.id} gameName={game.name} className="self-start" />
           {Options && (
             <Card>
               <Options options={options} onChange={(o) => setOptionsByGame((m) => ({ ...m, [game.id]: o }))} playerCount={playing.length} />
