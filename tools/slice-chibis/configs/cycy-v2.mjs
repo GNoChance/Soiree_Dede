@@ -6,5 +6,5 @@ export default {
   slug: 'cycy',
   src: 'assets-source/costumes/cycy-v2',
   sheets: ['bowler', 'strategist', 'tictactoe', 'admiral', 'tycoon', 'star', 'cinema', 'spy', 'croupier', 'painter', 'werewolf', 'pyro', 'coach', 'archer', 'philosopher', 'pirate'].map((n) => F(n)).concat([F('gown', 'actor'), F('sweater', 'teacher'), F('beanie', 'student')]),
-  portraits: [],
+  portraits: 'bowler strategist tictactoe admiral tycoon star cinema spy croupier teacher student painter werewolf pyro pirate philosopher archer actor coach'.split(' ').map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n })),
 };
