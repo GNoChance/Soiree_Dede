@@ -29,11 +29,11 @@ export const PERSOS: Record<PersoSlug, PersoMeta> = {
   kevin: { slug: 'kevin', name: 'Keke', title: 'Pause manette', emoji: '🎮', expression: 'gamer', effect: 'Tu rejoues immédiatement.' },
   cycy: { slug: 'cycy', name: 'Cycy', title: 'Câlin d’ours', emoji: '🐻', expression: 'amoureux', effect: 'Échange ta main avec le joueur de ton choix.', needsTarget: true },
   dede: { slug: 'dede', name: 'Dédé', title: 'Reine de la soirée', emoji: '👑', expression: 'cool', effect: 'Tous les autres piochent 1 carte.' },
-  manon: { slug: 'manon', name: 'Manon', title: 'Petit carnet', emoji: '✏️', expression: 'reflexion', effect: 'Regarde en secret la main d’un joueur.', needsTarget: true },
+  manon: { slug: 'manon', name: 'Manon', title: 'Petit carnet', emoji: '✏️', expression: 'reflexion', effect: 'Regarde en secret la main d’un joueur et prends-lui 1 carte au hasard.', needsTarget: true },
   mika: { slug: 'mika', name: 'Mika', title: 'Casquette à l’envers', emoji: '🧢', expression: 'clin_oeil', effect: 'Inverse le sens et choisis la couleur.', needsColor: true },
   cecile: { slug: 'cecile', name: 'Cécile', title: 'Grand ménage', emoji: '🧶', expression: 'joie', effect: 'Défausse aussi toutes tes cartes d’une couleur.', needsColor: true },
   carole: { slug: 'carole', name: 'Karo', title: 'Coup de griffe', emoji: '🐱', expression: 'colere', effect: 'Le joueur de ton choix pioche 3 cartes.', needsTarget: true },
-  marius: { slug: 'marius', name: 'Marius', title: 'Capuche', emoji: '🧥', expression: 'boude', effect: 'Bouclier : annule un cumul de +2/+4 qui te vise.' },
+  marius: { slug: 'marius', name: 'Marius', title: 'Capuche', emoji: '🧥', expression: 'boude', effect: 'Bouclier : annule un cumul de +2/+4 qui te vise. Sinon, le joueur suivant passe son tour.' },
   nini: { slug: 'nini', name: 'Nini', title: 'Glissade', emoji: '🐧', expression: 'surprise', effect: 'Chacun passe sa main à son voisin, dans le sens du jeu.' },
 }
 

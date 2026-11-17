@@ -8822,6 +8822,8 @@ declare
   v_secrets  jsonb := '{}'::jsonb;
   v_sec      jsonb;
   v_od       text;
+  v_sidx     integer;
+  v_stolen   jsonb;
   v_nd       text;
   p          text;
   i          integer;
@@ -8980,10 +8982,24 @@ begin
           end if;
         end loop;
       elsif v_perso = 'manon' then
-        -- Petit carnet : la main de la cible est montrée en secret à Manon (secret.peek).
+        -- Petit carnet : la main de la cible est montrée en secret à Manon (secret.peek),
+        -- puis elle lui prend 1 carte au hasard (sauf si la cible n'en a qu'une, ou si Manon
+        -- vient de poser sa dernière carte).
         v_peek := jsonb_build_object('target', v_target, 'hand', p_server->'hands'->v_target,
                                      'until', public._pdb_iso(now() + interval '8 seconds'),
                                      'n', coalesce((p_state->>'log_seq')::integer, 0) + 1);
+        v_newh := p_server->'hands'->v_target;
+        if jsonb_array_length(v_newh) >= 2 and jsonb_array_length(v_hand) > 0 then
+          select (o - 1)::integer, e into v_sidx, v_stolen
+            from jsonb_array_elements(v_newh) with ordinality as t(e, o) order by random() limit 1;
+          v_hand := v_hand || jsonb_build_array(v_stolen);
+          p_server := jsonb_set(p_server, array['hands', v_target], v_newh - v_sidx);
+          p_server := jsonb_set(p_server, array['hands', v_me], v_hand);
+          p_state := jsonb_set(p_state, array['counts', v_target], to_jsonb(jsonb_array_length(v_newh) - 1));
+          p_state := jsonb_set(p_state, array['counts', v_me], to_jsonb(jsonb_array_length(v_hand)));
+          v_peek := v_peek || jsonb_build_object('stolen', v_stolen->>'id');
+          v_entry := v_entry || jsonb_build_object('stolen', true);
+        end if;
       elsif v_perso = 'mika' then
         -- Casquette à l'envers : inverse le sens (+ couleur choisie, déjà appliquée).
         p_state := p_state || jsonb_build_object('direction', -coalesce((p_state->>'direction')::integer, 1));
@@ -9002,8 +9018,13 @@ begin
         v_r := public._pdb_draw(p_state, p_server, v_target, 3);
         p_state := v_r->'state'; p_server := v_r->'server';
       elsif v_perso = 'marius' then
-        -- Capuche : annule tout le cumul en attente.
-        if v_pending > 0 then v_entry := v_entry || jsonb_build_object('blocked', v_pending); end if;
+        -- Capuche : annule tout le cumul en attente ; sans cumul, le joueur suivant passe son tour.
+        if v_pending > 0 then
+          v_entry := v_entry || jsonb_build_object('blocked', v_pending);
+        else
+          v_skip := 2;
+          v_entry := v_entry || jsonb_build_object('skipped', true);
+        end if;
         p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
       elsif v_perso = 'nini' then
         -- Glissade : chaque joueur (qui a encore des cartes) passe sa main au voisin, dans le sens du jeu.

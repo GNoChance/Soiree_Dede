@@ -196,11 +196,11 @@ function SplashBody({ splash, get, meId }: { splash: Splash; get: Get; meId: str
         case 'kevin': return `${actor} rejoue tout de suite !`
         case 'cycy': return `${actor} échange sa main avec ${target} !`
         case 'dede': return `Tous les autres piochent 1 carte !`
-        case 'manon': return `${actor} lit en secret la main de ${target}…`
+        case 'manon': return e.stolen ? `${actor} lit la main de ${target} et lui prend une carte !` : `${actor} lit en secret la main de ${target}…`
         case 'mika': return `Le sens s’inverse ! Couleur : ${COLOR_META[e.color].label}`
         case 'cecile': return `${actor} défausse ${e.discarded?.length ?? 0} carte${(e.discarded?.length ?? 0) > 1 ? 's' : ''} ${e.chosen ? COLOR_META[e.chosen].label : ''} en plus !`
         case 'carole': return `${target} pioche 3 cartes !`
-        case 'marius': return e.blocked ? `Cumul de +${e.blocked} annulé !` : `${actor} se cache sous sa capuche.`
+        case 'marius': return e.blocked ? `Cumul de +${e.blocked} annulé !` : `${actor} se cache sous sa capuche : le joueur suivant passe son tour !`
         case 'nini': return `Tout le monde passe sa main au voisin !`
       }
     })()
@@ -281,23 +281,27 @@ export function DrawFlights({ s, meId }: { s: PdbState; meId: string }) {
     const pile = document.querySelector('[data-pdb-pile]')
     if (!pile) return
     const from = centerOf(pile)
-    const targets: Array<[string, number]> = []
+    const targets: Array<[string, number, string?]> = []
     for (const e of fresh) {
       if (e.t === 'draw') targets.push([e.p, Math.min(e.count, 4)])
       else if (e.t === 'denounce') targets.push([e.target, Math.min(e.count, 4)])
       else if (e.t === 'play' && e.card.kind === 'perso') {
         if (e.card.perso === 'carole' && e.target) targets.push([e.target, 3])
+        if (e.card.perso === 'manon' && e.target && e.stolen) targets.push([e.p, 1, e.target])
         if (e.card.perso === 'dede') for (const id of s.active) if (id !== e.p) targets.push([id, 1])
       }
     }
     const batch = `${fresh[0].n}-${Math.random().toString(36).slice(2, 6)}`
     const add: Flight[] = []
     let slot = 0
-    for (const [id, count] of targets) {
-      const el = document.querySelector(`[data-seat="${id === meId ? 'me' : id}"]`)
+    const seatOf = (id: string) => document.querySelector(`[data-seat="${id === meId ? 'me' : id}"]`)
+    for (const [id, count, src] of targets) {
+      const el = seatOf(id)
       if (!el) continue
+      const origin = src ? seatOf(src) : null
+      const start = origin ? centerOf(origin) : from
       const to = centerOf(el)
-      for (let i = 0; i < count; i++) add.push({ id: `${batch}-${slot++}`, from, to, delay: i * 0.1 })
+      for (let i = 0; i < count; i++) add.push({ id: `${batch}-${slot++}`, from: start, to, delay: i * 0.1 })
     }
     if (!add.length) return
     setFlights((f) => [...f, ...add])
@@ -354,12 +358,13 @@ export function PeekModal({ peek, get }: { peek: PdbPeek | undefined; get: Get }
       {shown && target && (
         <div className="flex flex-col gap-3">
           <p className="flex items-center gap-2 font-bold">
-            <Eye className="size-5 shrink-0" /> Main de {target.nickname} ({shown.hand.length} carte{shown.hand.length > 1 ? 's' : ''}) — chut !
+            <Eye className="size-5 shrink-0" /> Main de {target.nickname} ({shown.hand.length} carte{shown.hand.length > 1 ? 's' : ''}) — chut !{shown.stolen ? ' Tu lui prends la carte brillante.' : ''}
           </p>
           <div className="flex flex-wrap justify-center gap-1.5">
             {sortHand(shown.hand).map((c, i) => (
-              <motion.div key={c.id} initial={{ y: 30, opacity: 0, rotate: -8 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ delay: i * 0.04 }}>
-                <PdbCardView card={c} w={52} />
+              <motion.div key={c.id} className="relative" initial={{ y: 30, opacity: 0, rotate: -8 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ delay: i * 0.04 }}>
+                <PdbCardView card={c} w={52} glow={c.id === shown.stolen} dim={!!shown.stolen && c.id !== shown.stolen} />
+                {c.id === shown.stolen && <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border-2 border-ink bg-tomato px-1.5 text-[10px] font-extrabold whitespace-nowrap text-white">Volée !</span>}
               </motion.div>
             ))}
           </div>

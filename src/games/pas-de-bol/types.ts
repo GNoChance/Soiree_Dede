@@ -20,7 +20,7 @@ export interface PdbCard {
 }
 
 export type PdbLogEntry =
-  | { n: number; t: 'play'; p: string; card: PdbCard; color: PdbColor; target?: string; blocked?: number; discarded?: PdbCard[]; chosen?: PdbColor }
+  | { n: number; t: 'play'; p: string; card: PdbCard; color: PdbColor; target?: string; blocked?: number; discarded?: PdbCard[]; chosen?: PdbColor; stolen?: boolean; skipped?: boolean }
   | { n: number; t: 'draw'; p: string; count: number; auto?: boolean; cumul?: boolean }
   | { n: number; t: 'pass'; p: string; auto?: boolean }
   | { n: number; t: 'announce'; p: string }
@@ -78,6 +78,8 @@ export interface PdbPeek {
   /** ISO : fin d'affichage conseillée. */
   until: string
   n: number
+  /** Id de la carte que Manon vient de prendre à la cible (dans `hand`). */
+  stolen?: string
 }
 
 export interface PdbSecret {
