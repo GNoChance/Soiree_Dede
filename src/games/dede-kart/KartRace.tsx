@@ -30,7 +30,7 @@ interface Props {
 }
 
 export const fmtTime = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
-const DRIFT_BG = ['bg-surface', 'bg-[#4CC9F0]', 'bg-[#FF8C42]', 'bg-[#B388FF]']
+const DRIFT_COLORS = ['#4CC9F0', '#FF8C42', '#B388FF']
 
 /** Une course : scène 3D plein écran + HUD (place, tour, chrono) + bouton Drift tactile. */
 export default function KartRace(p: Props) {
@@ -72,11 +72,6 @@ export default function KartRace(p: Props) {
       cb.current.onFinish?.(hud.results)
     }
   }, [hud?.results])
-
-  const drift = (on: boolean) => (e: React.PointerEvent) => {
-    e.preventDefault()
-    game.current?.setDrift(on)
-  }
 
   // roulette : défile les emojis pendant le tirage
   const [spinIdx, setSpinIdx] = useState(0)
@@ -187,19 +182,22 @@ export default function KartRace(p: Props) {
             </button>
           )}
 
-          {meId && hud.phase !== 'finished' && (
-            <button
-              type="button"
-              onPointerDown={drift(true)}
-              onPointerUp={drift(false)}
-              onPointerCancel={drift(false)}
-              onPointerLeave={drift(false)}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`absolute bottom-6 right-4 size-28 rounded-full border-[4px] border-ink font-display text-xl font-extrabold text-ink shadow-sticker ${DRIFT_BG[Math.max(0, hud.driftLevel)]} ${hud.driftLevel >= 0 ? 'scale-95' : ''}`}
-              style={{ touchAction: 'none' }}
-            >
-              DRIFT
-            </button>
+          {/* dérapage automatique : jauge de mini-turbo (3 paliers), rien à appuyer */}
+          {meId && hud.phase !== 'finished' && hud.driftLevel >= 0 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-10 flex flex-col items-center gap-1">
+              <div className="flex gap-2 rounded-full border-[3px] border-ink bg-surface/90 px-3 py-2 shadow-sticker-sm">
+                {DRIFT_COLORS.map((c, k) => (
+                  <span
+                    key={c}
+                    className="size-5 rounded-full border-2 border-ink"
+                    style={{ background: hud.driftLevel > k ? c : 'transparent', boxShadow: hud.driftLevel > k ? `0 0 10px ${c}` : 'none' }}
+                  />
+                ))}
+              </div>
+              <span className="font-display text-sm font-extrabold text-white [text-shadow:2px_2px_0_#1B1B2F]">
+                {hud.driftLevel > 0 ? 'Redresse pour le turbo !' : 'Dérapage…'}
+              </span>
+            </div>
           )}
 
           {showResults && hud.results && (

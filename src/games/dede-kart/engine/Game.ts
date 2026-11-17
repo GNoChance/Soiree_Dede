@@ -179,6 +179,8 @@ interface Racer {
   shadow: THREE.Mesh
   /** direction lissée (-1..1) et vitesse précédente (tangage) */
   steerS: number
+  /** temps passé à tourner franchement (déclenche le dérapage automatique) */
+  autoT: number
   prevSpeed: number
 }
 
@@ -265,7 +267,7 @@ export class Game {
         skill: 0.84 + ((k * 37) % 13) / 100,
         botLat: lat * 0.9,
         buf: [], netP: 0,
-        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, air: 0, prevE: 0, e: 0, steerS: 0, prevSpeed: 0,
+        item: null, roll: 0, hold: 0, spin: 0, slow: 0, star: 0, bubble: 0, reverse: 0, confetti: 0, spinA: 0, air: 0, prevE: 0, e: 0, steerS: 0, autoT: 0, prevSpeed: 0,
         ...this.makeKart(d, loader),
       }
       r.netP = this.progress(r)
@@ -656,7 +658,13 @@ export class Game {
     const rate = r.speed < max ? (r.boost > 0 || r.star > 0 ? 45 : 13) : r.spin > 0 ? 40 : 26
     r.speed += Math.sign(max - r.speed) * Math.min(Math.abs(max - r.speed), rate * dt)
 
-    // dérapage : on charge tant qu'on maintient, on relâche pour un mini-turbo
+    // dérapage automatique (mon kart) : on tourne franchement un instant -> la glisse part toute seule ;
+    // on redresse (ou on lâche le doigt) -> fin de glisse et mini-turbo. Espace = dérapage manuel au clavier.
+    if (isMe) {
+      r.autoT = Math.abs(steer) > 0.55 && r.speed > 14 && !off ? r.autoT + dt : 0
+      drift = drift || (r.driftDir ? steer * r.driftDir > 0.3 : r.autoT > 0.3)
+    }
+    // la glisse charge un mini-turbo tant qu'elle dure
     if (!r.driftDir && drift && Math.abs(steer) > 0.25 && r.speed > 14 && !off) {
       r.driftDir = Math.sign(steer)
       r.charge = 0

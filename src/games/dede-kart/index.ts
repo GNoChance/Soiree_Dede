@@ -16,7 +16,7 @@ export const definition: GameDefinition = {
   minPlayers: 2,
   maxPlayers: 12,
   rules:
-    'Course de karts, chacun sur son téléphone. Le kart accélère tout seul : pose le doigt à gauche ou à droite pour tourner, maintiens DRIFT dans les virages pour charger un mini-turbo (bleu, orange, violet) et relâche ! Les dalles jaunes donnent un turbo. Points à chaque course, le meilleur total gagne la coupe.',
+    'Course de karts, chacun sur son téléphone. Le kart accélère tout seul : pose le doigt à gauche ou à droite pour tourner. Dans un grand virage, il dérape tout seul et charge un mini-turbo (bleu, orange, violet) : redresse pour le déclencher ! Roule sur les boîtes « ? » pour gagner un objet, et touche le bouton OBJET pour l’utiliser. Points à chaque course, le meilleur total gagne la coupe.',
   Play,
   Options: KartOptions,
   Summary,
