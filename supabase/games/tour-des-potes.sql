@@ -621,6 +621,28 @@ begin
   return p_s;
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql), lues dans state.stats / owners / buildings.
+-- p_other_max = fortune du meilleur autre joueur (0 pour un failli) ; p_n = nombre de joueurs.
+create or replace function public._tdp_tstats(s jsonb, p_p text, p_bk boolean, p_rk integer, p_f integer, p_other_max integer, p_n integer)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select jsonb_build_object(
+    'jail', coalesce((s->'stats'->p_p->>'jail')::integer, 0),
+    'bankrupt', case when p_bk then 1 else 0 end,
+    'rent_paid', coalesce((s->'stats'->p_p->>'rent_paid')::integer, 0),
+    'rent_received', coalesce((s->'stats'->p_p->>'rent_received')::integer, 0),
+    'bought', coalesce((s->'stats'->p_p->>'bought')::integer, 0),
+    'laps', coalesce((s->'stats'->p_p->>'laps')::integer, 0),
+    'pot', coalesce((s->'stats'->p_p->>'pot')::integer, 0),
+    'cards', coalesce((s->'stats'->p_p->>'cards')::integer, 0),
+    'hotel', case when not p_bk and exists (select 1 from jsonb_each_text(coalesce(s->'owners', '{}'::jsonb)) e
+                       where e.value = p_p and public._tdp_level(s, e.key::integer) >= 5) then 1 else 0 end,
+    'monopoly', case when not p_bk and (select count(distinct c->>'group') from jsonb_array_elements(public._tdp_board()) c
+                       where c->>'type' = 'quartier' and public._tdp_owns_group(s, p_p, c->>'group')) >= 2 then 1 else 0 end,
+    'tycoon', case when p_rk = 1 and p_n >= 3 and p_f > 0 and p_f >= 2 * greatest(coalesce(p_other_max, 0), 0) then 1 else 0 end)
+$$;
+
 -- Fin de partie : classement par fortune (en lice), puis faillis (le dernier
 -- failli d'abord). Égalité de fortune = même rang (partagé).
 create or replace function public._tdp_finish(g jsonb, p_reason text)
@@ -652,7 +674,9 @@ begin
            'owned', (select count(*) from jsonb_each_text(s->'owners') e where e.value = r.p),
            'bankrupt', r.bk) order by r.rk, r.o),
          jsonb_agg(jsonb_build_object('profile_id', r.p, 'placement', r.rk, 'points', n - r.rk + 1,
-                                      'won', r.rk = 1, 'stats', '{}'::jsonb) order by r.rk, r.o),
+                                      'won', r.rk = 1,
+                                      'stats', public._tdp_tstats(s, r.p, r.bk, r.rk, r.f,
+                                                 (select max(r2.f) from r r2 where r2.p <> r.p), n)) order by r.rk, r.o),
          coalesce(jsonb_agg(r.p order by r.o) filter (where r.rk = 1), '[]'::jsonb)
     into ranking, results, winners
     from r;
@@ -1272,6 +1296,7 @@ revoke all on function public._tdp_land(jsonb, text, integer, text) from public,
 revoke all on function public._tdp_card(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._tdp_liquidate(jsonb, text) from public, anon, authenticated;
 revoke all on function public._tdp_finish(jsonb, text) from public, anon, authenticated;
+revoke all on function public._tdp_tstats(jsonb, text, boolean, integer, integer, integer, integer) from public, anon, authenticated;
 revoke all on function public._tdp_bankrupt(jsonb, text) from public, anon, authenticated;
 revoke all on function public._tdp_next_turn(jsonb) from public, anon, authenticated;
 revoke all on function public._tdp_settle(jsonb) from public, anon, authenticated;

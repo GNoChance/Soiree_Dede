@@ -116,6 +116,20 @@ $$;
 
 -- ---------------------------------------------------------------- moteur (délégation au socle)
 
+-- Hook de trophées du socle duel (features/duel.sql, _duel_tstats) : stats propres au jeu.
+-- « jetons » = coups des deux joueurs au total.
+create or replace function public.game_quatre_a_la_suite_trophy_stats(p_state jsonb, p_pl text)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  select jsonb_build_object(
+    'fast_loss', count(*) filter (where lost and moves <= 10),
+    'long_win', count(*) filter (where won and moves >= 36),
+    'fast_win', count(*) filter (where won and moves <= 12))
+  from public._duel_games(p_state, p_pl)
+$$;
+revoke all on function public.game_quatre_a_la_suite_trophy_stats(jsonb, text) from public, anon, authenticated;
+
 create or replace function public.game_quatre_a_la_suite_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions

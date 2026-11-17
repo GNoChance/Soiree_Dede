@@ -204,6 +204,29 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : s'ajoutent à state.stats[pl]
+-- (bets_ok, rebel, norm, answered).
+create or replace function public._tp_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with s as (
+    select coalesce((p_state->'stats'->p_pl->>'answered')::integer, 0) as answered,
+           coalesce((p_state->'stats'->p_pl->>'bets_ok')::integer, 0) as bets_ok,
+           coalesce((p_state->'stats'->p_pl->>'norm')::integer, 0) as norm,
+           (p_state->>'total_rounds')::integer as rounds
+  )
+  select jsonb_build_object(
+    'rounds', rounds,
+    'bets_lost', greatest(0, answered - bets_ok),
+    'unanimous_rounds', (select count(*) from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) e
+                          where (coalesce((e->'counts'->>'a')::integer, 0) = 0 or coalesce((e->'counts'->>'b')::integer, 0) = 0)
+                            and coalesce((e->'counts'->>'a')::integer, 0) + coalesce((e->'counts'->>'b')::integer, 0) >= 3),
+    'minority', case when answered > 0 and (answered - norm) * 2 > answered then 1 else 0 end,
+    'perfect_bets', case when rounds >= 10 and bets_ok = rounds then 1 else 0 end)
+  from s
+$$;
+
 create or replace function public._tp_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -220,7 +243,7 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', coalesce(p_state->'stats'->t.key, '{}'::jsonb))
+           'stats', coalesce(p_state->'stats'->t.key, '{}'::jsonb) || public._tp_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -308,5 +331,6 @@ end $$;
 revoke all on function public._tp_open_round(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._tp_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._tp_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._tp_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_tu_preferes_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_tu_preferes_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

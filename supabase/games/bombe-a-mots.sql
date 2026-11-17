@@ -98,6 +98,33 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql), lues dans explosions / words / bonuses.
+create or replace function public._bam_tstats(p_state jsonb, p_pl text, p_winner text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with ev as (   -- événements de MES tours, dans l'ordre : x = explosion, w = mot validé
+    select (x->>'n')::integer as n, 'x' as k from jsonb_array_elements(coalesce(p_state->'explosions', '[]'::jsonb)) x where x->>'p' = p_pl
+    union all
+    select (w->>'n')::integer, 'w' from jsonb_array_elements(coalesce(p_state->'words', '[]'::jsonb)) w where w->>'p' = p_pl
+  ), r as (
+    select n, k, row_number() over (order by n) - row_number() over (partition by k order by n) as grp from ev
+  ), me as (
+    select (select count(*) from ev where k = 'x') as booms
+  )
+  select jsonb_build_object(
+    'explosions', (select booms from me),
+    'double_boom', (select count(*) from (select count(*) as c from r where k = 'x' group by grp) z where c >= 2),
+    'first_out', case when p_state->'eliminated'->>0 = p_pl then 1 else 0 end,
+    'words', coalesce((p_state->'word_counts'->>p_pl)::integer, 0),
+    'longest_word', coalesce((select max(char_length(replace(w->>'w', '-', '')))
+                                from jsonb_array_elements(coalesce(p_state->'words', '[]'::jsonb)) w where w->>'p' = p_pl), 0),
+    'alphabets', (select count(*) from jsonb_array_elements(coalesce(p_state->'bonuses', '[]'::jsonb)) b where b->>'p' = p_pl),
+    'last_life_win', case when p_winner = p_pl and (p_state->'lives'->>p_pl)::integer = 1 then 1 else 0 end,
+    'untouched', case when p_winner = p_pl and (select booms from me) = 0
+                       and jsonb_array_length(p_state->'players') >= 3 then 1 else 0 end)
+$$;
+
 -- Fin de partie : survivant 1er, puis ordre d'élimination inverse.
 -- points = mots validés (plafonnés à 25 => XP max 250 + 50 de victoire).
 create or replace function public._bam_finish(p_state jsonb, p_server jsonb)
@@ -121,7 +148,7 @@ begin
            'points', least(25, coalesce((p_state->'word_counts'->>pid)::integer, 0)),
            'won', pid = v_winner,
            'placement', o::integer,
-           'stats', '{}'::jsonb) order by o)
+           'stats', public._bam_tstats(p_state, pid, v_winner)) order by o)
     into v_results
     from jsonb_array_elements_text(v_ranked) with ordinality t(pid, o);
 
@@ -359,6 +386,7 @@ revoke all on function public._bam_fuse(timestamptz) from public, anon, authenti
 revoke all on function public._bam_next(jsonb, text) from public, anon, authenticated;
 revoke all on function public._bam_pick(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._bam_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._bam_tstats(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public._bam_rearm(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._bam_explode(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_bombe_a_mots_start(uuid[], jsonb) from public, anon, authenticated;

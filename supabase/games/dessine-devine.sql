@@ -267,6 +267,34 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].
+create or replace function public._dd_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with h as (
+    select e.o, e.v->>'drawer' as drawer, coalesce((e.v->>'skipped')::boolean, false) as skipped,
+           jsonb_array_length(e.v->'found') as nf,
+           coalesce((e.v->'found') ? p_pl, false) as me_found,
+           coalesce((e.v->'found'->>0) = p_pl, false) as first
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
+  ), n as (
+    select jsonb_array_length(p_state->'players') as np
+  ), g as (
+    select h.*, h.o - row_number() over (partition by h.me_found order by h.o) as grp
+      from h where drawer <> p_pl and not skipped
+  )
+  select jsonb_build_object(
+    'unfound', (select count(*) from h where drawer = p_pl and not skipped and nf = 0),
+    'found_count', (select count(*) from h where drawer <> p_pl and me_found),
+    'first_finds', (select count(*) from h where first),
+    'perfect_drawings', (select count(*) from h, n where drawer = p_pl and not skipped and np > 1 and nf = np - 1),
+    'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not me_found group by grp) x), 0),
+    'masterpiece', case when (select np from n) >= 4 and exists (select 1 from h where drawer = p_pl)
+        and not exists (select 1 from h, n where skipped
+                          or (drawer = p_pl and nf < np - 1) or (drawer <> p_pl and not me_found)) then 1 else 0 end)
+$$;
+
 create or replace function public._dd_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -283,7 +311,7 @@ begin
            'points', round(t.value::integer / 100.0)::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', jsonb_build_object('score', t.value::integer))
+           'stats', jsonb_build_object('score', t.value::integer) || public._dd_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -529,5 +557,6 @@ revoke all on function public._dd_begin_drawing(jsonb, jsonb, integer) from publ
 revoke all on function public._dd_apply_hints(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dd_end_turn(jsonb, jsonb, boolean) from public, anon, authenticated;
 revoke all on function public._dd_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._dd_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_dessine_devine_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_dessine_devine_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

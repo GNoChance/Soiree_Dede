@@ -37,6 +37,8 @@ export interface BaseGameState {
   new_unlocks?: Record<string, string[]>
   /** Tenues nouvellement débloquées : {profile_id: [tenue_id]}. */
   new_tenues?: Record<string, string[]>
+  /** Trophées nouvellement obtenus : {profile_id: [trophy_id]}. */
+  new_trophies?: Record<string, string[]>
   xp_gained?: Record<string, number>
 }
 

@@ -59,10 +59,14 @@ export function useSoireeChat(soireeId: string, meId: string, onIncoming?: (m: C
   useResync(() => void refetch())
 
   const send = useCallback(
-    async (kind: ChatMessage['kind'], body: string) => {
+    // slot : rang du sticker dans la planche de la tenue portée (stickers de tenue seulement ; cf. trophées).
+    async (kind: ChatMessage['kind'], body: string, slot?: number) => {
       setSending(true)
       try {
-        const { data, error } = await supabase.rpc('send_soiree_message', { p_soiree_id: soireeId, p_kind: kind, p_body: body })
+        const { data, error } = await supabase.rpc(
+          'send_soiree_message',
+          slot ? { p_soiree_id: soireeId, p_kind: kind, p_body: body, p_slot: slot } : { p_soiree_id: soireeId, p_kind: kind, p_body: body },
+        )
         if (error) {
           toastError(error)
           return false

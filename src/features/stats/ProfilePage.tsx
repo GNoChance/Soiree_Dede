@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { XpBar } from '@/components/ui/XpBar'
 import { getGame } from '@/games/registry'
+import { useProfileTrophies } from '@/features/trophees/access'
+import { TrophyBoard } from '@/features/trophees/TrophyBoard'
 import { rpcErrorMessage } from '@/lib/rpcError'
 import { useSession } from '@/store/session'
 import { gameLabel, useProfileStats } from './api'
@@ -44,6 +46,7 @@ export function ProfilePage() {
   const navigate = useNavigate()
   const me = useSession((s) => s.profile?.id)
   const { data, error, loading } = useProfileStats(id)
+  const trophies = useProfileTrophies(id)
   const mine = id === me
   return (
     <div className="flex flex-col gap-4">
@@ -141,6 +144,9 @@ export function ProfilePage() {
               </StaggerItem>
             </>
           )}
+          <StaggerItem>
+            <TrophyBoard unlocked={trophies} />
+          </StaggerItem>
         </StaggerList>
       )}
     </div>

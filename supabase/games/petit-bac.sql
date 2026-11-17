@@ -149,6 +149,26 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].points.
+create or replace function public._pb_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with h as (
+    select coalesce((e.v->'points'->>p_pl)::integer, 0) as mine,
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'points')), 0) as mx
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) as e(v)
+  )
+  select jsonb_build_object(
+    'uniques', coalesce((p_state->'uniques'->>p_pl)::integer, 0),
+    'zero_rounds', count(*) filter (where mine = 0),
+    'perfect_rounds', count(*) filter (where mine = 2 * jsonb_array_length(p_state->'categories')),
+    'best_rounds', count(*) filter (where mine > 0 and mine = mx),
+    'regular', case when count(*) >= 3 and min(mine) >= 8 then 1 else 0 end,
+    'grand_slam', case when count(*) >= 4 and bool_and(mine = mx and mx > 0) then 1 else 0 end)
+  from h
+$$;
+
 create or replace function public._pb_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -165,7 +185,7 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', '{}'::jsonb)
+           'stats', public._pb_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -390,5 +410,6 @@ revoke all on function public._pb_build_answers(jsonb, jsonb) from public, anon,
 revoke all on function public._pb_to_validation(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_score(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._pb_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_petit_bac_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_petit_bac_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

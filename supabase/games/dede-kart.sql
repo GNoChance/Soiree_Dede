@@ -90,6 +90,35 @@ begin
   return round(p_v::text::numeric, 2);
 end $$;
 
+-- Stats de fin de coupe pour les trophées (features/trophees.sql), lues dans standings[] et hits.
+-- « karts » = joueurs + bots présents dans la course.
+create or replace function public._dk_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with s as (
+    select e.o, (e.v->>'track')::integer as track, e.v->'places' as pl, jsonb_array_length(e.v->'places') as nk,
+           (select x from jsonb_array_elements(e.v->'places') x where x->>'id' = p_pl limit 1) as me
+      from jsonb_array_elements(coalesce(p_state->'standings', '[]'::jsonb)) with ordinality as e(v, o)
+  ), x as (
+    select s.o, s.track, s.nk, s.me, (s.me->>'place')::integer as place, (s.me->>'time')::integer as t,
+           (select (y->>'time')::integer from jsonb_array_elements(s.pl) y where (y->>'place')::integer = 2 limit 1) as t2
+      from s where s.me is not null
+  )
+  select jsonb_build_object(
+    'last_races', count(*) filter (where nk >= 4 and place = nk),
+    'dnf', count(*) filter (where me->>'time' is null),
+    'podiums', count(*) filter (where nk >= 4 and place <= 3),
+    'hits', coalesce((p_state->'hits'->>p_pl)::integer, 0),
+    'win_track_1', count(*) filter (where place = 1 and track = 1),
+    'win_track_2', count(*) filter (where place = 1 and track = 2),
+    'win_track_3', count(*) filter (where place = 1 and track = 3),
+    'comeback', (select count(*) from x a join x b on b.o = a.o - 1 where a.place = 1 and b.place > 3),
+    'big_lead', count(*) filter (where place = 1 and t is not null and (t2 is null or t2 - t >= 5000)),
+    'grand_slam', case when count(*) >= 3 and count(*) filter (where place = 1) = count(*) and max(nk) >= 4 then 1 else 0 end)
+  from x
+$$;
+
 -- Fin de la coupe : points finaux = total / nombre de courses (arrondi), classement des joueurs.
 create or replace function public._dk_finish(p_state jsonb, p_server jsonb, p_forced boolean)
 returns jsonb language plpgsql security definer
@@ -106,7 +135,7 @@ begin
            'points', round(t.tot::numeric / v_runs)::integer,
            'won', t.rk = 1 and t.tot > 0,
            'placement', t.rk,
-           'stats', '{}'::jsonb)
+           'stats', public._dk_tstats(p_state, t.pid))
          order by t.rk, t.pid)
     into v_results
     from (select x.pid, x.tot,
@@ -344,6 +373,7 @@ revoke all on function public._dk_prune(jsonb) from public, anon, authenticated;
 revoke all on function public._dk_num(jsonb) from public, anon, authenticated;
 revoke all on function public._dk_new_race(jsonb, integer, integer) from public, anon, authenticated;
 revoke all on function public._dk_finish(jsonb, jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._dk_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._dk_end_race(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_dede_kart_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

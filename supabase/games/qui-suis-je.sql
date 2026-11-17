@@ -88,6 +88,32 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : tours du joueur dans history[].
+create or replace function public._qsj_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with t as (
+    select e.o, (e.v->>'found')::integer as found, (e.v->>'passed')::integer as passed, e.v->'log' as log
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
+     where e.v->>'guesser' = p_pl and not coalesce((e.v->>'skipped')::boolean, false)
+  ), l as (
+    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s
+      from t, jsonb_array_elements(coalesce(t.log, '[]'::jsonb)) with ordinality as x(e, o)
+  ), runs as (
+    select turn_o, r, i - row_number() over (partition by turn_o, r order by i) as grp from l
+  )
+  select jsonb_build_object(
+    'empty_turns', count(*) filter (where found = 0),
+    'max_passed', coalesce(max(passed), 0),
+    'clean_turns', count(*) filter (where passed = 0 and found >= 3),
+    'best_turn', coalesce(max(found), 0),
+    'steady', case when count(*) >= 2 and min(found) >= 5 then 1 else 0 end,
+    'crew_found', (select count(*) from l where r = 'found' and s is not null),
+    'best_run', coalesce((select max(c) from (select count(*) as c from runs where r = 'found' group by turn_o, grp) z), 0))
+  from t
+$$;
+
 -- Fin de partie : classement par cartes trouvées.
 create or replace function public._qsj_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
@@ -104,7 +130,7 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', jsonb_build_object('found', t.value::integer))
+           'stats', jsonb_build_object('found', t.value::integer) || public._qsj_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -296,6 +322,7 @@ revoke all on function public._qsj_iso(timestamptz) from public, anon, authentic
 revoke all on function public._qsj_start_turn(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._qsj_next_card(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._qsj_end_turn(jsonb, jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._qsj_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._qsj_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_qui_suis_je_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_qui_suis_je_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

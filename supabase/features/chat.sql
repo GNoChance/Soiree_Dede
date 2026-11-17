@@ -28,8 +28,12 @@ create policy soiree_messages_select on public.soiree_messages for select to aut
 revoke all on table public.soiree_messages from anon, authenticated;
 grant select on table public.soiree_messages to authenticated;
 
--- Envoi d'un message. Erreurs : not_in_soiree, soiree_ended, invalid_message, chat_too_fast.
-create or replace function public.send_soiree_message(p_soiree_id uuid, p_kind text, p_body text)
+-- Envoi d'un message. Erreurs : not_in_soiree, soiree_ended, invalid_message, chat_too_fast,
+-- expression_locked (sticker de tenue sans le trophée du slot).
+-- p_slot : rang du sticker dans la planche de la tenue portée (cf. equip_expression) ; envoyé par le
+-- front seulement pour un sticker de tenue. Vérifié par _tenue_slot_ok (features/trophees.sql).
+drop function if exists public.send_soiree_message(uuid, text, text);
+create or replace function public.send_soiree_message(p_soiree_id uuid, p_kind text, p_body text, p_slot integer default null)
 returns bigint language plpgsql security definer
 set search_path = public, extensions
 as $$
@@ -65,6 +69,10 @@ begin
   end if;
 
   select equipped_tenue into v_tenue from public.profiles where id = v_me;
+  if p_kind = 'sticker' and p_slot is not null and coalesce(v_tenue, 'default') <> 'default'
+     and not public._tenue_slot_ok(v_me, v_tenue, p_slot) then
+    raise exception 'expression_locked';
+  end if;
   insert into public.soiree_messages(soiree_id, profile_id, kind, body, tenue)
   values (p_soiree_id, v_me, p_kind, v_body, coalesce(v_tenue, 'default'))
   returning id into v_id;
@@ -77,8 +85,8 @@ begin
   return v_id;
 end $$;
 
-revoke all on function public.send_soiree_message(uuid, text, text) from public, anon;
-grant execute on function public.send_soiree_message(uuid, text, text) to authenticated;
+revoke all on function public.send_soiree_message(uuid, text, text, integer) from public, anon;
+grant execute on function public.send_soiree_message(uuid, text, text, integer) to authenticated;
 
 -- Fin de soirée : la discussion est effacée.
 create or replace function public._chat_purge()

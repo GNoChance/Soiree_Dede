@@ -10,6 +10,7 @@ import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { refreshProfile } from '@/lib/auth'
 import type { BaseGameState, GameDefinition, PlayerInfo } from '@/games/types'
+import { TrophyUnlockReveal } from '@/features/trophees/TrophyReveal'
 import { TenueUnlockReveal, UnlockReveal } from './components'
 import { mood, playerOrPlaceholder } from './players'
 
@@ -37,10 +38,11 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
   const results = [...(state.results ?? [])].sort((a, b) => a.placement - b.placement)
   const me = results.find((r) => r.profile_id === meId)
   const xp = state.xp_gained?.[meId] ?? 0
-  // Révélations enchaînées : expressions, puis tenues.
-  const [reveal, setReveal] = useState<'none' | 'expressions' | 'tenues'>('none')
+  // Révélations enchaînées : expressions, tenues, puis trophées.
+  const [reveal, setReveal] = useState<'none' | 'expressions' | 'tenues' | 'trophies'>('none')
   const hasUnlocks = Object.values(state.new_unlocks ?? {}).some((l) => l.length)
   const hasTenues = Object.values(state.new_tenues ?? {}).some((l) => l.length)
+  const hasTrophies = Object.values(state.new_trophies ?? {}).some((l) => l.length)
   const Summary = game?.Summary
 
   useEffect(() => {
@@ -51,7 +53,7 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
       fx.whoosh()
     }
     void refreshProfile().catch(() => undefined)
-    const t = window.setTimeout(() => setReveal(hasUnlocks ? 'expressions' : hasTenues ? 'tenues' : 'none'), 2800)
+    const t = window.setTimeout(() => setReveal(hasUnlocks ? 'expressions' : hasTenues ? 'tenues' : hasTrophies ? 'trophies' : 'none'), 2800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- une seule célébration par écran
   }, [])
@@ -157,8 +159,9 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
         Retour au salon
       </Button>
 
-      {reveal === 'expressions' && <UnlockReveal unlocks={state.new_unlocks} meId={meId} players={players} onClose={() => setReveal(hasTenues ? 'tenues' : 'none')} />}
-      {reveal === 'tenues' && <TenueUnlockReveal tenues={state.new_tenues} meId={meId} players={players} onClose={() => setReveal('none')} />}
+      {reveal === 'expressions' && <UnlockReveal unlocks={state.new_unlocks} meId={meId} players={players} onClose={() => setReveal(hasTenues ? 'tenues' : hasTrophies ? 'trophies' : 'none')} />}
+      {reveal === 'tenues' && <TenueUnlockReveal tenues={state.new_tenues} meId={meId} players={players} onClose={() => setReveal(hasTrophies ? 'trophies' : 'none')} />}
+      {reveal === 'trophies' && <TrophyUnlockReveal trophies={state.new_trophies} meId={meId} players={players} onClose={() => setReveal('none')} />}
     </div>
   )
 }

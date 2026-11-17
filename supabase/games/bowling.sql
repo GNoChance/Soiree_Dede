@@ -204,6 +204,67 @@ begin
   return p_state || jsonb_build_object('scores', v_scores, 'cum', v_cum, 'next', v_nexts, 'done', v_done);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql). p_sheet = feuille COMPLÉTÉE,
+-- p_raw = feuille brute (gouttières : seuls les vrais lancers comptent, pas les 0 de remplissage).
+create or replace function public._bw_tstats(p_sheet jsonb, p_n integer, p_raw jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  f int; fr jsonb; c1 int; c2 int; c3 int; len int; l boolean;
+  v_strikes int := 0; v_spares int := 0; v_one int := 0; v_resc int := 0; v_gut int := 0;
+  v_clean boolean := true; v_run int := 0; v_best int := 0; v_ev int[] := '{}'; e int;
+begin
+  for f in 0 .. p_n - 1 loop
+    fr := coalesce(p_sheet->f, '[]'::jsonb);
+    len := jsonb_array_length(fr);
+    c1 := case when len >= 1 then public._bw_count((fr->>0)::integer) end;
+    c2 := case when len >= 2 then public._bw_count((fr->>1)::integer) end;
+    c3 := case when len >= 3 then public._bw_count((fr->>2)::integer) end;
+    l := f = p_n - 1;
+    if c1 is null then v_clean := false; v_ev := v_ev || 0; continue; end if;
+    if not l then
+      if c1 = 10 then v_strikes := v_strikes + 1; v_ev := v_ev || 1;
+      else
+        v_ev := v_ev || 0;
+        if coalesce(c1 + c2, 0) = 10 then v_spares := v_spares + 1; if c1 = 0 then v_resc := v_resc + 1; end if;
+        else v_clean := false; if coalesce(c1 + c2, 0) = 9 then v_one := v_one + 1; end if;
+        end if;
+      end if;
+    else
+      if c1 = 10 then
+        v_strikes := v_strikes + 1; v_ev := v_ev || 1;
+        if c2 = 10 then
+          v_strikes := v_strikes + 1; v_ev := v_ev || 1;
+          if c3 = 10 then v_strikes := v_strikes + 1; v_ev := v_ev || 1; else v_ev := v_ev || 0; end if;
+        else
+          v_ev := v_ev || 0;
+          if coalesce(c2 + c3, 0) = 10 then v_spares := v_spares + 1; end if;
+        end if;
+      else
+        v_ev := v_ev || 0;
+        if coalesce(c1 + c2, 0) = 10 then
+          v_spares := v_spares + 1; if c1 = 0 then v_resc := v_resc + 1; end if;
+          if c3 = 10 then v_strikes := v_strikes + 1; v_ev := v_ev || 1; else v_ev := v_ev || 0; end if;
+        else
+          v_clean := false; if coalesce(c1 + c2, 0) = 9 then v_one := v_one + 1; end if;
+        end if;
+      end if;
+    end if;
+  end loop;
+  foreach e in array v_ev loop
+    v_run := case when e = 1 then v_run + 1 else 0 end;
+    v_best := greatest(v_best, v_run);
+  end loop;
+  -- gouttières : lancers réellement joués à 0 quille
+  select count(*) into v_gut
+    from jsonb_array_elements(coalesce(p_raw, '[]'::jsonb)) fx, jsonb_array_elements(fx) m
+   where public._bw_count((m #>> '{}')::integer) = 0;
+  return jsonb_build_object('strikes', v_strikes, 'spares', v_spares, 'one_left', v_one, 'rescues', v_resc,
+                            'gutters', v_gut, 'strike_run', v_best,
+                            'clean', case when v_clean and p_n >= 5 then 1 else 0 end);
+end $$;
+
 -- Fin de partie : feuilles complétées par des 0, classement, résultats.
 -- points = round(score / 30) (300 -> 10 pts -> 100 XP) ; gagnant(s) = meilleur
 -- score (ex-aequo inclus), à condition d'avoir marqué au moins 1 quille.
@@ -218,6 +279,7 @@ declare
   v_max     integer;
   v_results jsonb;
   v_winners jsonb;
+  v_raw     jsonb := coalesce(p_state->'sheets', '{}'::jsonb);
 begin
   for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
     v_sheets := v_sheets || jsonb_build_object(pl, public._bw_fill(p_state->'sheets'->pl, v_n));
@@ -231,7 +293,8 @@ begin
            'points', round(t.value::integer / 30.0)::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', '{}'::jsonb)
+           'stats', jsonb_build_object('score', t.value::integer, 'frames', v_n)
+                    || public._bw_tstats(p_state->'sheets'->t.key, v_n, v_raw->t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -389,5 +452,6 @@ revoke all on function public._bw_fill(jsonb, integer) from public, anon, authen
 revoke all on function public._bw_score(jsonb, integer) from public, anon, authenticated;
 revoke all on function public._bw_refresh(jsonb) from public, anon, authenticated;
 revoke all on function public._bw_finish(jsonb, jsonb, boolean) from public, anon, authenticated;
+revoke all on function public._bw_tstats(jsonb, integer, jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

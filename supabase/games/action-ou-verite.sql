@@ -249,6 +249,16 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : s'ajoutent à state.stats[pl].
+create or replace function public._aov_tstats(p_stats jsonb)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select jsonb_build_object('perfect',
+    case when coalesce((p_stats->>'turns')::integer, 0) >= 5
+          and coalesce((p_stats->>'success')::integer, 0) = coalesce((p_stats->>'turns')::integer, 0) then 1 else 0 end)
+$$;
+
 create or replace function public._aov_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -265,7 +275,7 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', coalesce(p_state->'stats'->t.key, '{}'::jsonb))
+           'stats', coalesce(p_state->'stats'->t.key, '{}'::jsonb) || public._aov_tstats(p_state->'stats'->t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -492,6 +502,7 @@ revoke all on function public._aov_set_kind(jsonb, jsonb, text, boolean) from pu
 revoke all on function public._aov_tally_cards(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._aov_close_round(jsonb, jsonb, boolean) from public, anon, authenticated;
 revoke all on function public._aov_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._aov_tstats(jsonb) from public, anon, authenticated;
 revoke all on function public._aov_advance(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_action_ou_verite_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_action_ou_verite_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

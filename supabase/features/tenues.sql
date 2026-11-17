@@ -218,7 +218,13 @@ begin
   ) then
     raise exception 'tenue_locked';
   end if;
-  update public.profiles set equipped_tenue = p_tenue where id = v_me;
+  -- Trophées : le sticker porté ne vaut que pour la planche d'une tenue précise (cf. trophees.sql,
+  -- _tenue_slot_ok) ; en changeant de tenue il repasse sur `joie` (le front peut le rééquiper).
+  update public.profiles set equipped_tenue = p_tenue,
+         equipped_expression = case
+           when p_tenue is distinct from equipped_tenue and (p_tenue <> 'default' or equipped_expression ~ '^extra[0-9]+$')
+           then 'joie' else equipped_expression end
+   where id = v_me;
   return public._profile_json(v_me);
 end $$;
 

@@ -135,6 +135,52 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : rejoue history[] (qui perd / gagne un dé).
+create or replace function public._mtr_tstats(p_state jsonb, p_pl text, p_winner text)
+returns jsonb language plpgsql stable
+set search_path = public, extensions
+as $$
+declare
+  v_n       integer := jsonb_array_length(p_state->'players');
+  v_dice    jsonb := (select jsonb_object_agg(x, 5) from jsonb_array_elements_text(p_state->'players') x);
+  v_alive   integer := v_n;
+  v_comeback boolean := false;
+  v_lost    boolean := false;
+  v_false_liar integer := 0; v_caught integer := 0; v_good_liar integer := 0;
+  v_exact integer := 0; v_big integer := 0; v_pile integer := 0;
+  h         jsonb;
+begin
+  for h in select value from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) loop
+    if h->>'kind' = 'liar' then
+      if h->>'caller' = p_pl and h->>'loser' = p_pl then v_false_liar := v_false_liar + 1; end if;
+      if h->'bid'->>'by' = p_pl and h->>'loser' = p_pl then v_caught := v_caught + 1; end if;
+      if h->>'caller' = p_pl and h->>'loser' is not null and h->>'loser' <> p_pl then v_good_liar := v_good_liar + 1; end if;
+      if h->'bid'->>'by' = p_pl and (h->>'count')::integer = (h->'bid'->>'qty')::integer then v_exact := v_exact + 1; end if;
+      if h->'bid'->>'by' = p_pl and (h->'bid'->>'qty')::integer >= 8
+         and (h->>'count')::integer >= (h->'bid'->>'qty')::integer then v_big := v_big + 1; end if;
+    elsif h->>'kind' = 'pile' and h->>'caller' = p_pl and h->>'loser' is null then
+      v_pile := v_pile + 1;
+    end if;
+    if h->>'loser' is not null then
+      v_dice := jsonb_set(v_dice, array[h->>'loser'], to_jsonb((v_dice->>(h->>'loser'))::integer - 1));
+      if h->>'loser' = p_pl then v_lost := true; end if;
+      if h->>'eliminated' is not null then v_alive := v_alive - 1; end if;
+      -- tombé à un seul dé alors qu'il restait 3 joueurs ou plus
+      if h->>'loser' = p_pl and (v_dice->>p_pl)::integer = 1 and v_alive >= 3 then v_comeback := true; end if;
+    end if;
+    if h->>'gainer' is not null then
+      v_dice := jsonb_set(v_dice, array[h->>'gainer'], to_jsonb((v_dice->>(h->>'gainer'))::integer + 1));
+    end if;
+  end loop;
+  return jsonb_build_object(
+    'first_out', case when p_state->'eliminated'->>0 = p_pl then 1 else 0 end,
+    'false_liar', v_false_liar, 'caught', v_caught, 'good_liar', v_good_liar,
+    'last_die_win', case when p_winner = p_pl and (p_state->'dice_count'->>p_pl)::integer = 1 then 1 else 0 end,
+    'pile_ok', v_pile, 'exact_bids', v_exact, 'big_bid', v_big,
+    'comeback', case when p_winner = p_pl and v_comeback then 1 else 0 end,
+    'captain', case when p_winner = p_pl and not v_lost and v_n >= 3 then 1 else 0 end);
+end $$;
+
 -- Fin de partie : vainqueur = dernier vivant, puis ordre d'élimination inverse.
 create or replace function public._mtr_finish(p_state jsonb)
 returns jsonb language plpgsql stable
@@ -154,7 +200,7 @@ begin
       'placement', i,
       'points', v_n - i,
       'won', i = 1,
-      'stats', '{}'::jsonb));
+      'stats', public._mtr_tstats(p_state, v_ranked[i], v_ranked[1])));
   end loop;
   return p_state || jsonb_build_object(
     'phase', 'finished',
@@ -420,6 +466,7 @@ revoke all on function public._mtr_next(jsonb, text) from public, anon, authenti
 revoke all on function public._mtr_valid(integer, integer, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._mtr_new_round(jsonb, jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._mtr_finish(jsonb) from public, anon, authenticated;
+revoke all on function public._mtr_tstats(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public._mtr_resolve(jsonb, jsonb, text, text, boolean) from public, anon, authenticated;
 revoke all on function public.game_menteur_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_menteur_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

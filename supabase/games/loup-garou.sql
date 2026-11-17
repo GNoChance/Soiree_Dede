@@ -231,6 +231,67 @@ begin
   return null;
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql), lues dans dead / history / nights.
+create or replace function public._lg_tstats(p_state jsonb, p_server jsonb, p_pl text, p_winner text)
+returns jsonb language plpgsql stable
+set search_path = public, extensions
+as $$
+declare
+  v_roles   jsonb := coalesce(p_server->'roles', '{}'::jsonb);
+  v_role    text := v_roles->>p_pl;
+  v_won     boolean := public._lg_camp(p_server, p_pl) = p_winner;
+  v_alive   boolean := coalesce((p_state->'alive') ? p_pl, false);
+  v_hist    jsonb := coalesce(p_state->'history', '[]'::jsonb);
+  v_recv    integer;
+  v_wvotes  integer;
+  v_powers  integer := 0;
+  v_wolves_alive integer;
+  v_wolves_start integer;
+begin
+  -- votes du village contre moi / votes que j'ai donnés à un loup (révélations de vote)
+  select count(*) filter (where v.value = p_pl),
+         count(*) filter (where v.key = p_pl and v_roles->>v.value = 'loup')
+    into v_recv, v_wvotes
+    from jsonb_array_elements(v_hist) h, jsonb_each_text(coalesce(h->'votes', '{}'::jsonb)) v
+   where h->>'kind' = 'vote';
+
+  -- pouvoirs réussis
+  if v_role = 'voyante' then
+    select count(*) into v_powers from jsonb_array_elements(coalesce(p_server->'nights', '[]'::jsonb)) n
+     where n->>'seer' is not null and v_roles->>(n->>'seer') = 'loup';
+  elsif v_role = 'sorciere' then
+    select count(*) into v_powers from jsonb_array_elements(coalesce(p_server->'nights', '[]'::jsonb)) n
+     where n->>'saved' is not null;
+  elsif v_role = 'protecteur' then
+    select count(*) into v_powers from jsonb_array_elements(coalesce(p_server->'nights', '[]'::jsonb)) n
+     where n->>'protect' is not null and n->>'protect' = n->>'wolves';
+  elsif v_role = 'chasseur' then
+    select count(*) into v_powers from jsonb_array_elements(v_hist) h
+     where h->>'kind' = 'hunter' and h->>'hunter' = p_pl and h->>'target' is not null
+       and v_roles->>(h->>'target') = 'loup';
+  end if;
+
+  select count(*) filter (where v.value = 'loup' and (p_state->'alive') ? v.key),
+         count(*) filter (where v.value = 'loup')
+    into v_wolves_alive, v_wolves_start
+    from jsonb_each_text(v_roles) v;
+
+  return jsonb_build_object(
+    'first_night_death', case when exists (select 1 from jsonb_array_elements(coalesce(p_state->'dead', '[]'::jsonb)) d
+        where d->>'id' = p_pl and d->>'cause' = 'night' and (d->>'night')::integer = 1) then 1 else 0 end,
+    'lynched_innocent', case when v_role <> 'loup' and exists (select 1 from jsonb_array_elements(coalesce(p_state->'dead', '[]'::jsonb)) d
+        where d->>'id' = p_pl and d->>'cause' = 'vote') then 1 else 0 end,
+    'died', case when v_alive then 0 else 1 end,
+    'survived', case when v_alive then 1 else 0 end,
+    'wolf_votes', v_wvotes,
+    'won_village', case when v_won and public._lg_camp(p_server, p_pl) = 'village' then 1 else 0 end,
+    'won_wolf', case when v_won and v_role = 'loup' then 1 else 0 end,
+    'powers', v_powers,
+    'simple_win', case when v_won and v_role = 'villageois' and v_alive then 1 else 0 end,
+    'lamb', case when v_won and v_role = 'loup' and v_recv = 0 then 1 else 0 end,
+    'lone_wolf', case when v_won and v_role = 'loup' and v_alive and v_wolves_alive = 1 and v_wolves_start >= 2 then 1 else 0 end);
+end $$;
+
 -- Fin de partie : rôles, amoureux et chronique des nuits rendus publics.
 create or replace function public._lg_finish(p_state jsonb, p_server jsonb, p_winner text)
 returns jsonb language plpgsql volatile
@@ -248,7 +309,8 @@ begin
     v_results := v_results || jsonb_build_array(jsonb_build_object(
       'profile_id', p, 'won', v_won,
       'points', case when v_won and v_alive then 3 when v_won then 2 else 0 end,
-      'placement', case when v_won then 1 else 2 end));
+      'placement', case when v_won then 1 else 2 end,
+      'stats', public._lg_tstats(p_state, p_server, p, p_winner)));
   end loop;
   p_state := p_state || jsonb_build_object(
     'phase', 'finished', 'winner', p_winner, 'step', null, 'deadline', null, 'hunter', null,
@@ -820,6 +882,7 @@ revoke all on function public._lg_kill(jsonb, jsonb, text, text) from public, an
 revoke all on function public._lg_camp(jsonb, text) from public, anon, authenticated;
 revoke all on function public._lg_winner(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._lg_finish(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._lg_tstats(jsonb, jsonb, text, text) from public, anon, authenticated;
 revoke all on function public._lg_begin_night(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._lg_resolve_night(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._lg_end_step(jsonb, jsonb) from public, anon, authenticated;

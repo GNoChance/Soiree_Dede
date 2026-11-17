@@ -251,6 +251,35 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].found.
+create or replace function public._cef_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with q as (
+    select e.o, e.v->>'mode' as mode,
+           (select f from jsonb_array_elements(e.v->'found') f where f->>'profile_id' = p_pl limit 1) as me,
+           jsonb_array_length(e.v->'found') as nfound
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
+  ), r as (
+    select q.*, (q.me is not null) as ok from q
+  ), g as (
+    select r.*, r.o - row_number() over (partition by r.ok order by r.o) as grp from r
+  )
+  select jsonb_build_object(
+    'correct', (select count(*) from g where ok),
+    'firsts', (select count(*) from g where ok and (me->>'rank')::integer = 1),
+    'last_finder', (select count(*) from g where ok and nfound >= 3 and (me->>'rank')::integer = nfound),
+    'close_finds', (select count(*) from g where ok
+                      and (me->>'ms')::integer >= (p_state->>'duration')::integer * 1000 - 3000),
+    'fast_typed', (select count(*) from g where ok and mode = 'typed' and (me->>'ms')::integer < 3000),
+    'best_streak', coalesce((select max(c) from (select count(*) as c from g where ok group by grp) x), 0),
+    'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not ok group by grp) x), 0),
+    'qcm_perfect', case when (select count(*) from g where mode = 'mcq') >= 5
+                         and not exists (select 1 from g where mode = 'mcq' and not ok) then 1 else 0 end,
+    'perfect', case when (select count(*) from g) >= 10 and not exists (select 1 from g where not ok) then 1 else 0 end)
+$$;
+
 create or replace function public._cef_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -268,7 +297,7 @@ begin
            'points', round(t.value::integer / 100.0)::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', '{}'::jsonb)
+           'stats', public._cef_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -404,6 +433,7 @@ revoke all on function public._cef_match(text, jsonb) from public, anon, authent
 revoke all on function public._cef_open(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._cef_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._cef_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._cef_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._cef_check_done(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_cerveau_en_fete_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_cerveau_en_fete_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

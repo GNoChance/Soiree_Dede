@@ -11,8 +11,10 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
-import { hasTenueArt, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
+import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
 import { getTenue } from '@/data/tenues'
+import { trophyForSlot } from '@/data/trophees'
+import { slotUnlocked, useTrophyProgress } from '@/features/trophees/access'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus'
@@ -28,6 +30,7 @@ import type { ExpressionId } from '@/types/db'
 export function InventoryPage() {
   const profile = useSession((s) => s.profile)
   const unlocks = useSession((s) => s.unlocks)
+  const trophyUnlocks = useSession((s) => s.trophyUnlocks)
   const stats = useSession((s) => s.stats)
   const patchProfile = useSession((s) => s.patchProfile)
   const [selected, setSelected] = useState<string | null>(null)
@@ -52,14 +55,24 @@ export function InventoryPage() {
   }, [load])
   useRefetchOnFocus(() => void load())
 
+  // Tenue portée avec planche : « Joie » et les bonus sont offerts, les autres stickers se gagnent
+  // avec le trophée de leur rang (docs/TROPHEES.md). Planche de base : un défi par expression.
+  const wornTenue =
+    profile && profile.equipped_tenue && profile.equipped_tenue !== 'default' && hasTenueArt(profile.slug, profile.equipped_tenue)
+      ? profile.equipped_tenue
+      : undefined
+  const trophyProgress = useTrophyProgress(wornTenue, Object.keys(trophyUnlocks).length)
+
   if (!profile) return null
 
-  // Stickers bonus (extra1…) : libres dès que la tenue est portée.
-  const isUnlocked = (id: string) => /^extra\d+$/.test(id) || Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
-  // Palette de la tenue portée : la tenue débloque la planche, chaque expression garde son défi.
   const tenue = profile.equipped_tenue ?? 'default'
+  const tenueDef = wornTenue ? getTenue(tenue) : undefined
+  const trophyOf = (id: string) => (tenueDef ? trophyForSlot(tenue, stickerSlot(id)) : undefined)
+  const isUnlocked = (id: string) =>
+    tenueDef
+      ? slotUnlocked(stickerSlot(id), trophyUnlocks, trophyOf(id)?.id)
+      : Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
   const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
-  const tenueDef = tenue !== 'default' && hasTenueArt(profile.slug, tenue) ? getTenue(tenue) : undefined
   const unlockedCount = all.filter(isUnlocked).length
   const extras = tenueDef ? tenueExtras(profile.slug, tenue) : []
   const extraSel = selected ? extras.find((x) => x.id === selected) : undefined
@@ -68,6 +81,11 @@ export function InventoryPage() {
     : selected ? (EXPRESSIONS[selected as ExpressionId] ?? null) : null
 
   const progressOf = (def: ExpressionDef) => {
+    const tr = trophyOf(def.id)
+    if (tr) {
+      const pr = trophyProgress[tr.id]
+      return pr ? { value: Math.min(pr.value, pr.target), target: pr.target, unit: '' } : null
+    }
     const p = def.progress
     if (!p) return null
     const raw = p.stat === 'friends' ? friends : (stats?.[p.stat] ?? 0)
@@ -77,7 +95,10 @@ export function InventoryPage() {
   const equip = async (id: string) => {
     setBusy(true)
     try {
-      const { data, error } = await supabase.rpc('equip_expression', { p_expression: id as ExpressionId })
+      const { data, error } = await supabase.rpc(
+        'equip_expression',
+        tenueDef ? { p_expression: id as ExpressionId, p_slot: stickerSlot(id) } : { p_expression: id as ExpressionId },
+      )
       if (error) throw error
       patchProfile(data)
       void usePlayersStore.getState().load(true)
@@ -136,7 +157,7 @@ export function InventoryPage() {
       {tenueDef && (
         <StaggerItem>
           <p className="text-center text-sm font-bold text-muted">
-            Expressions en {tenueDef.emoji} {tenueDef.label} : chacune se débloque avec son défi.
+            Stickers en {tenueDef.emoji} {tenueDef.label} : « Joie » est offert, les autres se gagnent avec leur trophée 🏆.
           </p>
         </StaggerItem>
       )}
@@ -177,7 +198,9 @@ export function InventoryPage() {
                     </>
                   )}
                 </div>
-                <span className="font-display text-sm font-extrabold">{open ? def.label : '???'}</span>
+                <span className="font-display text-sm font-extrabold leading-tight">
+                  {open ? def.label : trophyOf(id) ? `🏆 ${trophyOf(id)!.name}` : '???'}
+                </span>
                 {equipped && (
                   <span className="absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border-2 border-ink bg-mint text-[#1f1b2e]">
                     <Check className="size-4" strokeWidth={4} />
@@ -229,14 +252,22 @@ export function InventoryPage() {
       </>
       )}
 
-      <BottomSheet open={Boolean(sel)} onClose={() => setSelected(null)} title={sel && isUnlocked(sel.id) ? sel.label : 'Expression secrète'}>
+      <BottomSheet
+        open={Boolean(sel)}
+        onClose={() => setSelected(null)}
+        title={sel && isUnlocked(sel.id) ? sel.label : sel && trophyOf(sel.id) ? `🏆 ${trophyOf(sel.id)!.name}` : 'Expression secrète'}
+      >
         {sel && (
           <SheetBody
             slug={profile.slug}
             tenue={tenue}
-            def={sel}
+            def={
+              trophyOf(sel.id) && !isUnlocked(sel.id)
+                ? { ...sel, condition: `${trophyOf(sel.id)!.condition}${trophyOf(sel.id)!.active ? '' : ' (trophée bientôt disponible)'}` }
+                : sel
+            }
             unlocked={isUnlocked(sel.id)}
-            unlockedAt={unlocks[sel.id]}
+            unlockedAt={tenueDef ? (trophyOf(sel.id) ? trophyUnlocks[trophyOf(sel.id)!.id] : undefined) : unlocks[sel.id]}
             equipped={profile.equipped_expression === sel.id}
             progress={progressOf(sel)}
             busy={busy}

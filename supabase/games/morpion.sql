@@ -221,6 +221,29 @@ $$;
 
 -- ---------------------------------------------------------------- moteur (délégation au socle)
 
+-- Hook de trophées du socle duel (features/duel.sql, _duel_tstats) : stats propres au jeu.
+-- La variante est celle de la session (session.board_options.variant).
+create or replace function public.game_morpion_trophy_stats(p_state jsonb, p_pl text)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  with v as (
+    select public._morpion_variant(p_state->'session'->'board_options') as variant,
+           coalesce((p_state->'session'->'stats'->p_pl->>'wins')::integer, 0) as wins
+  ), g as (select * from public._duel_games(p_state, p_pl))
+  select jsonb_build_object(
+    'classic_fast_loss', case when v.variant = 'classic' then (select count(*) from g where lost and moves <= 7) else 0 end,
+    'giant_wins', case when v.variant = 'giant' then (select count(*) from g where won) else 0 end,
+    'win_classic', case when v.variant = 'classic' and v.wins >= 1 then 1 else 0 end,
+    'win_giant', case when v.variant = 'giant' and v.wins >= 1 then 1 else 0 end,
+    'win_ultimate', case when v.variant = 'ultimate' and v.wins >= 1 then 1 else 0 end,
+    'classic_second_win', case when v.variant = 'classic' then (select count(*) from g where won and not i_started) else 0 end,
+    'giant_fast_win', case when v.variant = 'giant' then (select count(*) from g where won and moves <= 13) else 0 end,
+    'ultimate_duel_wins', case when v.variant = 'ultimate' then v.wins else 0 end)
+  from v
+$$;
+revoke all on function public.game_morpion_trophy_stats(jsonb, text) from public, anon, authenticated;
+
 create or replace function public.game_morpion_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions

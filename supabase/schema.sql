@@ -517,14 +517,28 @@ begin
   return public._profile_json(v_me);
 end $$;
 
-create or replace function public.equip_expression(p_expression text)
+-- Ancienne signature (text) : remplacée par (text, integer) — drop pour éviter l'ambiguïté PostgREST.
+drop function if exists public.equip_expression(text);
+
+-- p_slot : rang (1..12, ou 12+N pour extraN) du sticker dans la planche de la TENUE équipée ;
+-- envoyé par le front seulement quand il affiche la planche d'une tenue (pas la planche de base).
+-- Slot 1 (joie) et stickers bonus (slot > 12) : offerts avec la tenue ; slots 2..12 : trophée de la
+-- tenue (cf. features/trophees.sql, _tenue_slot_ok). Sans p_slot : conditions d'expression habituelles.
+create or replace function public.equip_expression(p_expression text, p_slot integer default null)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me uuid := public._require_profile();
+  v_me    uuid := public._require_profile();
+  v_tenue text;
 begin
-  if p_expression ~ '^extra[1-9]$' then
+  select equipped_tenue into v_tenue from public.profiles where id = v_me;
+  if p_slot is not null and coalesce(v_tenue, 'default') <> 'default' then
+    if p_expression !~ '^[a-z0-9_]{1,24}$' then raise exception 'unknown_expression'; end if;
+    if not public._tenue_slot_ok(v_me, v_tenue, p_slot) then
+      raise exception 'expression_locked';
+    end if;
+  elsif p_expression ~ '^extra[1-9]$' then
     -- Sticker bonus d'une planche de tenue : dispo dès qu'une tenue (déjà débloquée, cf. equip_tenue) est portée.
     if not exists (select 1 from public.profiles where id = v_me and equipped_tenue is not null and equipped_tenue <> 'default') then
       raise exception 'expression_locked';
@@ -1002,6 +1016,13 @@ returns jsonb language sql
 set search_path = public, extensions
 as $$ select '{}'::jsonb $$;
 
+-- Hook trophées : no-op ici, redéfini par supabase/features/trophees.sql.
+-- Renvoie {profile_id: [trophy_ids]} fusionné sous `new_trophies`.
+create or replace function public._after_finish_trophies(p_match_id uuid, p_profile_ids uuid[])
+returns jsonb language sql
+set search_path = public, extensions
+as $$ select '{}'::jsonb $$;
+
 -- p_results : [{profile_id, points, won, placement, stats?: {designated?, undercover_won_as_undercover?, undercover_first_out?}}]
 -- Écrit match_players, XP, player_stats, passe le match en 'finished',
 -- puis évalue les déblocages de tous les joueurs. Renvoie {new_unlocks, xp_gained}.
@@ -1017,12 +1038,15 @@ declare
   v_xp    integer;
   v_xpmap jsonb := '{}'::jsonb;
   v_ids   uuid[] := '{}';
+  v_np    integer;
+  v_nt    jsonb;
+  v_ntr   jsonb;
 begin
   select * into v_m from public.matches where id = p_match_id for update;
   if not found then raise exception 'match_not_found'; end if;
   if v_m.status = 'finished' then raise exception 'match_already_finished'; end if;
 
-  select max(x.placement), min(x.placement) into v_maxp, v_minp
+  select max(x.placement), min(x.placement), count(*) into v_maxp, v_minp, v_np
     from jsonb_to_recordset(p_results) as x(placement integer);
 
   for r in
@@ -1032,7 +1056,10 @@ begin
     insert into public.match_players(match_id, profile_id, game_id, placement, points, won, stats)
     values (p_match_id, r.profile_id, v_m.game_id, coalesce(r.placement, 1),
             coalesce(r.points, 0), coalesce(r.won, false),
-            case when jsonb_typeof(r.stats) = 'object' then r.stats else '{}'::jsonb end);
+            -- 'last' (1 = dernier d'une partie non nulle) et 'nplayers' : stats génériques lues par les trophées.
+            (case when jsonb_typeof(r.stats) = 'object' then r.stats else '{}'::jsonb end)
+              || jsonb_build_object('last', case when v_maxp > v_minp and r.placement = v_maxp then 1 else 0 end,
+                                    'nplayers', v_np));
 
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;
@@ -1061,8 +1088,11 @@ begin
 
   update public.matches set status = 'finished', finished_at = now() where id = p_match_id;
 
+  -- Dans l'ordre : tenues d'abord (le trophée « Garde-robe » compte les tenues), puis trophées.
+  v_nt  := coalesce(public._after_finish_match(p_match_id, v_ids), '{}'::jsonb);
+  v_ntr := coalesce(public._after_finish_trophies(p_match_id, v_ids), '{}'::jsonb);
   return jsonb_build_object('new_unlocks', public._unlocks_map(v_ids), 'xp_gained', v_xpmap,
-                            'new_tenues', coalesce(public._after_finish_match(p_match_id, v_ids), '{}'::jsonb));
+                            'new_tenues', v_nt, 'new_trophies', v_ntr);
 end $$;
 
 -- =============================================================================
@@ -1151,6 +1181,30 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (cf. features/trophees.sql), recopiées depuis le state final.
+create or replace function public._qdn_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with h as (
+    select e.o, coalesce((e.v->'counts'->>p_pl)::integer, 0) as mine,
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'counts')), 0) as mx
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
+  )
+  select jsonb_build_object(
+    'rounds', (p_state->>'total_rounds')::integer,
+    -- manches sans point (hors majorité ; une manche sans vote compte aussi)
+    'off_majority', greatest(0, (p_state->>'total_rounds')::integer - coalesce((p_state->'scores'->>p_pl)::integer, 0)),
+    'pointed_by_all', (select count(*) from h where mine > 0 and mine = jsonb_array_length(p_state->'players') - 1
+                         and jsonb_array_length(p_state->'players') >= 3),
+    'top_rounds', (select count(*) from h where mine > 0 and mine = mx),
+    'top_designated', case when coalesce((p_state->'designated'->>p_pl)::integer, 0) > 0
+        and coalesce((p_state->'designated'->>p_pl)::integer, 0) >=
+            (select max(value::integer) from jsonb_each_text(p_state->'designated')) then 1 else 0 end,
+    'perfect', case when (p_state->>'total_rounds')::integer >= 10
+        and coalesce((p_state->'scores'->>p_pl)::integer, 0) = (p_state->>'total_rounds')::integer then 1 else 0 end)
+$$;
+
 create or replace function public._qdn_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -1167,7 +1221,8 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', jsonb_build_object('designated', coalesce((p_state->'designated'->>t.key)::integer, 0)))
+           'stats', jsonb_build_object('designated', coalesce((p_state->'designated'->>t.key)::integer, 0))
+                    || public._qdn_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -1365,7 +1420,13 @@ begin
            'stats', jsonb_build_object(
              'undercover_won_as_undercover',
                case when won and role = 'undercover' and alive and p_winner = 'infiltres' then 1 else 0 end,
-             'undercover_first_out', case when elim_idx = 1 then 1 else 0 end))
+             'undercover_first_out', case when elim_idx = 1 then 1 else 0 end,
+             -- trophées (features/trophees.sql)
+             'wrongly_out', case when role = 'civil' and elim_idx is not null then 1 else 0 end,
+             'survived', case when alive then 1 else 0 end,
+             'won_civil', case when won and role = 'civil' then 1 else 0 end,
+             'won_mrwhite', case when won and role = 'mrwhite' then 1 else 0 end,
+             'won_infiltre', case when won and role in ('undercover', 'mrwhite') then 1 else 0 end))
          order by placement, pl)
     into v_results
     from ranked;
@@ -1694,7 +1755,8 @@ begin
     v_fin := public.finish_match(p_match_id, v_res->'results');
     v_state := v_state || jsonb_build_object('new_unlocks', v_fin->'new_unlocks',
                                              'xp_gained', v_fin->'xp_gained',
-                                             'new_tenues', coalesce(v_fin->'new_tenues', '{}'::jsonb));
+                                             'new_tenues', coalesce(v_fin->'new_tenues', '{}'::jsonb),
+                                             'new_trophies', coalesce(v_fin->'new_trophies', '{}'::jsonb));
     update public.matches set state = v_state, status = 'finished', finished_at = now() where id = p_match_id;
   else
     update public.matches set state = v_state where id = p_match_id;
@@ -1829,6 +1891,8 @@ revoke all on function public._match_stale_timeout() from public, anon, authenti
 revoke all on function public._matches_touch() from public, anon, authenticated;
 revoke all on function public.finish_match(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public._after_finish_match(uuid, uuid[]) from public, anon, authenticated;
+revoke all on function public._after_finish_trophies(uuid, uuid[]) from public, anon, authenticated;
+revoke all on function public._qdn_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_qui_de_nous_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_finish(jsonb, jsonb) from public, anon, authenticated;
@@ -1853,7 +1917,7 @@ revoke all on function public._require_admin() from public, anon, authenticated;
 revoke all on function public.admin_list_soirees() from public, anon;
 revoke all on function public.admin_end_soiree(uuid) from public, anon;
 revoke all on function public.update_nickname(text) from public, anon;
-revoke all on function public.equip_expression(text) from public, anon;
+revoke all on function public.equip_expression(text, integer) from public, anon;
 revoke all on function public.send_friend_request(uuid) from public, anon;
 revoke all on function public.respond_friend_request(uuid, boolean) from public, anon;
 revoke all on function public.remove_friend(uuid) from public, anon;
@@ -1876,7 +1940,7 @@ grant execute on function
   public.admin_list_soirees(),
   public.admin_end_soiree(uuid),
   public.update_nickname(text),
-  public.equip_expression(text),
+  public.equip_expression(text, integer),
   public.send_friend_request(uuid),
   public.respond_friend_request(uuid, boolean),
   public.remove_friend(uuid),

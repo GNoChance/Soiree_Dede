@@ -598,6 +598,59 @@ end $$;
 
 -- ---------------------------------------------------------------- fin de session
 
+-- Manches jouées par p_pl dans la session (history[].games[] des duels où il figure) :
+-- (won, lost, moves = coups des deux joueurs, i_started). Utilisé par les hooks de trophées des jeux.
+create or replace function public._duel_games(p_state jsonb, p_pl text)
+returns table (won boolean, lost boolean, moves integer, i_started boolean)
+language sql immutable
+set search_path = public, extensions
+as $$
+  select coalesce(g->>'winner' = p_pl, false),
+         g->>'winner' is not null and g->>'winner' <> p_pl,
+         coalesce((g->>'moves')::integer, 0),
+         coalesce(g->>'starter' = p_pl, false)
+    from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) d,
+         jsonb_array_elements(coalesce(d->'games', '[]'::jsonb)) g
+   where d->>'a' = p_pl or d->>'b' = p_pl
+$$;
+
+-- Stats de session d'un joueur pour les trophées (features/trophees.sql) : compteurs de session.stats,
+-- meilleures séries de duels gagnés / perdus, + hook optionnel du jeu game_<id>_trophy_stats(state, joueur).
+create or replace function public._duel_tstats(p_state jsonb, p_pl text)
+returns jsonb language plpgsql stable
+set search_path = public, extensions
+as $$
+declare
+  v_st    jsonb := coalesce(p_state->'session'->'stats'->p_pl, '{}'::jsonb);
+  v_fn    text;
+  v_extra jsonb := '{}'::jsonb;
+  v_w     integer := 0;
+  v_l     integer := 0;
+  v_bw    integer := 0;
+  v_bl    integer := 0;
+  e       jsonb;
+begin
+  for e in select value from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) loop
+    if e->>'a' = p_pl or e->>'b' = p_pl then
+      if e->>'winner' = p_pl then v_w := v_w + 1; v_l := 0;
+      elsif e->>'winner' is not null then v_l := v_l + 1; v_w := 0;
+      else v_w := 0; v_l := 0;
+      end if;
+      v_bw := greatest(v_bw, v_w);
+      v_bl := greatest(v_bl, v_l);
+    end if;
+  end loop;
+  v_fn := public._duel_hook(p_state->>'game', 'trophy_stats', 'jsonb, text');
+  if v_fn is not null then
+    execute format('select public.%I($1, $2)', v_fn) into v_extra using p_state, p_pl;
+  end if;
+  return jsonb_build_object(
+    'played', coalesce((v_st->>'played')::integer, 0), 'draws', coalesce((v_st->>'draws')::integer, 0),
+    'losses', coalesce((v_st->>'losses')::integer, 0), 'bets', coalesce((v_st->>'bets')::integer, 0),
+    'bets_won', coalesce((v_st->>'bets_won')::integer, 0), 'win_streak', v_bw, 'loss_streak', v_bl)
+    || coalesce(v_extra, '{}'::jsonb);
+end $$;
+
 -- Classement par points de session. won : champion du tournoi / vainqueur du
 -- duel / meilleur(s) score(s) (roi, ou session arrêtée sans champion ; max > 0).
 -- Le champion (s'il existe) est classé 1er quels que soient les points.
@@ -628,7 +681,8 @@ begin
   -- stats.duel_wins = duels remportés dans la session (tenues : chaque duel gagné compte).
   select jsonb_agg(jsonb_build_object('profile_id', p, 'points', pts, 'won', w, 'placement', pl,
                                       'stats', jsonb_build_object('duel_wins',
-                                        coalesce((v_s->'stats'->p->>'wins')::integer, 0)))
+                                        coalesce((v_s->'stats'->p->>'wins')::integer, 0))
+                                        || public._duel_tstats(p_state, p))
                    order by pl, p)
     into v_results
     from (select p, pts, w, (rank() over (order by w desc, pts desc))::integer as pl
@@ -887,6 +941,8 @@ revoke all on function public._duel_apply_move(text, jsonb, text, jsonb, boolean
 revoke all on function public._duel_setup_begin(text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_setup_call(text, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_finish(jsonb, text) from public, anon, authenticated;
+revoke all on function public._duel_games(jsonb, text) from public, anon, authenticated;
+revoke all on function public._duel_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_advance(text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_start(text, uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public._duel_action(text, jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

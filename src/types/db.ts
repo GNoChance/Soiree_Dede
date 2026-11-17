@@ -26,6 +26,9 @@ export type TenueId = string;
 /** Map profile_id -> tenues nouvellement débloquées (entrées non vides seulement). */
 export type NewTenues = Record<UUID, TenueId[]>;
 
+/** Map profile_id -> trophées nouvellement obtenus (ids du catalogue `trophies` / src/data/trophees.ts). */
+export type NewTrophies = Record<UUID, string[]>;
+
 // -----------------------------------------------------------------------------
 // Tables (lignes lisibles par le client ; aucune écriture directe : tout passe par RPC)
 // -----------------------------------------------------------------------------
@@ -171,6 +174,15 @@ export type TenueUnlockRow = {
   unlocked_at: Timestamp;
 };
 
+export type TrophyUnlockRow = {
+  profile_id: UUID;
+  trophy_id: string;
+  unlocked_at: Timestamp;
+};
+
+/** Progression d'un trophée (RPC my_trophy_progress) : {trophy_id: {value, target}}. */
+export type TrophyProgress = Record<string, { value: number; target: number }>;
+
 export type UnlockRow = {
   profile_id: UUID;
   expression: ExpressionId;
@@ -250,6 +262,7 @@ export type MatchResult = {
 export type FinishedExtras = {
   new_unlocks?: NewUnlocks;
   new_tenues?: NewTenues;
+  new_trophies?: NewTrophies;
   xp_gained?: Record<UUID, number>;
   /** true si la partie a été annulée (action abort ou fin de soirée). */
   aborted?: boolean;
@@ -456,6 +469,7 @@ export type Database = {
       unlocks: Table<UnlockRow>;
       tenues: Table<TenueRow>;
       tenue_unlocks: Table<TenueUnlockRow>;
+      trophy_unlocks: Table<TrophyUnlockRow>;
       soiree_messages: Table<SoireeMessageRow>;
       player_stats: Table<PlayerStatsRow>;
     };
@@ -472,9 +486,11 @@ export type Database = {
       admin_list_soirees: { Args: Record<string, never>; Returns: unknown };
       admin_end_soiree: { Args: { p_soiree_id: UUID }; Returns: EndSoireeResult };
       update_nickname: { Args: { p_nickname: string }; Returns: ProfileJson };
-      equip_expression: { Args: { p_expression: ExpressionId }; Returns: ProfileJson };
+      /** p_slot : rang du sticker dans la planche de la tenue portée (omis pour la planche de base). */
+      equip_expression: { Args: { p_expression: ExpressionId; p_slot?: number }; Returns: ProfileJson };
+      my_trophy_progress: { Args: { p_tenue?: TenueId | null }; Returns: TrophyProgress };
       equip_tenue: { Args: { p_tenue: TenueId }; Returns: ProfileJson };
-      send_soiree_message: { Args: { p_soiree_id: UUID; p_kind: 'text' | 'sticker'; p_body: string }; Returns: number };
+      send_soiree_message: { Args: { p_soiree_id: UUID; p_kind: 'text' | 'sticker'; p_body: string; p_slot?: number }; Returns: number };
       level_for_xp: { Args: { p_xp: number }; Returns: number };
       is_soiree_member: { Args: { p_soiree_id: UUID }; Returns: boolean };
 

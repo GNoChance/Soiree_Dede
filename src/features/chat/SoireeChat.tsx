@@ -4,8 +4,10 @@ import { MessageCircle, Send, Smile } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { BottomSheet } from '@/components/ui/Modal'
-import { tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
+import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
 import { EXPRESSIONS } from '@/data/expressions'
+import { trophyForSlot } from '@/data/trophees'
+import { slotUnlocked } from '@/features/trophees/access'
 import type { ExpressionId } from '@/types/db'
 import { cn } from '@/lib/cn'
 import { playSound } from '@/lib/feedback'
@@ -81,15 +83,20 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
   }, [open, lastId, seen, soireeId])
 
   // seuls les stickers débloqués (comme dans l'inventaire) : les autres, il faut les gagner !
+  // En tenue (planche dessinée) : « Joie » + bonus offerts, les autres avec le trophée de leur rang.
   const unlocks = useSession((s) => s.unlocks)
+  const trophyUnlocks = useSession((s) => s.trophyUnlocks)
+  const inTenue = me.equippedTenue !== 'default' && hasTenueArt(me.slug, me.equippedTenue)
   const stickers = useMemo(
     () => [
-      ...tenuePalette(me.slug, me.equippedTenue).filter(
-        (e) => e === 'joie' || EXPRESSIONS[e as ExpressionId]?.default || unlocks[e as ExpressionId],
+      ...tenuePalette(me.slug, me.equippedTenue).filter((e) =>
+        inTenue
+          ? slotUnlocked(stickerSlot(e), trophyUnlocks, trophyForSlot(me.equippedTenue, stickerSlot(e))?.id)
+          : e === 'joie' || EXPRESSIONS[e as ExpressionId]?.default || unlocks[e as ExpressionId],
       ),
       ...tenueExtras(me.slug, me.equippedTenue).map((x) => x.id),
     ],
-    [me.slug, me.equippedTenue, unlocks],
+    [me.slug, me.equippedTenue, unlocks, trophyUnlocks, inTenue],
   )
 
   const submit = async () => {
@@ -161,7 +168,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
                     key={e}
                     type="button"
                     disabled={sending}
-                    onClick={() => void send('sticker', e)}
+                    onClick={() => void send('sticker', e, inTenue ? stickerSlot(e) : undefined)}
                     aria-label={`Envoyer le sticker ${e}`}
                     className="grid place-items-center rounded-chip p-1 active:scale-90"
                   >

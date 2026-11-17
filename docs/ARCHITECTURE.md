@@ -64,7 +64,7 @@ En jeu, **toutes** les expressions du perso sont utilisables comme réactions (m
    - lie `auth.uid()` au profil dans `device_sessions` (plusieurs appareils possibles).
 3. `current_profile_id()` = profil lié à `auth.uid()` ; utilisé par toutes les RLS.
 4. RPC `admin_reset_pin(p_slug)` réservée à l'admin.
-5. `update_nickname(p_nickname)`, `equip_expression(p_expression)` (vérifie unlock).
+5. `update_nickname(p_nickname)`, `equip_expression(p_expression, p_slot)` (vérifie unlock ; `p_slot` = sticker de tenue, cf. Trophées).
 
 ## Modèle de données (Supabase, schéma public)
 - `profiles` (id uuid, slug unique, first_name, nickname, pin_hash, is_admin, equipped_expression default 'joie', expressions text[] (dispo pour ce perso), xp int, created_at)
@@ -136,6 +136,13 @@ Variables : `.env.local` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (jama
 
 ## Tenues (skins)
 Variante vestimentaire du chibi : `public/chibis/<slug>/<tenue>/<expression>.webp`. Catalogue : table `tenues` (`supabase/features/tenues.sql`) + miroir `src/data/tenues.ts`. `profiles.equipped_tenue` (défaut `default`), RPC `equip_tenue`, déblocage « 10 victoires dans un jeu » évalué en fin de partie (`new_tenues` dans le state final). `Avatar`/`ChibiImage` prennent `tenue` (sans `tenue`, `Avatar` lit l'annuaire `usePlayers`) et se replient sur `default` + emoji si l'illustration manque (`src/data/tenues-art.generated.ts`, généré par `tools/slice-chibis`). Détails : `supabase/README.md` (Tenues) et `tools/slice-chibis/README.md`.
+
+## Trophées (stickers de tenue)
+Conception complète : [docs/TROPHEES.md](TROPHEES.md). Débloquer une tenue ne donne que le sticker n°1 (`joie`) ; les stickers 2→12 se gagnent avec un trophée propre à la tenue (un par rang, « slot »). Les stickers bonus `extraN` restent offerts (slot 12+N).
+- **Catalogue** : table `trophies` (`id, tenue_id, slot, name, description, game_id, rule jsonb, active, sort_order` ; 220 trophées de tenue + 10 généraux, `tenue_id`/`slot` nuls) + miroir front `src/data/trophees.ts`. `active=false` = pas encore obtenable (compteur NEW de la phase 2). `trophy_unlocks(profile_id, trophy_id, unlocked_at)`. Lecture `authenticated`, aucune écriture client. SQL : `supabase/features/trophees.sql`.
+- **Évaluation** (fin de partie, hook `_after_finish_trophies` appelé par `finish_match` après les tenues) : règle générique `{agg: sum|max|count|streak|all|special, stat, threshold, and[]}` calculée sur `match_players` (colonnes `points/placement/won` + clés de `stats`). La progression compte dès la première partie, même sans la tenue. Chaque jeu recopie ce dont ses trophées ont besoin dans `results[].stats` (fonction `_<jeu>_tstats` appelée par son `_finish` ; duels : `_duel_tstats` + hook optionnel `game_<id>_trophy_stats(state, joueur)`). `finish_match` ajoute `last` et `nplayers`. Le state final contient `new_trophies` ({profile_id: [trophy_id]}), célébré par `TrophyUnlockReveal` (écran de fin).
+- **Slot d'un sticker** = rang dans la palette commune `COSTUME_EXPRESSIONS` (joie=1 … déterminé=12), `stickerSlot()` dans `tenueArt.ts`. `equip_expression(p_expression, p_slot)` et `send_soiree_message(…, p_slot)` vérifient `_tenue_slot_ok(profil, tenue équipée, slot)` (tenue débloquée ET slot 1 / > 12 / trophée du slot). Sans `p_slot` : conditions d'expression historiques (planche de base). `equip_tenue` remet l'expression sur `joie` quand on change de tenue.
+- **Front** : `src/features/trophees/` (`access.ts` : `slotUnlocked`, `useTrophyProgress` (RPC `my_trophy_progress(p_tenue)`), `useProfileTrophies` ; `TrophyBoard` : section « Trophées » du profil ; `TrophyReveal`). Inventaire : stickers verrouillés d'une tenue = trophée à gagner (nom, condition, progression). `useSession.trophyUnlocks` (chargé par `refreshProfile`).
 
 ## Jeux en duel (socle commun)
 Jeux à 2 joueurs à la fois (4 à la suite, morpion, bataille navale…) : les autres regardent en direct et **parient**. Le socle gère la session, les tours, le minuteur, les paris, les points et `finish_match` ; un jeu ne fournit **que son plateau** (3 fonctions SQL + 1 composant React).
@@ -279,7 +286,7 @@ Points par place (12 places) : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 (moins de j
 Un fil par soirée, visible au salon ET pendant les jeux : bulle flottante (`SoireeChat`, montée une fois dans `Root`, suit la soirée déclarée par `useViewingSoiree`), feuille de discussion, aperçus des messages reçus.
 - Table `soiree_messages(id, soiree_id, profile_id, kind, body, tenue, created_at)` : `kind = text` (1 à 200 caractères) ou `sticker` (`body` = id d'expression, `tenue` = tenue de l'auteur à l'envoi). Lecture : membres de la soirée (RLS `is_soiree_member`) + Realtime `postgres_changes` INSERT.
 - Écriture : RPC `send_soiree_message(p_soiree_id, p_kind, p_body)` uniquement. Erreurs : `not_in_soiree`, `soiree_ended`, `invalid_message`, `chat_too_fast` (6 messages / 10 s). 200 derniers messages gardés par soirée ; purge complète quand la soirée passe à `ended` (trigger `soirees_chat_purge`).
-- Front : `useSoireeChat` (100 derniers messages + temps réel), non-lus mémorisés par soirée dans `localStorage`. Stickers proposés = palette de la tenue équipée + stickers bonus. Les jeux qui écoutent le clavier doivent ignorer les champs de saisie (cf. `Game.onKey` de Dédé Kart).
+- Front : `useSoireeChat` (100 derniers messages + temps réel), non-lus mémorisés par soirée dans `localStorage`. Stickers proposés = palette de la tenue équipée (slot 1 + ceux dont le trophée est obtenu, cf. Trophées) + stickers bonus ; `send_soiree_message(p_soiree_id, p_kind, p_body, p_slot)`. Les jeux qui écoutent le clavier doivent ignorer les champs de saisie (cf. `Game.onKey` de Dédé Kart).
 
 ## Stats : classement de soirée, historique, profil (`supabase/features/stats.sql`, `src/features/stats/`)
 Tout est dérivé de `soirees` / `soiree_players` / `matches` / `match_players` (pas de table). RPC `security definer`, jsonb prêt à afficher, `authenticated` seulement.

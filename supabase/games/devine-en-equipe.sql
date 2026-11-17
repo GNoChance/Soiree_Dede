@@ -143,6 +143,27 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql).
+create or replace function public._dee_tstats(p_state jsonb, p_pid text, p_team text, p_won boolean)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with s as (
+    select coalesce((p_state->'speaker_points'->>p_pid)::integer, 0) as mine,
+           (select coalesce(max(coalesce((p_state->'speaker_points'->>m)::integer, 0)), 0)
+              from jsonb_array_elements_text(p_state->'teams'->p_team) m) as team_max,
+           (select coalesce(max(value::integer), 0) from jsonb_each_text(coalesce(p_state->'speaker_points', '{}'::jsonb))) as all_max
+  )
+  select jsonb_build_object(
+    'best_in_team', case when mine > 0 and mine >= team_max then 1 else 0 end,
+    'sweep', case when jsonb_array_length(coalesce(p_state->'round_scores', '[]'::jsonb)) >= 3
+        and not exists (select 1 from jsonb_array_elements(p_state->'round_scores') r
+                         where (r->>p_team)::integer <= (r->>(case when p_team = 'red' then 'blue' else 'red' end))::integer)
+        then 1 else 0 end,
+    'mvp', case when p_won and mine >= 10 and mine >= all_max then 1 else 0 end)
+  from s
+$$;
+
 create or replace function public._dee_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql stable
 set search_path = public, extensions
@@ -162,7 +183,8 @@ begin
            'points', ceil(coalesce((p_state->'speaker_points'->>t.pid)::integer, 0) / 3.0)::integer,
            'won', v_winners ? t.team,
            'placement', case when v_winners ? t.team then 1 else 2 end,
-           'stats', jsonb_build_object('found', coalesce((p_state->'speaker_points'->>t.pid)::integer, 0), 'team', t.team))
+           'stats', jsonb_build_object('found', coalesce((p_state->'speaker_points'->>t.pid)::integer, 0), 'team', t.team)
+                    || public._dee_tstats(p_state, t.pid, t.team, v_winners ? t.team))
          order by case when v_winners ? t.team then 1 else 2 end, t.team, t.pid)
     into v_results
     from (select x as pid, 'red' as team from jsonb_array_elements_text(p_state->'teams'->'red') x
@@ -421,6 +443,7 @@ revoke all on function public._dee_rotate(jsonb) from public, anon, authenticate
 revoke all on function public._dee_recap(jsonb, text) from public, anon, authenticated;
 revoke all on function public._dee_end_passage(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._dee_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._dee_tstats(jsonb, text, text, boolean) from public, anon, authenticated;
 revoke all on function public._dee_round_complete(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_devine_en_equipe_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_devine_en_equipe_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

@@ -179,6 +179,44 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].ranking.
+create or replace function public._lpp_tstats(p_state jsonb, p_pl text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  with h as (
+    select e.o, (e.v->>'answer')::numeric as ans, e.v->'ranking' as rk
+      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
+  ), m as (
+    select h.o, h.ans,
+           (select r from jsonb_array_elements(h.rk) r where r->>'profile_id' = p_pl limit 1) as me,
+           jsonb_array_length(h.rk) as n,
+           (select max((r->>'rank')::integer) from jsonb_array_elements(h.rk) r) as maxrank,
+           (select count(*) from jsonb_array_elements(h.rk) r where (r->>'rank')::integer = 1) as nfirst
+      from h
+  ), x as (
+    select m.o, m.ans, m.n, m.maxrank, m.nfirst, (m.me is not null) as ans_ok,
+           coalesce((m.me->>'rank')::integer, 0) as rank, coalesce((m.me->>'points')::integer, 0) as pts,
+           coalesce((m.me->>'exact')::boolean, false) as exact,
+           (m.me->>'value')::numeric as val, (m.me->>'gap')::numeric as gap
+      from m
+  ), g1 as (
+    select x.*, x.o - row_number() over (partition by (x.pts = 0) order by x.o) as grp from x
+  ), g2 as (
+    select x.*, x.o - row_number() over (partition by (x.rank = 1) order by x.o) as grp from x
+  )
+  select jsonb_build_object(
+    'farthest', (select count(*) from x where ans_ok and n >= 3 and rank = maxrank and rank > 1),
+    'way_off', (select count(*) from x where ans_ok and ans <> 0 and (abs(val) >= 10 * abs(ans) or abs(val) <= abs(ans) / 10)),
+    'scoreless_run', coalesce((select max(c) from (select count(*) as c from g1 where pts = 0 group by grp) z), 0),
+    'closest', (select count(*) from x where rank = 1),
+    'seconds', (select count(*) from x where rank = 2),
+    'tied_closest', (select count(*) from x where rank = 1 and nfirst >= 2),
+    'near_miss', (select count(*) from x where rank = 1 and not exact and ans <> 0 and gap < abs(ans) * 0.01),
+    'scored_all', case when (select count(*) from x) >= 8 and not exists (select 1 from x where pts = 0) then 1 else 0 end,
+    'closest_run', coalesce((select max(c) from (select count(*) as c from g2 where rank = 1 group by grp) z), 0))
+$$;
+
 create or replace function public._lpp_finish(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -195,7 +233,8 @@ begin
            'points', t.value::integer,
            'won', v_max > 0 and t.value::integer = v_max,
            'placement', t.r,
-           'stats', jsonb_build_object('exacts', coalesce((p_state->'exacts'->>t.key)::integer, 0)))
+           'stats', jsonb_build_object('exacts', coalesce((p_state->'exacts'->>t.key)::integer, 0))
+                    || public._lpp_tstats(p_state, t.key))
          order by t.r, t.key)
     into v_results
     from (select key, value, rank() over (order by value::integer desc) as r
@@ -285,5 +324,6 @@ revoke all on function public._lpp_num(jsonb) from public, anon, authenticated;
 revoke all on function public._lpp_open(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._lpp_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._lpp_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._lpp_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_le_plus_proche_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_le_plus_proche_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

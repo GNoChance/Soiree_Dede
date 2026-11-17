@@ -55,6 +55,25 @@ export function tenueExtras(slug: string, tenue: string) {
   return tenueExtrasOf(slug, tenueArtDir(tenue, slug)!)
 }
 
+/**
+ * Trophées : rang (1..12) d'un sticker dans la planche d'une tenue = sa place dans la palette commune
+ * (COSTUME_EXPRESSIONS) ; `extraN` = 12 + N (stickers bonus, offerts avec la tenue) ; 0 = inconnu.
+ * Le slot 1 (joie) est offert avec la tenue, les slots 2..12 se gagnent avec le trophée (tenue, slot).
+ */
+export function stickerSlot(id: string): number {
+  const i = (COSTUME_EXPRESSIONS as readonly string[]).indexOf(id)
+  if (i >= 0) return i + 1
+  const m = /^extra([0-9]+)$/.exec(id)
+  return m ? 12 + Number(m[1]) : 0
+}
+
+/** Sticker (id d'expression) de rang `slot` dans la planche de ce perso pour cette tenue, ou null s'il n'existe pas. */
+export function tenueStickerAt(slug: string, tenue: string, slot: number): string | null {
+  if (slot > 12) return tenueExtras(slug, tenue)[slot - 13]?.id ?? null
+  const e = COSTUME_EXPRESSIONS[slot - 1]
+  return e && tenuePalette(slug, tenue).includes(e) ? e : null
+}
+
 export function markTenueArtMissing(slug: string, tenue: string) {
   if (tenue === DEFAULT_TENUE || failed.has(key(slug, tenue))) return
   failed.add(key(slug, tenue))

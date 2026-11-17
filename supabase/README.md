@@ -40,7 +40,8 @@ Types TypeScript : `src/types/db.ts` (`createClient<Database>(...)`).
 | `admin_list_soirees()` | jsonb : soirées non terminées (code, hôte, joueurs, partie en cours) — admin seulement |
 | `admin_end_soiree(p_soiree_id)` | {new_unlocks} : clôt de force (end_reason 'admin', partie en cours annulée sans XP) — admin seulement |
 | `update_nickname(p_nickname)` | profil (1–20 caractères, espaces normalisés) |
-| `equip_expression(p_expression)` | profil (`unknown_expression` / `expression_locked`) |
+| `equip_expression(p_expression, p_slot default null)` | profil (`unknown_expression` / `expression_locked`) — `p_slot` : stickers de tenue, cf. Trophées |
+| `my_trophy_progress(p_tenue default null)` | `{trophy_id: {value, target}}` — cf. Trophées |
 | `equip_tenue(p_tenue)` | profil (`unknown_tenue` / `tenue_locked`) — cf. section Tenues |
 
 PIN : exactement 4 chiffres. 5 échecs → blocage 15 min (par profil, tous appareils confondus). Premier login = le PIN saisi devient le PIN.
@@ -172,6 +173,17 @@ Skins vestimentaires : variante du chibi (`public/chibis/<slug>/<tenue>/<expr>.w
 - **Branchement fin de partie** : `schema.sql` définit un hook no-op `_after_finish_match(p_match_id, p_profile_ids) → jsonb` appelé en dernier par `finish_match` ; `tenues.sql` le redéfinit pour évaluer les tenues de tous les joueurs. `finish_match` renvoie `{new_unlocks, xp_gained, new_tenues}` et `game_action` met `new_tenues` dans le state final.
 - `has_art` est informatif ; côté front la disponibilité des illustrations vient de `src/data/tenues-art.generated.ts` (généré par `tools/slice-chibis`).
 - Ordre d'exécution : `tenues.sql` APRÈS `schema.sql` (il redéfinit `_profile_json`, `list_profiles_public`, les vues). `schema.sql` fait un `drop function list_profiles_public()` avant de la recréer pour rester ré-exécutable seul.
+
+### Trophées (`supabase/features/trophees.sql`)
+Conception : `docs/TROPHEES.md` ; vue d'ensemble : ARCHITECTURE.md (Trophées). Exécuté APRÈS `tenues.sql` (qui lui fournit `tenues` / `tenue_unlocks`).
+- Tables : `trophies` (catalogue seedé, 230 lignes, `on conflict do update` ; `active` faux = non obtenable), `trophy_unlocks`. Lecture `authenticated`.
+- Évaluation : `evaluate_trophies(p_profile_id, p_game default null) → text[]` (interne ; insère les trophées actifs dont la règle est remplie, renvoie les ids nouveaux) ; `_tr_progress(profil, jeu, règle)` / `_tr_target(règle)` ; hook `_after_finish_trophies(match, profils) → {profile_id: [ids]}` (no-op dans `schema.sql`, redéfini ici) appelé par `finish_match` → `new_trophies` (renvoyé par `finish_match`, recopié dans le state final par `game_action`).
+- Règle jsonb : `sum` (somme de `stat`), `max` (meilleure partie), `count` (parties vérifiant `and`), `streak` (série de parties consécutives vérifiant `and`, par date de fin), `all` (toutes les sous-règles), `special` (généraux : `distinct_games`, `distinct_win_games`, `soirees`, `late_soirees`, `games_in_soiree`, `hosted`, `biggest_table`, `tenues`, `full_board`). `and` = `[{stat, op, value}]` par partie, stat absente = 0. Stats virtuelles : `points`, `placement`, `won`.
+- `match_players.stats` : `finish_match` ajoute `last` (1 = dernier d'une partie non nulle) et `nplayers`. Chaque jeu y recopie les compteurs de ses trophées (voir les fonctions `_*_tstats`) ; duels : `_duel_tstats` (compteurs de session, séries `win_streak` / `loss_streak`) + hook de jeu `game_<id>_trophy_stats(state jsonb, joueur text)` (quatre-a-la-suite, morpion).
+- `my_trophy_progress(p_tenue default null) → {trophy_id: {value, target}}` (profil courant, trophées actifs ; `authenticated`).
+- `_tenue_slot_ok(profil, tenue, slot)` (interne) : tenue débloquée ET (slot 1 | slot > 12 | trophée `(tenue, slot)` obtenu). `equip_expression(p_expression, p_slot default null)` et `send_soiree_message(p_soiree_id, p_kind, p_body, p_slot default null)` l'appellent quand `p_slot` est fourni et qu'une tenue autre que `default` est portée (erreur `expression_locked`) ; les anciennes signatures (sans `p_slot`) sont supprimées (`drop function`) pour éviter l'ambiguïté PostgREST. `equip_tenue` repasse l'expression sur `joie` quand la tenue change.
+- Migration douce (une seule fois, à la création de la table) : tout profil portant une tenue ≠ `default` avec une expression ≠ `joie` repasse sur `joie`.
+- Pas de rattrapage à l'installation : les trophées s'évaluent à la prochaine partie du jeu concerné (les cumuls comptent tout l'historique de `match_players` du jeu ; les compteurs FIN n'existent que pour les parties jouées après la mise à jour).
 
 ### Écarts au contrat (ARCHITECTURE.md)
 1. `pin_hash` n'est pas dans `profiles` mais dans une table privée `profile_credentials` (sinon `select('*')` sur profiles exposerait le hash ou échouerait). `has_pin` est exposé via `list_profiles_public()`.

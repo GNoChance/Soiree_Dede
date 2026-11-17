@@ -14,6 +14,7 @@ import { toastRpcError } from '@/lib/rpcError'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { DEFAULT_TENUE, TENUES, type TenueDef } from '@/data/tenues'
+import { trophiesOfTenue } from '@/data/trophees'
 import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
 
@@ -50,6 +51,7 @@ function useWinsByGame(profileId: string | undefined) {
 export function TenuesTab() {
   const profile = useSession((s) => s.profile)
   const tenueUnlocks = useSession((s) => s.tenueUnlocks)
+  const trophyUnlocks = useSession((s) => s.trophyUnlocks)
   const patchProfile = useSession((s) => s.patchProfile)
   const [busy, setBusy] = useState<string | null>(null)
   const { wins, duelWins, total } = useWinsByGame(profile?.id)
@@ -93,6 +95,7 @@ export function TenuesTab() {
               unlocked={unlocked}
               equipped={equippedTenue === t.id}
               progress={progressOf(t)}
+              trophies={trophiesOfTenue(t.id).length ? { got: trophiesOfTenue(t.id).filter((x) => trophyUnlocks[x.id]).length, total: trophiesOfTenue(t.id).length } : null}
               busy={busy === t.id}
               onEquip={() => void equip(t)}
             />
@@ -104,7 +107,7 @@ export function TenuesTab() {
 }
 
 function TenueCard({
-  slug, expression, def, unlocked, equipped, progress, busy, onEquip,
+  slug, expression, def, unlocked, equipped, progress, trophies, busy, onEquip,
 }: {
   slug: string
   expression: string
@@ -112,6 +115,8 @@ function TenueCard({
   unlocked: boolean
   equipped: boolean
   progress: { value: number; target: number }
+  /** Trophées de la tenue (un par sticker, hors « joie ») : obtenus / total. */
+  trophies: { got: number; total: number } | null
   busy: boolean
   onEquip: () => void
 }) {
@@ -169,6 +174,7 @@ function TenueCard({
       {unlocked ? (
         <p className={cn('text-xs font-bold', equipped ? 'text-[#1f1b2e]/70' : 'text-muted')}>
           {def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
+          {trophies && !def.default && ` · 🏆 ${trophies.got}/${trophies.total}`}
         </p>
       ) : (
         <div className="w-full">
