@@ -165,7 +165,8 @@ begin
     'turn_points', '{}'::jsonb,
     'feed', '[]'::jsonb,
     'last_turn', null);
-  p_server := p_server || jsonb_build_object('word', null, 'revealed', '[]'::jsonb, 'hints_left', '[]'::jsonb);
+  p_server := p_server || jsonb_build_object('word', null, 'revealed', '[]'::jsonb, 'hints_left', '[]'::jsonb,
+                                             'fm', '{}'::jsonb, 'close_turn', '[]'::jsonb);
   return jsonb_build_object(
     'state', p_state,
     'server', p_server,
@@ -263,7 +264,11 @@ begin
       'points', p_state->'turn_points', 'skipped', p_skipped),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
-      'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped)));
+      'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped,
+      -- trophées : difficulté du mot, « Presque ! » reçus (1 par joueur et par tour), chrono de chaque trouvaille
+      'diff', coalesce((v_word->>'difficulty')::integer, 2),
+      'close', coalesce(p_server->'close_turn', '[]'::jsonb),
+      'fm', coalesce(p_server->'fm', '{}'::jsonb))));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -276,7 +281,12 @@ as $$
     select e.o, e.v->>'drawer' as drawer, coalesce((e.v->>'skipped')::boolean, false) as skipped,
            jsonb_array_length(e.v->'found') as nf,
            coalesce((e.v->'found') ? p_pl, false) as me_found,
-           coalesce((e.v->'found'->>0) = p_pl, false) as first
+           coalesce((e.v->'found'->>0) = p_pl, false) as first,
+           coalesce((e.v->'close') ? p_pl, false) as closed,
+           coalesce((e.v->>'diff')::integer, 0) as diff,
+           (e.v->'fm'->p_pl->>'r')::numeric as rem,
+           (e.v->'fm'->p_pl->>'e')::numeric as el,
+           coalesce((e.v->'fm'->p_pl->>'nh')::boolean, false) as nohint
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
   ), n as (
     select jsonb_array_length(p_state->'players') as np
@@ -288,6 +298,11 @@ as $$
     'unfound', (select count(*) from h where drawer = p_pl and not skipped and nf = 0),
     'found_count', (select count(*) from h where drawer <> p_pl and me_found),
     'first_finds', (select count(*) from h where first),
+    'close_count', (select count(*) from h where drawer <> p_pl and closed),
+    'late_finds', (select count(*) from h where me_found and rem <= 5),
+    'fast_finds', (select count(*) from h where me_found and el < 10),
+    'no_hint_finds', (select count(*) from h where me_found and nohint),
+    'hard_perfect', (select count(*) from h, n where drawer = p_pl and not skipped and diff = 3 and np > 1 and nf = np - 1),
     'perfect_drawings', (select count(*) from h, n where drawer = p_pl and not skipped and np > 1 and nf = np - 1),
     'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not me_found group by grp) x), 0),
     'masterpiece', case when (select np from n) >= 4 and exists (select 1 from h where drawer = p_pl)
@@ -477,6 +492,11 @@ begin
                   || jsonb_build_object(p_state->>'drawer', coalesce((p_state->'turn_points'->>(p_state->>'drawer'))::integer, 0) + 40),
         'feed_seq', v_seq,
         'feed', v_feed || jsonb_build_array(jsonb_build_object('n', v_seq, 'p', v_me, 'k', 'found', 'pts', v_pts)));
+      p_server := p_server || jsonb_build_object('fm', coalesce(p_server->'fm', '{}'::jsonb) || jsonb_build_object(v_me,
+        jsonb_build_object('e', round(extract(epoch from (now() - v_start))::numeric, 1),
+                           'r', round(extract(epoch from (v_end - now()))::numeric, 1),
+                           'nh', (p_state->>'next_hint_at') is not null
+                                 and now() < (p_state->>'next_hint_at')::timestamptz)));
       v_secrets := jsonb_build_object(v_me, jsonb_build_object(
         'turn', v_turn, 'role', 'guesser', 'found', true, 'word', p_server->'word'->>'word'));
       -- Tout le monde a trouvé -> fin de tour anticipée.
@@ -493,6 +513,9 @@ begin
         'turn', v_turn, 'role', 'guesser', 'found', false,
         'close', jsonb_build_object('text', v_text, 'n', v_seq)));
       p_state := p_state || jsonb_build_object('feed_seq', v_seq);
+      if not (coalesce(p_server->'close_turn', '[]'::jsonb) ? v_me) then
+        p_server := p_server || jsonb_build_object('close_turn', coalesce(p_server->'close_turn', '[]'::jsonb) || to_jsonb(v_me));
+      end if;
       return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 
     else

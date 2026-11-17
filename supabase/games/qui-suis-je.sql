@@ -74,7 +74,8 @@ begin
     'skipped', p_skipped,
     -- log compact : [{n: nom, r: 'found'|'pass', s?: slug}]
     'log', coalesce((select jsonb_agg(
-                       jsonb_strip_nulls(jsonb_build_object('n', e->'card'->>'name', 'r', e->>'r', 's', e->'card'->>'slug'))
+                       jsonb_strip_nulls(jsonb_build_object('n', e->'card'->>'name', 'r', e->>'r', 's', e->'card'->>'slug',
+                                          'd', e->'card'->>'difficulty'))
                        order by o)
                        from jsonb_array_elements(coalesce(p_state->'turn_log', '[]'::jsonb)) with ordinality as x(e, o)),
                     '[]'::jsonb));
@@ -98,7 +99,7 @@ as $$
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
      where e.v->>'guesser' = p_pl and not coalesce((e.v->>'skipped')::boolean, false)
   ), l as (
-    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s
+    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s, x.e->>'d' as d
       from t, jsonb_array_elements(coalesce(t.log, '[]'::jsonb)) with ordinality as x(e, o)
   ), runs as (
     select turn_o, r, i - row_number() over (partition by turn_o, r order by i) as grp from l
@@ -110,6 +111,7 @@ as $$
     'best_turn', coalesce(max(found), 0),
     'steady', case when count(*) >= 2 and min(found) >= 5 then 1 else 0 end,
     'crew_found', (select count(*) from l where r = 'found' and s is not null),
+    'hard_found', (select count(*) from l where r = 'found' and d = '3'),
     'best_run', coalesce((select max(c) from (select count(*) as c from runs where r = 'found' group by turn_o, grp) z), 0))
   from t
 $$;

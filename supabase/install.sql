@@ -1179,7 +1179,7 @@ begin
         'majority', to_jsonb(v_maj), 'scorers', to_jsonb(v_scorers)),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
         'round', p_state->'round', 'question', p_state->'question',
-        'counts', v_counts, 'majority', to_jsonb(v_maj))));
+        'counts', v_counts, 'majority', to_jsonb(v_maj), 'scorers', to_jsonb(v_scorers))));
 
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
@@ -1191,10 +1191,16 @@ set search_path = public, extensions
 as $$
   with h as (
     select e.o, coalesce((e.v->'counts'->>p_pl)::integer, 0) as mine,
-           coalesce((select max(value::integer) from jsonb_each_text(e.v->'counts')), 0) as mx
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'counts')), 0) as mx,
+           coalesce(e.v->'scorers', '[]'::jsonb) ? p_pl as maj
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
   )
   select jsonb_build_object(
+    -- plus longue série de manches où le joueur a voté avec la majorité (Le flair)
+    'maj_streak', (select coalesce(max(c), 0) from (
+        select count(*) as c from (
+          select maj, o - row_number() over (partition by maj order by o) as grp from h) x
+         where maj group by grp) y),
     'rounds', (p_state->>'total_rounds')::integer,
     -- manches sans point (hors majorité ; une manche sans vote compte aussi)
     'off_majority', greatest(0, (p_state->>'total_rounds')::integer - coalesce((p_state->'scores'->>p_pl)::integer, 0)),
@@ -1429,7 +1435,24 @@ begin
              'survived', case when alive then 1 else 0 end,
              'won_civil', case when won and role = 'civil' then 1 else 0 end,
              'won_mrwhite', case when won and role = 'mrwhite' then 1 else 0 end,
-             'won_infiltre', case when won and role in ('undercover', 'mrwhite') then 1 else 0 end))
+             'won_infiltre', case when won and role in ('undercover', 'mrwhite') then 1 else 0 end,
+             -- votes (server.vote_log) : civil -> civil, tout vote contre un infiltré, tous les votes sur des infiltrés
+             'civil_vs_civil', (select count(*) from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v
+                                where v.key = pl and role = 'civil' and v_roles->>v.value = 'civil'),
+             'infiltre_votes', (select count(*) from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v
+                                where v.key = pl and v_roles->>v.value in ('undercover', 'mrwhite')),
+             -- Sherlock : au moins 2 votes et tous contre un infiltré
+             'sherlock', (select case when count(*) >= 2 and bool_and(v_roles->>v.value in ('undercover', 'mrwhite'))
+                                      then 1 else 0 end
+                            from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v where v.key = pl),
+             -- Insoupçonnable : victoire en undercover sans aucun vote reçu pendant toute la partie
+             'insoupconnable', case when won and role = 'undercover'
+                                     and not exists (select 1 from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                                          jsonb_each_text(l.value) v where v.value = pl)
+                                    then 1 else 0 end))
          order by placement, pl)
     into v_results
     from ranked;
@@ -1458,6 +1481,9 @@ declare
   v_role    text;
   v_rec     jsonb;
 begin
+  -- Journal des votes (trophées) : reste dans server, croisé avec les rôles seulement en fin de partie.
+  p_server := p_server || jsonb_build_object('vote_log',
+    coalesce(p_server->'vote_log', '[]'::jsonb) || jsonb_build_array(v_votes));
   select jsonb_object_agg(c, (select count(*)::integer from jsonb_each_text(v_votes) v where v.value = c))
     into v_counts from unnest(v_cands) c;
   select max(value::integer) into v_max from jsonb_each_text(v_counts);
@@ -2059,6 +2085,9 @@ grant select on table public.soiree_messages to authenticated;
 -- p_slot : rang du sticker dans la planche de la tenue portée (cf. equip_expression) ; envoyé par le
 -- front seulement pour un sticker de tenue. Vérifié par _tenue_slot_ok (features/trophees.sql).
 drop function if exists public.send_soiree_message(uuid, text, text);
+-- Compteur persistant des stickers envoyés (trophée Pipelette) : les messages sont purgés en fin de soirée.
+alter table public.player_stats add column if not exists stickers_sent integer not null default 0;
+
 create or replace function public.send_soiree_message(p_soiree_id uuid, p_kind text, p_body text, p_slot integer default null)
 returns bigint language plpgsql security definer
 set search_path = public, extensions
@@ -2102,6 +2131,13 @@ begin
   insert into public.soiree_messages(soiree_id, profile_id, kind, body, tenue)
   values (p_soiree_id, v_me, p_kind, v_body, coalesce(v_tenue, 'default'))
   returning id into v_id;
+
+  -- Pipelette : compte le sticker puis évalue ce seul trophée (évaluation légère, sans repasser tout le catalogue).
+  if p_kind = 'sticker' then
+    insert into public.player_stats(profile_id) values (v_me) on conflict do nothing;
+    update public.player_stats set stickers_sent = stickers_sent + 1 where profile_id = v_me;
+    perform public.evaluate_trophy(v_me, 'gen_pipelette');
+  end if;
 
   -- on ne garde que les 200 derniers messages de la soirée
   delete from public.soiree_messages m
@@ -2867,8 +2903,10 @@ begin
     'turn', null,
     'games', coalesce(v_d->'games', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'no', v_d->'game_no', 'starter', v_d->'starter',
-      'winner', case when p_outcome = 'win' then p_winner end, 'moves', v_d->'moves')))
-    || coalesce(p_extra, '{}'::jsonb);
+      'winner', case when p_outcome = 'win' then p_winner end, 'moves', v_d->'moves')
+      -- p_extra->'game' : compteurs de fin de manche propres au jeu (trophées), lus par les hooks trophy_stats
+      || case when p_extra ? 'game' then jsonb_build_object('x', p_extra->'game') else '{}'::jsonb end))
+    || coalesce(p_extra - 'game', '{}'::jsonb);
   v_done := (p_outcome = 'win' and (v_d->'wins'->>p_winner)::integer >= v_need)
             or (v_d->>'game_no')::integer >= v_bo;
   p_state := p_state || jsonb_build_object('duel', v_d);
@@ -2898,7 +2936,9 @@ begin
     'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto));
   v_state := v_state || jsonb_build_object('board', v_r->'board', 'duel', v_d);
   if v_out is not null then
-    v_state := public._duel_end_game(v_state, v_out, v_r->>'winner', null);
+    -- board_move peut renvoyer 'game' : compteurs de fin de manche pour les trophées (rangés dans games[].x)
+    v_state := public._duel_end_game(v_state, v_out, v_r->>'winner',
+                 case when v_r ? 'game' then jsonb_build_object('game', v_r->'game') end);
   else
     v_turn := coalesce(v_r->>'turn', public._duel_other(v_d, p_actor));
     if v_turn not in (v_d->>'a', v_d->>'b') then raise exception 'invalid_board'; end if;
@@ -2960,6 +3000,23 @@ as $$
          g->>'winner' is not null and g->>'winner' <> p_pl,
          coalesce((g->>'moves')::integer, 0),
          coalesce(g->>'starter' = p_pl, false)
+    from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) d,
+         jsonb_array_elements(coalesce(d->'games', '[]'::jsonb)) g
+   where d->>'a' = p_pl or d->>'b' = p_pl
+$$;
+
+-- Variante de _duel_games avec g = games[].x (compteurs de fin de manche renvoyés par board_move
+-- dans 'game' ; null pour les manches sans ces compteurs, ex. anciennes parties).
+create or replace function public._duel_games_x(p_state jsonb, p_pl text)
+returns table (won boolean, lost boolean, moves integer, i_started boolean, g jsonb)
+language sql immutable
+set search_path = public, extensions
+as $$
+  select coalesce(g->>'winner' = p_pl, false),
+         g->>'winner' is not null and g->>'winner' <> p_pl,
+         coalesce((g->>'moves')::integer, 0),
+         coalesce(g->>'starter' = p_pl, false),
+         g->'x'
     from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) d,
          jsonb_array_elements(coalesce(d->'games', '[]'::jsonb)) g
    where d->>'a' = p_pl or d->>'b' = p_pl
@@ -3293,6 +3350,7 @@ revoke all on function public._duel_setup_begin(text, jsonb) from public, anon, 
 revoke all on function public._duel_setup_call(text, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_finish(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_games(jsonb, text) from public, anon, authenticated;
+revoke all on function public._duel_games_x(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_advance(text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_start(text, uuid[], jsonb) from public, anon, authenticated;
@@ -4160,7 +4218,7 @@ select public.evaluate_unlocks(id) from public.profiles;
 --   count  : nombre de parties satisfaisant `and`              >= threshold
 --   streak : plus longue série de parties consécutives (par date) satisfaisant `and` >= threshold
 --   all    : toutes les sous-règles de `rules` sont satisfaites
---   special: règle nommée (`name`), trophées généraux (cf. _tr_progress)
+--   special: règle nommée (`name`), trophées généraux (cf. _tr_progress ; ex. 'stickers' = player_stats.stickers_sent)
 --   `and`  : [{"stat","op" (>= <= = > <),"value"}] filtre par partie (stat absente = 0)
 --   `stat` : clé de match_players.stats, ou colonne virtuelle points / placement / won (0|1) ;
 --            `last` (1 = dernier) et `nplayers` sont posées par finish_match dans stats.
@@ -4315,6 +4373,9 @@ begin
           select count(*) as c from public.soiree_players sp
            where sp.soiree_id in (select soiree_id from public.soiree_players where profile_id = p_profile)
            group by sp.soiree_id) x;
+      when 'stickers' then
+        -- compteur persistant (le chat est purgé en fin de soirée), incrémenté par send_soiree_message
+        select coalesce(max(stickers_sent), 0) into v from public.player_stats where profile_id = p_profile;
       when 'tenues' then
         select count(*) into v from public.tenue_unlocks where profile_id = p_profile;
       when 'full_board' then
@@ -4352,6 +4413,29 @@ begin
     end if;
   end loop;
   return v_new;
+end $$;
+
+-- Évalue UN seul trophée (hors fin de partie : ex. Pipelette, au moment où un sticker est envoyé).
+-- Renvoie true s'il vient d'être débloqué.
+create or replace function public.evaluate_trophy(p_profile_id uuid, p_trophy_id text)
+returns boolean language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  t      record;
+  v_rows integer;
+begin
+  select * into t from public.trophies where id = p_trophy_id and active and rule is not null;
+  if not found then return false; end if;
+  if exists (select 1 from public.trophy_unlocks u where u.profile_id = p_profile_id and u.trophy_id = t.id) then
+    return false;
+  end if;
+  if public._tr_progress(p_profile_id, t.game_id, t.rule) >= public._tr_target(t.rule) then
+    insert into public.trophy_unlocks(profile_id, trophy_id) values (p_profile_id, t.id) on conflict do nothing;
+    get diagnostics v_rows = row_count;
+    return v_rows > 0;
+  end if;
+  return false;
 end $$;
 
 -- Hook de fin de partie (cf. schema.sql) : {profile_id: [trophy_ids]} (non vides seulement).
@@ -4420,32 +4504,32 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('qdn_bon_public', 'star', 5, 'Bon public', '60 points en cumul', 'qui-de-nous', '{"agg":"sum","stat":"points","threshold":60}'::jsonb, true, 4),
   ('qdn_invisible', 'star', 6, 'L''invisible', 'Finir une partie (8 manches min.) sans recevoir un seul vote', 'qui-de-nous', '{"agg":"count","threshold":1,"and":[{"stat":"designated","op":"=","value":0},{"stat":"rounds","op":">=","value":8}]}'::jsonb, true, 5),
   ('qdn_chouchou', 'star', 7, 'Le chouchou', 'Recevoir 30 votes en cumul', 'qui-de-nous', '{"agg":"sum","stat":"designated","threshold":30}'::jsonb, true, 6),
-  ('qdn_flair', 'star', 8, 'Le flair', 'Voter avec la majorité 5 manches d''affilée', 'qui-de-nous', null, false, 7),
+  ('qdn_flair', 'star', 8, 'Le flair', 'Voter avec la majorité 5 manches d''affilée', 'qui-de-nous', '{"agg":"max","stat":"maj_streak","threshold":5}'::jsonb, true, 7),
   ('qdn_plebiscite', 'star', 9, 'Plébiscite', 'Être le plus désigné sur 5 manches d''une même partie', 'qui-de-nous', '{"agg":"max","stat":"top_rounds","threshold":5}'::jsonb, true, 8),
   ('qdn_star_de_la_soiree', 'star', 10, 'Star de la soirée', 'Être le joueur le plus désigné de la partie, 3 fois (cumul)', 'qui-de-nous', '{"agg":"sum","stat":"top_designated","threshold":3}'::jsonb, true, 9),
   ('qdn_telepathe', 'star', 11, 'Télépathe', '8 points ou plus sur une partie de 10 manches', 'qui-de-nous', '{"agg":"count","threshold":1,"and":[{"stat":"points","op":">=","value":8},{"stat":"rounds","op":">=","value":10}]}'::jsonb, true, 10),
   ('qdn_voix_du_peuple', 'star', 12, 'La voix du peuple', 'Voter avec la majorité à toutes les manches d''une partie (10 manches min.)', 'qui-de-nous', '{"agg":"sum","stat":"perfect","threshold":1}'::jsonb, true, 11),
   ('uc_grille', 'espion', 2, 'Grillé !', 'Être éliminé en premier', 'undercover', '{"agg":"sum","stat":"undercover_first_out","threshold":1}'::jsonb, true, 12),
   ('uc_erreur_judiciaire', 'espion', 3, 'Erreur judiciaire', 'Être éliminé en étant civil, 3 fois (cumul)', 'undercover', '{"agg":"sum","stat":"wrongly_out","threshold":3}'::jsonb, true, 13),
-  ('uc_bavure', 'espion', 4, 'La bavure', 'En civil, voter contre un autre civil 5 fois (cumul)', 'undercover', null, false, 14),
-  ('uc_fin_limier', 'espion', 5, 'Fin limier', 'Voter contre un infiltré 5 fois (cumul)', 'undercover', null, false, 15),
+  ('uc_bavure', 'espion', 4, 'La bavure', 'En civil, voter contre un autre civil 5 fois (cumul)', 'undercover', '{"agg":"sum","stat":"civil_vs_civil","threshold":5}'::jsonb, true, 14),
+  ('uc_fin_limier', 'espion', 5, 'Fin limier', 'Voter contre un infiltré 5 fois (cumul)', 'undercover', '{"agg":"sum","stat":"infiltre_votes","threshold":5}'::jsonb, true, 15),
   ('uc_planque', 'espion', 6, 'La planque', 'Être encore en vie à la fin de 5 parties (cumul)', 'undercover', '{"agg":"sum","stat":"survived","threshold":5}'::jsonb, true, 16),
   ('uc_bon_citoyen', 'espion', 7, 'Bon citoyen', 'Gagner 5 parties en civil (cumul)', 'undercover', '{"agg":"sum","stat":"won_civil","threshold":5}'::jsonb, true, 17),
   ('uc_taupe', 'espion', 8, 'La taupe', 'Gagner 2 parties en undercover (cumul)', 'undercover', '{"agg":"sum","stat":"undercover_won_as_undercover","threshold":2}'::jsonb, true, 18),
   ('uc_page_blanche', 'espion', 9, 'Page blanche', 'Gagner une partie en Mister White', 'undercover', '{"agg":"sum","stat":"won_mrwhite","threshold":1}'::jsonb, true, 19),
-  ('uc_sherlock', 'espion', 10, 'Sherlock', 'En une partie, voter contre un infiltré à chaque vote (2 votes min.)', 'undercover', null, false, 20),
-  ('uc_insoupconnable', 'espion', 11, 'Insoupçonnable', 'Gagner en undercover sans recevoir un seul vote de la partie', 'undercover', null, false, 21),
+  ('uc_sherlock', 'espion', 10, 'Sherlock', 'En une partie, voter contre un infiltré à chaque vote (2 votes min.)', 'undercover', '{"agg":"sum","stat":"sherlock","threshold":1}'::jsonb, true, 20),
+  ('uc_insoupconnable', 'espion', 11, 'Insoupçonnable', 'Gagner en undercover sans recevoir un seul vote de la partie', 'undercover', '{"agg":"sum","stat":"insoupconnable","threshold":1}'::jsonb, true, 21),
   ('uc_agent_double', 'espion', 12, 'Agent double', 'Gagner 5 parties en infiltré, undercover ou Mister White (cumul)', 'undercover', '{"agg":"sum","stat":"won_infiltre","threshold":5}'::jsonb, true, 22),
   ('pdb_pas_de_bol', 'croupier', 2, 'Vraiment pas de bol', 'Finir dernier (le dernier avec des cartes)', 'pas-de-bol', '{"agg":"sum","stat":"last","threshold":1}'::jsonb, true, 23),
-  ('pdb_addition_salee', 'croupier', 3, 'L''addition salée', 'Piocher 6 cartes ou plus d''un coup (cumul de +2 / +4)', 'pas-de-bol', null, false, 24),
-  ('pdb_etourdi', 'croupier', 4, 'L''étourdi', 'Se faire dénoncer pour un « Dernière carte ! » oublié', 'pas-de-bol', null, false, 25),
-  ('pdb_beau_jeu', 'croupier', 5, 'Beau jeu', 'Poser 5 cartes spéciales en une partie (+2, +4, joker, sens, passe, perso)', 'pas-de-bol', null, false, 26),
-  ('pdb_main_pleine', 'croupier', 6, 'Les mains pleines', 'Avoir 12 cartes ou plus en main', 'pas-de-bol', null, false, 27),
-  ('pdb_genereux', 'croupier', 7, 'Trop généreux', 'Faire piocher 20 cartes aux autres (cumul)', 'pas-de-bol', null, false, 28),
-  ('pdb_balance', 'croupier', 8, 'La balance', 'Dénoncer 3 oublis de « Dernière carte ! » (cumul)', 'pas-de-bol', null, false, 29),
-  ('pdb_retour_envoyeur', 'croupier', 9, 'Retour à l''envoyeur', 'Renvoyer un +2 / +4 en cumulant dessus, 5 fois (cumul)', 'pas-de-bol', null, false, 30),
-  ('pdb_main_propre', 'croupier', 10, 'Main propre', 'Sortir premier en ayant pioché 2 cartes au plus de toute la partie', 'pas-de-bol', null, false, 31),
-  ('pdb_remontada', 'croupier', 11, 'Remontada', 'Sortir premier après avoir eu 10 cartes ou plus en main', 'pas-de-bol', null, false, 32),
+  ('pdb_addition_salee', 'croupier', 3, 'L''addition salée', 'Piocher 6 cartes ou plus d''un coup (cumul de +2 / +4)', 'pas-de-bol', '{"agg":"max","stat":"big_draw","threshold":6}'::jsonb, true, 24),
+  ('pdb_etourdi', 'croupier', 4, 'L''étourdi', 'Se faire dénoncer pour un « Dernière carte ! » oublié', 'pas-de-bol', '{"agg":"sum","stat":"denounced","threshold":1}'::jsonb, true, 25),
+  ('pdb_beau_jeu', 'croupier', 5, 'Beau jeu', 'Poser 5 cartes spéciales en une partie (+2, +4, joker, sens, passe, perso)', 'pas-de-bol', '{"agg":"max","stat":"special_cards","threshold":5}'::jsonb, true, 26),
+  ('pdb_main_pleine', 'croupier', 6, 'Les mains pleines', 'Avoir 12 cartes ou plus en main', 'pas-de-bol', '{"agg":"max","stat":"max_hand","threshold":12}'::jsonb, true, 27),
+  ('pdb_genereux', 'croupier', 7, 'Trop généreux', 'Faire piocher 20 cartes aux autres (cumul)', 'pas-de-bol', '{"agg":"sum","stat":"inflicted","threshold":20}'::jsonb, true, 28),
+  ('pdb_balance', 'croupier', 8, 'La balance', 'Dénoncer 3 oublis de « Dernière carte ! » (cumul)', 'pas-de-bol', '{"agg":"sum","stat":"denounces","threshold":3}'::jsonb, true, 29),
+  ('pdb_retour_envoyeur', 'croupier', 9, 'Retour à l''envoyeur', 'Renvoyer un +2 / +4 en cumulant dessus, 5 fois (cumul)', 'pas-de-bol', '{"agg":"sum","stat":"stacks","threshold":5}'::jsonb, true, 30),
+  ('pdb_main_propre', 'croupier', 10, 'Main propre', 'Sortir premier en ayant pioché 2 cartes au plus de toute la partie', 'pas-de-bol', '{"agg":"sum","stat":"clean_win","threshold":1}'::jsonb, true, 31),
+  ('pdb_remontada', 'croupier', 11, 'Remontada', 'Sortir premier après avoir eu 10 cartes ou plus en main', 'pas-de-bol', '{"agg":"sum","stat":"comeback","threshold":1}'::jsonb, true, 32),
   ('pdb_main_chaude', 'croupier', 12, 'Main chaude', 'Sortir premier 3 parties de suite', 'pas-de-bol', '{"agg":"streak","threshold":3,"and":[{"stat":"placement","op":"=","value":1}]}'::jsonb, true, 33),
   ('cef_bonnet_d_ane', 'prof', 2, 'Bonnet d''âne', 'Finir dernier d''une partie', 'cerveau-en-fete', '{"agg":"sum","stat":"last","threshold":1}'::jsonb, true, 34),
   ('cef_copie_blanche', 'prof', 3, 'Copie blanche', 'Rater 3 questions de suite', 'cerveau-en-fete', '{"agg":"max","stat":"miss_streak","threshold":3}'::jsonb, true, 35),
@@ -4458,27 +4542,27 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('cef_serie', 'prof', 10, 'En série', '5 bonnes réponses d''affilée', 'cerveau-en-fete', '{"agg":"max","stat":"best_streak","threshold":5}'::jsonb, true, 42),
   ('cef_tete_de_classe', 'prof', 11, 'Tête de classe', 'Être le premier à trouver sur 5 questions d''une même partie', 'cerveau-en-fete', '{"agg":"max","stat":"firsts","threshold":5}'::jsonb, true, 43),
   ('cef_sans_faute', 'prof', 12, '20 sur 20', 'Trouver toutes les questions d''une partie (10 questions min.)', 'cerveau-en-fete', '{"agg":"sum","stat":"perfect","threshold":1}'::jsonb, true, 44),
-  ('pb_recale', 'ecolier', 2, 'Recalé !', 'Se faire refuser 3 réponses par le vote des autres (cumul)', 'petit-bac', null, false, 45),
+  ('pb_recale', 'ecolier', 2, 'Recalé !', 'Se faire refuser 3 réponses par le vote des autres (cumul)', 'petit-bac', '{"agg":"sum","stat":"refused","threshold":3}'::jsonb, true, 45),
   ('pb_page_blanche', 'ecolier', 3, 'Page blanche', 'Marquer 0 point sur une manche', 'petit-bac', '{"agg":"sum","stat":"zero_rounds","threshold":1}'::jsonb, true, 46),
-  ('pb_copieur', 'ecolier', 4, 'Le copieur', '10 réponses partagées avec un autre joueur (cumul)', 'petit-bac', null, false, 47),
+  ('pb_copieur', 'ecolier', 4, 'Le copieur', '10 réponses partagées avec un autre joueur (cumul)', 'petit-bac', '{"agg":"sum","stat":"shared","threshold":10}'::jsonb, true, 47),
   ('pb_original', 'ecolier', 5, 'L''original', '20 réponses uniques (cumul)', 'petit-bac', '{"agg":"sum","stat":"uniques","threshold":20}'::jsonb, true, 48),
-  ('pb_panne_seche', 'ecolier', 6, 'Panne sèche', 'Laisser 3 cases vides sur une même manche', 'petit-bac', null, false, 49),
-  ('pb_grille_pleine', 'ecolier', 7, 'Grille pleine', 'Remplir toutes les cases d''une manche avec des réponses acceptées', 'petit-bac', null, false, 50),
-  ('pb_avocat', 'ecolier', 8, 'L''avocat', 'Contester 5 réponses qui finissent refusées (cumul)', 'petit-bac', null, false, 51),
+  ('pb_panne_seche', 'ecolier', 6, 'Panne sèche', 'Laisser 3 cases vides sur une même manche', 'petit-bac', '{"agg":"max","stat":"max_empty","threshold":3}'::jsonb, true, 49),
+  ('pb_grille_pleine', 'ecolier', 7, 'Grille pleine', 'Remplir toutes les cases d''une manche avec des réponses acceptées', 'petit-bac', '{"agg":"sum","stat":"full_grids","threshold":1}'::jsonb, true, 50),
+  ('pb_avocat', 'ecolier', 8, 'L''avocat', 'Contester 5 réponses qui finissent refusées (cumul)', 'petit-bac', '{"agg":"sum","stat":"lawyer","threshold":5}'::jsonb, true, 51),
   ('pb_carton_plein', 'ecolier', 9, 'Carton plein', 'Une manche avec uniquement des réponses uniques (2 pts partout)', 'petit-bac', '{"agg":"sum","stat":"perfect_rounds","threshold":1}'::jsonb, true, 52),
   ('pb_meilleure_copie', 'ecolier', 10, 'Meilleure copie', 'Avoir le meilleur score de la manche 10 fois (cumul)', 'petit-bac', '{"agg":"sum","stat":"best_rounds","threshold":10}'::jsonb, true, 53),
   ('pb_regulier', 'ecolier', 11, 'Élève régulier', 'Marquer au moins 8 points à chaque manche d''une partie (3 manches min.)', 'petit-bac', '{"agg":"sum","stat":"regular","threshold":1}'::jsonb, true, 54),
   ('pb_grand_chelem', 'ecolier', 12, 'Major de promo', 'Avoir le meilleur score à toutes les manches d''une partie (4 manches min., ex æquo acceptés)', 'petit-bac', '{"agg":"sum","stat":"grand_slam","threshold":1}'::jsonb, true, 55),
   ('dd_gribouillis', 'artiste', 2, 'Gribouillis', 'Dessiner un mot que personne ne trouve', 'dessine-devine', '{"agg":"sum","stat":"unfound","threshold":1}'::jsonb, true, 56),
   ('dd_dans_le_flou', 'artiste', 3, 'Dans le flou', 'Ne pas trouver 3 dessins de suite', 'dessine-devine', '{"agg":"max","stat":"miss_streak","threshold":3}'::jsonb, true, 57),
-  ('dd_presque', 'artiste', 4, 'Presque !', 'Recevoir 5 « Presque ! » (cumul)', 'dessine-devine', null, false, 58),
+  ('dd_presque', 'artiste', 4, 'Presque !', 'Recevoir 5 « Presque ! » (cumul)', 'dessine-devine', '{"agg":"sum","stat":"close_count","threshold":5}'::jsonb, true, 58),
   ('dd_oeil_de_lynx', 'artiste', 5, 'Œil de lynx', 'Trouver 25 mots (cumul)', 'dessine-devine', '{"agg":"sum","stat":"found_count","threshold":25}'::jsonb, true, 59),
-  ('dd_in_extremis', 'artiste', 6, 'In extremis', 'Trouver un mot dans les 5 dernières secondes', 'dessine-devine', null, false, 60),
+  ('dd_in_extremis', 'artiste', 6, 'In extremis', 'Trouver un mot dans les 5 dernières secondes', 'dessine-devine', '{"agg":"sum","stat":"late_finds","threshold":1}'::jsonb, true, 60),
   ('dd_limpide', 'artiste', 7, 'Limpide', 'Tout le monde trouve ton dessin, 3 fois (cumul)', 'dessine-devine', '{"agg":"sum","stat":"perfect_drawings","threshold":3}'::jsonb, true, 61),
   ('dd_premier_servi', 'artiste', 8, 'Premier servi', 'Être le premier à trouver 10 fois (cumul)', 'dessine-devine', '{"agg":"sum","stat":"first_finds","threshold":10}'::jsonb, true, 62),
-  ('dd_eclair', 'artiste', 9, 'Coup d''œil', 'Trouver un mot en moins de 10 s', 'dessine-devine', null, false, 63),
-  ('dd_sans_indice', 'artiste', 10, 'Sans indice', 'Trouver avant la première lettre révélée, 5 fois (cumul)', 'dessine-devine', null, false, 64),
-  ('dd_defi_releve', 'artiste', 11, 'Défi relevé', 'Faire deviner un mot difficile (niveau 3) à tous les joueurs', 'dessine-devine', null, false, 65),
+  ('dd_eclair', 'artiste', 9, 'Coup d''œil', 'Trouver un mot en moins de 10 s', 'dessine-devine', '{"agg":"sum","stat":"fast_finds","threshold":1}'::jsonb, true, 63),
+  ('dd_sans_indice', 'artiste', 10, 'Sans indice', 'Trouver avant la première lettre révélée, 5 fois (cumul)', 'dessine-devine', '{"agg":"sum","stat":"no_hint_finds","threshold":5}'::jsonb, true, 64),
+  ('dd_defi_releve', 'artiste', 11, 'Défi relevé', 'Faire deviner un mot difficile (niveau 3) à tous les joueurs', 'dessine-devine', '{"agg":"sum","stat":"hard_perfect","threshold":1}'::jsonb, true, 65),
   ('dd_chef_d_oeuvre', 'artiste', 12, 'Chef-d''œuvre', 'En une partie (4 joueurs min.) : tout le monde trouve tous tes dessins et tu trouves tous ceux des autres', 'dessine-devine', '{"agg":"sum","stat":"masterpiece","threshold":1}'::jsonb, true, 66),
   ('lg_petit_dejeuner', 'loup', 2, 'Petit déjeuner', 'Être dévoré dès la première nuit', 'loup-garou', '{"agg":"sum","stat":"first_night_death","threshold":1}'::jsonb, true, 67),
   ('lg_bucher', 'loup', 3, 'Au bûcher !', 'Être éliminé par le vote sans être loup, 3 fois (cumul)', 'loup-garou', '{"agg":"sum","stat":"lynched_innocent","threshold":3}'::jsonb, true, 68),
@@ -4497,8 +4581,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('bam_dico', 'artificier', 5, 'Le dico', '100 mots validés (cumul)', 'bombe-a-mots', '{"agg":"sum","stat":"words","threshold":100}'::jsonb, true, 81),
   ('bam_mot_a_rallonge', 'artificier', 6, 'Mot à rallonge', 'Valider un mot de 12 lettres ou plus', 'bombe-a-mots', '{"agg":"max","stat":"longest_word","threshold":12}'::jsonb, true, 82),
   ('bam_abecedaire', 'artificier', 7, 'L''abécédaire', 'Compléter l''alphabet bonus', 'bombe-a-mots', '{"agg":"sum","stat":"alphabets","threshold":1}'::jsonb, true, 83),
-  ('bam_patate_chaude', 'artificier', 8, 'Patate chaude', 'Valider un mot en moins de 2 s, 10 fois (cumul)', 'bombe-a-mots', null, false, 84),
-  ('bam_sueurs_froides', 'artificier', 9, 'Sueurs froides', 'Valider un mot à moins d''1 s de l''explosion', 'bombe-a-mots', null, false, 85),
+  ('bam_patate_chaude', 'artificier', 8, 'Patate chaude', 'Valider un mot en moins de 2 s, 10 fois (cumul)', 'bombe-a-mots', '{"agg":"sum","stat":"fast_words","threshold":10}'::jsonb, true, 84),
+  ('bam_sueurs_froides', 'artificier', 9, 'Sueurs froides', 'Valider un mot à moins d''1 s de l''explosion', 'bombe-a-mots', '{"agg":"sum","stat":"close_calls","threshold":1}'::jsonb, true, 85),
   ('bam_survivant', 'artificier', 10, 'Sur un fil', 'Gagner avec une seule vie restante', 'bombe-a-mots', '{"agg":"sum","stat":"last_life_win","threshold":1}'::jsonb, true, 86),
   ('bam_intouchable', 'artificier', 11, 'Intouchable', 'Gagner sans perdre une seule vie (3 joueurs min.)', 'bombe-a-mots', '{"agg":"sum","stat":"untouched","threshold":1}'::jsonb, true, 87),
   ('bam_marathon', 'artificier', 12, 'Moulin à paroles', '20 mots validés en une partie', 'bombe-a-mots', '{"agg":"max","stat":"words","threshold":20}'::jsonb, true, 88),
@@ -4508,7 +4592,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('mtr_detecteur', 'pirate', 5, 'Détecteur de mensonges', 'Crier « Menteur ! » à raison 10 fois (cumul)', 'menteur', '{"agg":"sum","stat":"good_liar","threshold":10}'::jsonb, true, 92),
   ('mtr_dernier_de', 'pirate', 6, 'Le dernier dé', 'Gagner la partie avec un seul dé restant', 'menteur', '{"agg":"sum","stat":"last_die_win","threshold":1}'::jsonb, true, 93),
   ('mtr_pile', 'pirate', 7, 'Pile !', 'Réussir un « Pile ! » exact (option activée)', 'menteur', '{"agg":"sum","stat":"pile_ok","threshold":1}'::jsonb, true, 94),
-  ('mtr_bluff', 'pirate', 8, 'Coup de bluff', 'Ton enchère est contestée, elle est vraie, et tu n''avais aucun dé de cette valeur ni joker', 'menteur', null, false, 95),
+  ('mtr_bluff', 'pirate', 8, 'Coup de bluff', 'Ton enchère est contestée, elle est vraie, et tu n''avais aucun dé de cette valeur ni joker', 'menteur', '{"agg":"sum","stat":"pure_bluffs","threshold":1}'::jsonb, true, 95),
   ('mtr_pile_poil', 'pirate', 9, 'Pile-poil', 'Ton enchère contestée tombe exactement juste, 3 fois (cumul)', 'menteur', '{"agg":"sum","stat":"exact_bids","threshold":3}'::jsonb, true, 96),
   ('mtr_grosse_voix', 'pirate', 10, 'Grosse voix', 'Une enchère de 8 dés ou plus, contestée, qui s''avère vraie', 'menteur', '{"agg":"sum","stat":"big_bid","threshold":1}'::jsonb, true, 97),
   ('mtr_revenant', 'pirate', 11, 'Le revenant', 'Gagner après être tombé à un seul dé alors qu''il restait 3 joueurs ou plus', 'menteur', '{"agg":"sum","stat":"comeback","threshold":1}'::jsonb, true, 98),
@@ -4530,7 +4614,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('tp_sondeur', 'philosophe', 5, 'Le sondeur', '30 paris justes (cumul)', 'tu-preferes', '{"agg":"sum","stat":"bets_ok","threshold":30}'::jsonb, true, 114),
   ('tp_mouton', 'philosophe', 6, 'Le mouton', 'Choisir comme la majorité 30 fois (cumul)', 'tu-preferes', '{"agg":"sum","stat":"norm","threshold":30}'::jsonb, true, 115),
   ('tp_tous_d_accord', 'philosophe', 7, 'Tous d''accord', 'Une manche à l''unanimité (3 joueurs min.), 3 fois (cumul)', 'tu-preferes', '{"agg":"sum","stat":"unanimous_rounds","threshold":3}'::jsonb, true, 116),
-  ('tp_rebelle_lucide', 'philosophe', 8, 'Rebelle lucide', 'Être seul de son avis et gagner son pari sur la même manche', 'tu-preferes', null, false, 117),
+  ('tp_rebelle_lucide', 'philosophe', 8, 'Rebelle lucide', 'Être seul de son avis et gagner son pari sur la même manche', 'tu-preferes', '{"agg":"sum","stat":"rebel_right","threshold":1}'::jsonb, true, 117),
   ('tp_rebelle_en_serie', 'philosophe', 9, 'Rebelle en série', 'Être seul de son avis 3 fois en une partie', 'tu-preferes', '{"agg":"max","stat":"rebel","threshold":3}'::jsonb, true, 118),
   ('tp_devin', 'philosophe', 10, 'Le devin', '8 paris justes en une partie (10 manches min.)', 'tu-preferes', '{"agg":"count","threshold":1,"and":[{"stat":"bets_ok","op":">=","value":8},{"stat":"rounds","op":">=","value":10}]}'::jsonb, true, 119),
   ('tp_anticonformiste', 'philosophe', 11, 'Anticonformiste', 'Gagner une partie en ayant été minoritaire plus d''une manche sur deux', 'tu-preferes', '{"agg":"count","threshold":1,"and":[{"stat":"minority","op":"=","value":1},{"stat":"won","op":"=","value":1}]}'::jsonb, true, 120),
@@ -4544,7 +4628,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('qsj_tac_tac', 'vedette', 8, 'Tac tac tac', '5 cartes trouvées d''affilée sans passer', 'qui-suis-je', '{"agg":"max","stat":"best_run","threshold":5}'::jsonb, true, 128),
   ('qsj_rafale', 'vedette', 9, 'En rafale', '8 cartes trouvées en un seul tour', 'qui-suis-je', '{"agg":"max","stat":"best_turn","threshold":8}'::jsonb, true, 129),
   ('qsj_valeur_sure', 'vedette', 10, 'Valeur sûre', 'Au moins 5 cartes à chacun de ses tours (2 tours min.)', 'qui-suis-je', '{"agg":"sum","stat":"steady","threshold":1}'::jsonb, true, 130),
-  ('qsj_cinephile', 'vedette', 11, 'Le cinéphile', 'Trouver 10 cartes difficiles (niveau 3, cumul)', 'qui-suis-je', null, false, 131),
+  ('qsj_cinephile', 'vedette', 11, 'Le cinéphile', 'Trouver 10 cartes difficiles (niveau 3, cumul)', 'qui-suis-je', '{"agg":"sum","stat":"hard_found","threshold":10}'::jsonb, true, 131),
   ('qsj_tapis_rouge', 'vedette', 12, 'Tapis rouge', '12 cartes trouvées en un seul tour', 'qui-suis-je', '{"agg":"max","stat":"best_turn","threshold":12}'::jsonb, true, 132),
   ('lpp_a_cote', 'archer', 2, 'À côté de la cible', 'Être le plus loin de la réponse 5 fois (3 joueurs min., cumul)', 'le-plus-proche', '{"agg":"sum","stat":"farthest","threshold":5}'::jsonb, true, 133),
   ('lpp_hors_cible', 'archer', 3, 'Dans le décor', 'Se tromper d''un facteur 10 ou plus', 'le-plus-proche', '{"agg":"sum","stat":"way_off","threshold":1}'::jsonb, true, 134),
@@ -4562,21 +4646,21 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('aov_siffle', 'comedien', 4, 'Sifflé', 'Recevoir 10 👎 (cumul)', 'action-ou-verite', '{"agg":"sum","stat":"thumbs_down","threshold":10}'::jsonb, true, 146),
   ('aov_franc_jeu', 'comedien', 5, 'Franc-jeu', 'Choisir « Vérité » 10 fois (cumul)', 'action-ou-verite', '{"agg":"sum","stat":"verites","threshold":10}'::jsonb, true, 147),
   ('aov_chouchou_de_la_roue', 'comedien', 6, 'Chouchou de la roue', 'Être désigné 5 fois par la roue en une partie', 'action-ou-verite', '{"agg":"max","stat":"turns","threshold":5}'::jsonb, true, 148),
-  ('aov_ovation', 'comedien', 7, 'Ovation', 'Réussir un défi à l''unanimité (3 votants min.)', 'action-ou-verite', null, false, 149),
+  ('aov_ovation', 'comedien', 7, 'Ovation', 'Réussir un défi à l''unanimité (3 votants min.)', 'action-ou-verite', '{"agg":"sum","stat":"unanimous","threshold":1}'::jsonb, true, 149),
   ('aov_casse_cou', 'comedien', 8, 'Casse-cou', 'Choisir « Action » 15 fois (cumul)', 'action-ou-verite', '{"agg":"sum","stat":"actions","threshold":15}'::jsonb, true, 150),
-  ('aov_niveau_3', 'comedien', 9, 'Même pas peur', 'Réussir une carte de niveau 3', 'action-ou-verite', null, false, 151),
+  ('aov_niveau_3', 'comedien', 9, 'Même pas peur', 'Réussir une carte de niveau 3', 'action-ou-verite', '{"agg":"sum","stat":"hard_success","threshold":1}'::jsonb, true, 151),
   ('aov_applaudi', 'comedien', 10, 'Applaudimètre', 'Recevoir 50 👍 (cumul)', 'action-ou-verite', '{"agg":"sum","stat":"thumbs_up","threshold":50}'::jsonb, true, 152),
   ('aov_jamais_degonfle', 'comedien', 11, 'Jamais dégonflé', '3 parties sans aucun refus (2 tours min. par partie, cumul)', 'action-ou-verite', '{"agg":"count","threshold":3,"and":[{"stat":"refusals","op":"=","value":0},{"stat":"turns","op":">=","value":2}]}'::jsonb, true, 153),
   ('aov_standing_ovation', 'comedien', 12, 'Standing ovation', 'En une partie : 5 tours ou plus, tous réussis', 'action-ou-verite', '{"agg":"sum","stat":"perfect","threshold":1}'::jsonb, true, 154),
   ('dee_sur_le_banc', 'coach', 2, 'Sur le banc', 'Perdre 3 parties avec son équipe (cumul)', 'devine-en-equipe', '{"agg":"count","threshold":3,"and":[{"stat":"won","op":"=","value":0}]}'::jsonb, true, 155),
-  ('dee_bredouille', 'coach', 3, 'Bredouille', 'Finir un passage d''orateur sans aucun mot trouvé', 'devine-en-equipe', null, false, 156),
-  ('dee_suivant', 'coach', 4, 'Suivant !', 'Passer 3 mots dans un même passage', 'devine-en-equipe', null, false, 157),
+  ('dee_bredouille', 'coach', 3, 'Bredouille', 'Finir un passage d''orateur sans aucun mot trouvé', 'devine-en-equipe', '{"agg":"sum","stat":"empty_turns","threshold":1}'::jsonb, true, 156),
+  ('dee_suivant', 'coach', 4, 'Suivant !', 'Passer 3 mots dans un même passage', 'devine-en-equipe', '{"agg":"max","stat":"max_passed","threshold":3}'::jsonb, true, 157),
   ('dee_orateur', 'coach', 5, 'Belle éloquence', 'Faire deviner 30 mots (cumul)', 'devine-en-equipe', '{"agg":"sum","stat":"found","threshold":30}'::jsonb, true, 158),
-  ('dee_mime', 'coach', 6, 'Roi du mime', 'Faire deviner 5 mots en manche Mime (cumul)', 'devine-en-equipe', null, false, 159),
+  ('dee_mime', 'coach', 6, 'Roi du mime', 'Faire deviner 5 mots en manche Mime (cumul)', 'devine-en-equipe', '{"agg":"sum","stat":"found_r3","threshold":5}'::jsonb, true, 159),
   ('dee_pilier', 'coach', 7, 'Pilier de l''équipe', 'Être le meilleur orateur de son équipe 3 fois (cumul)', 'devine-en-equipe', '{"agg":"sum","stat":"best_in_team","threshold":3}'::jsonb, true, 160),
-  ('dee_un_seul_mot', 'coach', 8, 'En un mot', '4 mots trouvés dans un passage de la manche « Un seul mot »', 'devine-en-equipe', null, false, 161),
-  ('dee_du_rab', 'coach', 9, 'Du rab', 'Vider la pioche et garder du temps pour la manche suivante', 'devine-en-equipe', null, false, 162),
-  ('dee_rafale', 'coach', 10, 'La rafale', '6 mots trouvés en un seul passage', 'devine-en-equipe', null, false, 163),
+  ('dee_un_seul_mot', 'coach', 8, 'En un mot', '4 mots trouvés dans un passage de la manche « Un seul mot »', 'devine-en-equipe', '{"agg":"max","stat":"best_r2","threshold":4}'::jsonb, true, 161),
+  ('dee_du_rab', 'coach', 9, 'Du rab', 'Vider la pioche et garder du temps pour la manche suivante', 'devine-en-equipe', '{"agg":"sum","stat":"carries","threshold":1}'::jsonb, true, 162),
+  ('dee_rafale', 'coach', 10, 'La rafale', '6 mots trouvés en un seul passage', 'devine-en-equipe', '{"agg":"max","stat":"best_turn","threshold":6}'::jsonb, true, 163),
   ('dee_trois_manches', 'coach', 11, 'Carton plein', 'Son équipe gagne les 3 manches d''une partie', 'devine-en-equipe', '{"agg":"sum","stat":"sweep","threshold":1}'::jsonb, true, 164),
   ('dee_mvp', 'coach', 12, 'MVP', 'Gagner en étant le meilleur orateur des deux équipes avec 10 mots ou plus', 'devine-en-equipe', '{"agg":"sum","stat":"mvp","threshold":1}'::jsonb, true, 165),
   ('q4_tete_en_l_air', 'stratege', 2, 'Tête en l''air', 'Perdre une manche en 10 jetons ou moins (au total)', 'quatre-a-la-suite', '{"agg":"sum","stat":"fast_loss","threshold":1}'::jsonb, true, 166),
@@ -4584,8 +4668,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('q4_grille_pleine', 'stratege', 4, 'Grille pleine', 'Faire match nul (grille pleine)', 'quatre-a-la-suite', '{"agg":"sum","stat":"draws","threshold":1}'::jsonb, true, 168),
   ('q4_parieur', 'stratege', 5, 'Le parieur', 'Gagner 10 paris en spectateur (cumul)', 'quatre-a-la-suite', '{"agg":"sum","stat":"bets_won","threshold":10}'::jsonb, true, 169),
   ('q4_marathon', 'stratege', 6, 'Guerre des nerfs', 'Gagner une manche de 36 jetons ou plus', 'quatre-a-la-suite', '{"agg":"sum","stat":"long_win","threshold":1}'::jsonb, true, 170),
-  ('q4_diagonale', 'stratege', 7, 'En diagonale', 'Gagner 3 manches par une diagonale (cumul)', 'quatre-a-la-suite', null, false, 171),
-  ('q4_double_menace', 'stratege', 8, 'Double menace', 'Gagner avec deux alignements à la fois, ou 5 jetons alignés', 'quatre-a-la-suite', null, false, 172),
+  ('q4_diagonale', 'stratege', 7, 'En diagonale', 'Gagner 3 manches par une diagonale (cumul)', 'quatre-a-la-suite', '{"agg":"sum","stat":"diag_wins","threshold":3}'::jsonb, true, 171),
+  ('q4_double_menace', 'stratege', 8, 'Double menace', 'Gagner avec deux alignements à la fois, ou 5 jetons alignés', 'quatre-a-la-suite', '{"agg":"sum","stat":"double_wins","threshold":1}'::jsonb, true, 172),
   ('q4_express', 'stratege', 9, 'Express', 'Gagner une manche en 12 jetons ou moins (au total)', 'quatre-a-la-suite', '{"agg":"sum","stat":"fast_win","threshold":1}'::jsonb, true, 173),
   ('q4_trois_a_la_suite', 'stratege', 10, '3 à la suite', 'Gagner 3 duels d''affilée dans une session', 'quatre-a-la-suite', '{"agg":"max","stat":"win_streak","threshold":3}'::jsonb, true, 174),
   ('q4_champion', 'stratege', 11, 'Champion de la table', 'Finir premier d''une session de 4 joueurs ou plus, 2 fois (cumul)', 'quatre-a-la-suite', '{"agg":"count","threshold":2,"and":[{"stat":"won","op":"=","value":1},{"stat":"nplayers","op":">=","value":4}]}'::jsonb, true, 175),
@@ -4599,19 +4683,19 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('mor_contre_attaque', 'ninja', 8, 'Contre-attaque', 'Gagner une manche en classique en jouant ⭕ (en second)', 'morpion', '{"agg":"sum","stat":"classic_second_win","threshold":1}'::jsonb, true, 183),
   ('mor_eclair', 'ninja', 9, 'L''éclair', 'Gagner une manche en Géant en 13 coups ou moins (au total)', 'morpion', '{"agg":"sum","stat":"giant_fast_win","threshold":1}'::jsonb, true, 184),
   ('mor_ultime', 'ninja', 10, 'Maître de l''Ultime', 'Gagner 3 duels en Ultime (cumul)', 'morpion', '{"agg":"sum","stat":"ultimate_duel_wins","threshold":3}'::jsonb, true, 185),
-  ('mor_ombre', 'ninja', 11, 'L''ombre', 'Gagner une manche en Ultime sans perdre un seul petit morpion', 'morpion', null, false, 186),
+  ('mor_ombre', 'ninja', 11, 'L''ombre', 'Gagner une manche en Ultime sans perdre un seul petit morpion', 'morpion', '{"agg":"sum","stat":"clean_ultimate","threshold":1}'::jsonb, true, 186),
   ('mor_ninja', 'ninja', 12, 'Insaisissable', 'Gagner 4 duels d''affilée dans une session', 'morpion', '{"agg":"max","stat":"win_streak","threshold":4}'::jsonb, true, 187),
-  ('bn_plouf', 'amiral', 2, 'Plouf plouf', '10 tirs à l''eau d''affilée', 'bataille-navale', null, false, 188),
-  ('bn_naufrage', 'amiral', 3, 'Naufrage total', 'Perdre une manche sans couler un seul bateau adverse', 'bataille-navale', null, false, 189),
-  ('bn_si_pres', 'amiral', 4, 'Si près du but', 'Perdre alors qu''il ne restait qu''un bateau adverse', 'bataille-navale', null, false, 190),
-  ('bn_canonnier', 'amiral', 5, 'Le canonnier', '100 tirs touchés (cumul)', 'bataille-navale', null, false, 191),
-  ('bn_guerre_d_usure', 'amiral', 6, 'Guerre d''usure', 'Gagner une manche de 120 tirs ou plus (au total)', 'bataille-navale', null, false, 192),
+  ('bn_plouf', 'amiral', 2, 'Plouf plouf', '10 tirs à l''eau d''affilée', 'bataille-navale', '{"agg":"max","stat":"miss_streak","threshold":10}'::jsonb, true, 188),
+  ('bn_naufrage', 'amiral', 3, 'Naufrage total', 'Perdre une manche sans couler un seul bateau adverse', 'bataille-navale', '{"agg":"sum","stat":"lost_no_sink","threshold":1}'::jsonb, true, 189),
+  ('bn_si_pres', 'amiral', 4, 'Si près du but', 'Perdre alors qu''il ne restait qu''un bateau adverse', 'bataille-navale', '{"agg":"sum","stat":"lost_close","threshold":1}'::jsonb, true, 190),
+  ('bn_canonnier', 'amiral', 5, 'Le canonnier', '100 tirs touchés (cumul)', 'bataille-navale', '{"agg":"sum","stat":"hits","threshold":100}'::jsonb, true, 191),
+  ('bn_guerre_d_usure', 'amiral', 6, 'Guerre d''usure', 'Gagner une manche de 120 tirs ou plus (au total)', 'bataille-navale', '{"agg":"sum","stat":"long_win","threshold":1}'::jsonb, true, 192),
   ('bn_parieur', 'amiral', 7, 'Le parieur', 'Gagner 10 paris en spectateur (cumul)', 'bataille-navale', '{"agg":"sum","stat":"bets_won","threshold":10}'::jsonb, true, 193),
-  ('bn_premier_tir', 'amiral', 8, 'Du premier coup', 'Toucher au tout premier tir d''une manche, 3 fois (cumul)', 'bataille-navale', null, false, 194),
-  ('bn_rafale', 'amiral', 9, 'En rafale', '5 touchés d''affilée', 'bataille-navale', null, false, 195),
-  ('bn_precision', 'amiral', 10, 'Tireur d''élite', 'Gagner une manche avec 40 % de tirs touchés ou plus', 'bataille-navale', null, false, 196),
-  ('bn_eclair', 'amiral', 11, 'Guerre éclair', 'Gagner une manche en 40 tirs ou moins', 'bataille-navale', null, false, 197),
-  ('bn_flotte_intacte', 'amiral', 12, 'Flotte intacte', 'Gagner une manche sans perdre un seul bateau', 'bataille-navale', null, false, 198),
+  ('bn_premier_tir', 'amiral', 8, 'Du premier coup', 'Toucher dès son premier tir d''une manche, 3 fois (cumul)', 'bataille-navale', '{"agg":"sum","stat":"first_shot_hits","threshold":3}'::jsonb, true, 194),
+  ('bn_rafale', 'amiral', 9, 'En rafale', '5 touchés d''affilée', 'bataille-navale', '{"agg":"max","stat":"best_hit_streak","threshold":5}'::jsonb, true, 195),
+  ('bn_precision', 'amiral', 10, 'Tireur d''élite', 'Gagner une manche avec 40 % de tirs touchés ou plus', 'bataille-navale', '{"agg":"sum","stat":"precise_win","threshold":1}'::jsonb, true, 196),
+  ('bn_eclair', 'amiral', 11, 'Guerre éclair', 'Gagner une manche en 40 tirs ou moins', 'bataille-navale', '{"agg":"sum","stat":"fast_win","threshold":1}'::jsonb, true, 197),
+  ('bn_flotte_intacte', 'amiral', 12, 'Flotte intacte', 'Gagner une manche sans perdre un seul bateau', 'bataille-navale', '{"agg":"sum","stat":"intact_win","threshold":1}'::jsonb, true, 198),
   ('tdp_au_violon', 'magnat', 2, 'Habitué du violon', 'Aller 3 fois au violon en une partie', 'tour-des-potes', '{"agg":"max","stat":"jail","threshold":3}'::jsonb, true, 199),
   ('tdp_faillite', 'magnat', 3, 'Sur la paille', 'Faire faillite', 'tour-des-potes', '{"agg":"sum","stat":"bankrupt","threshold":1}'::jsonb, true, 200),
   ('tdp_pigeon', 'magnat', 4, 'Le pigeon', 'Payer 1 000 de loyers en une partie', 'tour-des-potes', '{"agg":"max","stat":"rent_paid","threshold":1000}'::jsonb, true, 201),
@@ -4623,13 +4707,13 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('tdp_hotelier', 'magnat', 10, 'L''hôtelier', 'Posséder un hôtel à la fin d''une partie', 'tour-des-potes', '{"agg":"sum","stat":"hotel","threshold":1}'::jsonb, true, 207),
   ('tdp_monopole', 'magnat', 11, 'Chasse gardée', 'Posséder 2 quartiers complets à la fin d''une partie', 'tour-des-potes', '{"agg":"sum","stat":"monopoly","threshold":1}'::jsonb, true, 208),
   ('tdp_tycoon', 'magnat', 12, 'Le tycoon', 'Gagner avec une fortune au moins 2 fois supérieure à celle du 2e (3 joueurs min.)', 'tour-des-potes', '{"agg":"sum","stat":"tycoon","threshold":1}'::jsonb, true, 209),
-  ('dk_tete_a_queue', 'pilote', 2, 'Tête-à-queue', 'Se faire toucher 5 fois par une boule ou une glue (cumul)', 'dede-kart', null, false, 210),
+  ('dk_tete_a_queue', 'pilote', 2, 'Tête-à-queue', 'Se faire toucher 5 fois par une boule ou une glue (cumul)', 'dede-kart', '{"agg":"sum","stat":"hits_taken","threshold":5}'::jsonb, true, 210),
   ('dk_lanterne_rouge', 'pilote', 3, 'Lanterne rouge', 'Finir dernier d''une course (4 karts min.)', 'dede-kart', '{"agg":"sum","stat":"last_races","threshold":1}'::jsonb, true, 211),
   ('dk_panne', 'pilote', 4, 'En panne', 'Ne pas franchir la ligne avant la fin d''une course', 'dede-kart', '{"agg":"sum","stat":"dnf","threshold":1}'::jsonb, true, 212),
   ('dk_podium', 'pilote', 5, 'Sur le podium', '10 podiums (4 karts min., cumul)', 'dede-kart', '{"agg":"sum","stat":"podiums","threshold":10}'::jsonb, true, 213),
   ('dk_tireur', 'pilote', 6, 'Fine gâchette', 'Toucher 10 karts avec une boule ou une glue (cumul)', 'dede-kart', '{"agg":"sum","stat":"hits","threshold":10}'::jsonb, true, 214),
   ('dk_touriste', 'pilote', 7, 'Tour du monde', 'Gagner une course sur chacun des 3 circuits (cumul)', 'dede-kart', '{"agg":"all","rules":[{"agg":"sum","stat":"win_track_1","threshold":1},{"agg":"sum","stat":"win_track_2","threshold":1},{"agg":"sum","stat":"win_track_3","threshold":1}]}'::jsonb, true, 215),
-  ('dk_coup_bas', 'pilote', 8, 'Coups bas', 'Utiliser au moins une fois le nuage, les confettis et le demi-tour (cumul)', 'dede-kart', null, false, 216),
+  ('dk_coup_bas', 'pilote', 8, 'Coups bas', 'Utiliser au moins une fois le nuage, les confettis et le demi-tour (cumul)', 'dede-kart', '{"agg":"all","rules":[{"agg":"sum","stat":"used_cloud","threshold":1},{"agg":"sum","stat":"used_confetti","threshold":1},{"agg":"sum","stat":"used_reverse","threshold":1}]}'::jsonb, true, 216),
   ('dk_remontada', 'pilote', 9, 'Remontada', 'En coupe, gagner une course après avoir fini hors du podium à la précédente', 'dede-kart', '{"agg":"sum","stat":"comeback","threshold":1}'::jsonb, true, 217),
   ('dk_sniper', 'pilote', 10, 'Sniper', '5 touches réussies en une coupe', 'dede-kart', '{"agg":"max","stat":"hits","threshold":5}'::jsonb, true, 218),
   ('dk_echappee', 'pilote', 11, 'L''échappée', 'Gagner une course avec 5 s d''avance ou plus sur le 2e', 'dede-kart', '{"agg":"sum","stat":"big_lead","threshold":1}'::jsonb, true, 219),
@@ -4641,7 +4725,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_marathon', null, null, 'Marathonien', 'Jouer 8 parties dans une même soirée', null, '{"agg":"special","name":"games_in_soiree","threshold":8}'::jsonb, true, 225),
   ('gen_hote', null, null, 'Hôte de la maison', 'Organiser 5 soirées menées à leur terme', null, '{"agg":"special","name":"hosted","threshold":5}'::jsonb, true, 226),
   ('gen_grande_tablee', null, null, 'Grande tablée', 'Participer à une soirée de 6 joueurs ou plus', null, '{"agg":"special","name":"biggest_table","threshold":6}'::jsonb, true, 227),
-  ('gen_pipelette', null, null, 'Pipelette', 'Envoyer 50 stickers dans le chat', null, null, false, 228),
+  ('gen_pipelette', null, null, 'Pipelette', 'Envoyer 50 stickers dans le chat', null, '{"agg":"special","name":"stickers","threshold":50}'::jsonb, true, 228),
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
   ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230)
 on conflict (id) do update
@@ -4653,6 +4737,7 @@ on conflict (id) do update
 revoke all on function public._tr_val(public.match_players, text) from public, anon, authenticated;
 revoke all on function public._tr_ok(public.match_players, jsonb) from public, anon, authenticated;
 revoke all on function public._tr_target(jsonb) from public, anon, authenticated;
+revoke all on function public.evaluate_trophy(uuid, text) from public, anon, authenticated;
 revoke all on function public._tr_progress(uuid, text, jsonb) from public, anon, authenticated;
 revoke all on function public.evaluate_trophies(uuid, text) from public, anon, authenticated;
 revoke all on function public._after_finish_trophies(uuid, uuid[]) from public, anon, authenticated;
@@ -4880,6 +4965,9 @@ begin
     v_outcome := 'success';
     v_points := 1;
     v_stats := public._aov_bump(v_stats, v_t, 'success');
+    -- Ovation : défi réussi à l'unanimité (3 votants min.) ; Même pas peur : carte de niveau 3 réussie
+    if v_down = 0 and v_up >= 3 then v_stats := public._aov_bump(v_stats, v_t, 'unanimous'); end if;
+    if p_state->'card'->>'level' = '3' then v_stats := public._aov_bump(v_stats, v_t, 'hard_success'); end if;
   else
     v_outcome := 'fail';
     v_stats := public._aov_bump(v_stats, v_t, 'fails');
@@ -5549,7 +5637,13 @@ begin
     'shots', coalesce((v_st->>'shots')::integer, 0) + 1,
     'hits', coalesce((v_st->>'hits')::integer, 0) + case when v_r = 'miss' then 0 else 1 end,
     'streak', v_streak,
-    'best', greatest(coalesce((v_st->>'best')::integer, 0), v_streak));
+    'best', greatest(coalesce((v_st->>'best')::integer, 0), v_streak),
+    -- trophées : série de tirs à l'eau (en cours / record) et 1er tir de la manche touché ?
+    'mstreak', case when v_r = 'miss' then coalesce((v_st->>'mstreak')::integer, 0) + 1 else 0 end,
+    'mbest', greatest(coalesce((v_st->>'mbest')::integer, 0),
+                      case when v_r = 'miss' then coalesce((v_st->>'mstreak')::integer, 0) + 1 else 0 end),
+    'fh', case when coalesce((v_st->>'shots')::integer, 0) = 0 then (v_r <> 'miss')::integer
+               else coalesce((v_st->>'fh')::integer, 0) end);
 
   p_board := p_board || jsonb_build_object(
     'waters', coalesce(p_board->'waters', '{}'::jsonb) || jsonb_build_object(v_target, v_w),
@@ -5563,7 +5657,26 @@ begin
     -- Toute la flotte adverse est coulée : manche gagnée, flottes révélées.
     p_board := p_board || jsonb_build_object('reveal', jsonb_build_object(
       v_a, p_server->'fleets'->v_a, v_b, p_server->'fleets'->v_b));
-    return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : bilan de la manche pour les trophées, par joueur (socle duel : games[].x). Les stats de
+    -- board sont remplacées à chaque manche, on les recopie donc ici dans l'historique de la session.
+    return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object('total', (p_board->>'count')::integer, 'p', jsonb_build_object(
+        v_a, jsonb_build_object(
+          'shots', coalesce((p_board->'stats'->v_a->>'shots')::integer, 0),
+          'hits', coalesce((p_board->'stats'->v_a->>'hits')::integer, 0),
+          'best', coalesce((p_board->'stats'->v_a->>'best')::integer, 0),
+          'mbest', coalesce((p_board->'stats'->v_a->>'mbest')::integer, 0),
+          'fh', coalesce((p_board->'stats'->v_a->>'fh')::integer, 0),
+          'left', coalesce((p_board->'waters'->v_a->>'left')::integer, 5),
+          'enemy_left', coalesce((p_board->'waters'->v_b->>'left')::integer, 5)),
+        v_b, jsonb_build_object(
+          'shots', coalesce((p_board->'stats'->v_b->>'shots')::integer, 0),
+          'hits', coalesce((p_board->'stats'->v_b->>'hits')::integer, 0),
+          'best', coalesce((p_board->'stats'->v_b->>'best')::integer, 0),
+          'mbest', coalesce((p_board->'stats'->v_b->>'mbest')::integer, 0),
+          'fh', coalesce((p_board->'stats'->v_b->>'fh')::integer, 0),
+          'left', coalesce((p_board->'waters'->v_b->>'left')::integer, 5),
+          'enemy_left', coalesce((p_board->'waters'->v_a->>'left')::integer, 5)))));
   elsif v_r = 'miss' then
     return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', null);   -- à l'eau : tour adverse
   end if;
@@ -5620,6 +5733,34 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- moteur (délégation au socle)
+
+-- Hook de trophées du socle duel (features/duel.sql, _duel_tstats) : tout vient des bilans de manche
+-- (games[].x.p[joueur]) enregistrés à la fin de chaque manche. left = mes bateaux à flot,
+-- enemy_left = bateaux adverses à flot. Seuils : tirs 40 / 120, précision 40 %.
+create or replace function public.game_bataille_navale_trophy_stats(p_state jsonb, p_pl text)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  with m as (
+    select won, lost, g->'total' as total, g->'p'->p_pl as me
+      from public._duel_games_x(p_state, p_pl)
+     where g->'p'->p_pl is not null
+  )
+  select jsonb_build_object(
+    'miss_streak', coalesce(max((me->>'mbest')::integer), 0),
+    'hits', coalesce(sum((me->>'hits')::integer), 0),
+    'best_hit_streak', coalesce(max((me->>'best')::integer), 0),
+    'first_shot_hits', coalesce(sum((me->>'fh')::integer), 0),
+    'lost_no_sink', count(*) filter (where lost and (me->>'enemy_left')::integer >= 5),
+    'lost_close', count(*) filter (where lost and (me->>'enemy_left')::integer = 1),
+    'long_win', count(*) filter (where won and (total)::text::integer >= 120),
+    'precise_win', count(*) filter (where won and (me->>'shots')::integer > 0
+                                      and (me->>'hits')::integer * 100 >= (me->>'shots')::integer * 40),
+    'fast_win', count(*) filter (where won and (me->>'shots')::integer <= 40),
+    'intact_win', count(*) filter (where won and (me->>'left')::integer >= 5))
+  from m
+$$;
+revoke all on function public.game_bataille_navale_trophy_stats(jsonb, text) from public, anon, authenticated;
 
 create or replace function public.game_bataille_navale_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
@@ -5806,7 +5947,10 @@ begin
            'points', least(25, coalesce((p_state->'word_counts'->>pid)::integer, 0)),
            'won', pid = v_winner,
            'placement', o::integer,
-           'stats', public._bam_tstats(p_state, pid, v_winner)) order by o)
+           -- fast_words / close_calls : comptés dans server (l'heure d'explosion est secrète)
+           'stats', public._bam_tstats(p_state, pid, v_winner) || jsonb_build_object(
+             'fast_words', coalesce((p_server->'fast_words'->>pid)::integer, 0),
+             'close_calls', coalesce((p_server->'close_calls'->>pid)::integer, 0))) order by o)
     into v_results
     from jsonb_array_elements_text(v_ranked) with ordinality t(pid, o);
 
@@ -6012,6 +6156,17 @@ begin
     end if;
     p_state := p_state || jsonb_build_object('bonuses', coalesce(p_state->'bonuses', '[]'::jsonb)
       || jsonb_build_array(jsonb_build_object('p', v_me, 'n', v_n, 'life', v_bonus)));
+  end if;
+
+  -- Trophées : mot validé en moins de 2 s (Patate chaude) / à moins d'1 s de l'explosion (Sueurs froides).
+  if p_state->>'turn_started_at' is not null
+     and now() - (p_state->>'turn_started_at')::timestamptz < interval '2 seconds' then
+    p_server := p_server || jsonb_build_object('fast_words', coalesce(p_server->'fast_words', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_server->'fast_words'->>v_me)::integer, 0) + 1));
+  end if;
+  if v_explode is not null and v_explode - now() < interval '1 second' then
+    p_server := p_server || jsonb_build_object('close_calls', coalesce(p_server->'close_calls', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_server->'close_calls'->>v_me)::integer, 0) + 1));
   end if;
 
   v_next := public._bam_next(p_state, v_me);
@@ -7066,6 +7221,10 @@ as $$
     'dnf', count(*) filter (where me->>'time' is null),
     'podiums', count(*) filter (where nk >= 4 and place <= 3),
     'hits', coalesce((p_state->'hits'->>p_pl)::integer, 0),
+    'hits_taken', coalesce((p_state->'taken'->>p_pl)::integer, 0),
+    'used_cloud', coalesce((p_state->'used'->p_pl->>'cloud')::integer, 0),
+    'used_confetti', coalesce((p_state->'used'->p_pl->>'confetti')::integer, 0),
+    'used_reverse', coalesce((p_state->'used'->p_pl->>'reverse')::integer, 0),
     'win_track_1', count(*) filter (where place = 1 and track = 1),
     'win_track_2', count(*) filter (where place = 1 and track = 2),
     'win_track_3', count(*) filter (where place = 1 and track = 3),
@@ -7268,6 +7427,10 @@ begin
         'at', now())));
     else
       if jsonb_typeof(p_action->'targets') <> 'array' then raise exception 'invalid_action'; end if;
+      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour utilisés
+      p_state := p_state || jsonb_build_object('used', coalesce(p_state->'used', '{}'::jsonb) || jsonb_build_object(v_id,
+        coalesce(p_state->'used'->v_id, '{}'::jsonb) || jsonb_build_object(v_item,
+          coalesce((p_state->'used'->v_id->>v_item)::integer, 0) + 1)));
       for v_target in
         select distinct t from jsonb_array_elements_text(p_action->'targets') t
          where public._dk_racers(p_state) ? t and t <> v_id limit 11
@@ -7291,6 +7454,9 @@ begin
     p_state := p_state || jsonb_build_object(
       'hazards', coalesce((select jsonb_agg(h) from jsonb_array_elements(p_state->'hazards') h
                             where (h->>'id')::integer <> (p_action->>'hazard')::integer), '[]'::jsonb));
+    -- Trophées (Tête-à-queue) : touches subies par la victime
+    p_state := p_state || jsonb_build_object('taken', coalesce(p_state->'taken', '{}'::jsonb)
+                 || jsonb_build_object(v_id, coalesce((p_state->'taken'->>v_id)::integer, 0) + 1));
     if v_owner <> v_id then
       p_state := p_state || jsonb_build_object('hits', coalesce(p_state->'hits', '{}'::jsonb)
                    || jsonb_build_object(v_owner, coalesce((p_state->'hits'->>v_owner)::integer, 0) + 1));
@@ -7503,7 +7669,8 @@ begin
     'turn_points', '{}'::jsonb,
     'feed', '[]'::jsonb,
     'last_turn', null);
-  p_server := p_server || jsonb_build_object('word', null, 'revealed', '[]'::jsonb, 'hints_left', '[]'::jsonb);
+  p_server := p_server || jsonb_build_object('word', null, 'revealed', '[]'::jsonb, 'hints_left', '[]'::jsonb,
+                                             'fm', '{}'::jsonb, 'close_turn', '[]'::jsonb);
   return jsonb_build_object(
     'state', p_state,
     'server', p_server,
@@ -7601,7 +7768,11 @@ begin
       'points', p_state->'turn_points', 'skipped', p_skipped),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
-      'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped)));
+      'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped,
+      -- trophées : difficulté du mot, « Presque ! » reçus (1 par joueur et par tour), chrono de chaque trouvaille
+      'diff', coalesce((v_word->>'difficulty')::integer, 2),
+      'close', coalesce(p_server->'close_turn', '[]'::jsonb),
+      'fm', coalesce(p_server->'fm', '{}'::jsonb))));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -7614,7 +7785,12 @@ as $$
     select e.o, e.v->>'drawer' as drawer, coalesce((e.v->>'skipped')::boolean, false) as skipped,
            jsonb_array_length(e.v->'found') as nf,
            coalesce((e.v->'found') ? p_pl, false) as me_found,
-           coalesce((e.v->'found'->>0) = p_pl, false) as first
+           coalesce((e.v->'found'->>0) = p_pl, false) as first,
+           coalesce((e.v->'close') ? p_pl, false) as closed,
+           coalesce((e.v->>'diff')::integer, 0) as diff,
+           (e.v->'fm'->p_pl->>'r')::numeric as rem,
+           (e.v->'fm'->p_pl->>'e')::numeric as el,
+           coalesce((e.v->'fm'->p_pl->>'nh')::boolean, false) as nohint
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
   ), n as (
     select jsonb_array_length(p_state->'players') as np
@@ -7626,6 +7802,11 @@ as $$
     'unfound', (select count(*) from h where drawer = p_pl and not skipped and nf = 0),
     'found_count', (select count(*) from h where drawer <> p_pl and me_found),
     'first_finds', (select count(*) from h where first),
+    'close_count', (select count(*) from h where drawer <> p_pl and closed),
+    'late_finds', (select count(*) from h where me_found and rem <= 5),
+    'fast_finds', (select count(*) from h where me_found and el < 10),
+    'no_hint_finds', (select count(*) from h where me_found and nohint),
+    'hard_perfect', (select count(*) from h, n where drawer = p_pl and not skipped and diff = 3 and np > 1 and nf = np - 1),
     'perfect_drawings', (select count(*) from h, n where drawer = p_pl and not skipped and np > 1 and nf = np - 1),
     'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not me_found group by grp) x), 0),
     'masterpiece', case when (select np from n) >= 4 and exists (select 1 from h where drawer = p_pl)
@@ -7815,6 +7996,11 @@ begin
                   || jsonb_build_object(p_state->>'drawer', coalesce((p_state->'turn_points'->>(p_state->>'drawer'))::integer, 0) + 40),
         'feed_seq', v_seq,
         'feed', v_feed || jsonb_build_array(jsonb_build_object('n', v_seq, 'p', v_me, 'k', 'found', 'pts', v_pts)));
+      p_server := p_server || jsonb_build_object('fm', coalesce(p_server->'fm', '{}'::jsonb) || jsonb_build_object(v_me,
+        jsonb_build_object('e', round(extract(epoch from (now() - v_start))::numeric, 1),
+                           'r', round(extract(epoch from (v_end - now()))::numeric, 1),
+                           'nh', (p_state->>'next_hint_at') is not null
+                                 and now() < (p_state->>'next_hint_at')::timestamptz)));
       v_secrets := jsonb_build_object(v_me, jsonb_build_object(
         'turn', v_turn, 'role', 'guesser', 'found', true, 'word', p_server->'word'->>'word'));
       -- Tout le monde a trouvé -> fin de tour anticipée.
@@ -7831,6 +8017,9 @@ begin
         'turn', v_turn, 'role', 'guesser', 'found', false,
         'close', jsonb_build_object('text', v_text, 'n', v_seq)));
       p_state := p_state || jsonb_build_object('feed_seq', v_seq);
+      if not (coalesce(p_server->'close_turn', '[]'::jsonb) ? v_me) then
+        p_server := p_server || jsonb_build_object('close_turn', coalesce(p_server->'close_turn', '[]'::jsonb) || to_jsonb(v_me));
+      end if;
       return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 
     else
@@ -8028,6 +8217,31 @@ as $$
     'reason', p_reason)
 $$;
 
+-- Compteurs de trophées par orateur (state.tstat[pid]) : appelé à la fin d'un passage joué.
+-- Cumul : empty_turns, found_r3 (mots en manche Mime), carries ; record : max_passed, best_r2, best_turn.
+create or replace function public._dee_note(p_state jsonb, p_carry boolean)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_pid   text := p_state->>'speaker';
+  v_st    jsonb := coalesce(p_state->'tstat'->v_pid, '{}'::jsonb);
+  v_found integer := coalesce((p_state->>'turn_found')::integer, 0);
+  v_pass  integer := coalesce((p_state->>'turn_passed')::integer, 0);
+  v_round integer := coalesce((p_state->>'round')::integer, 0);
+begin
+  if v_pid is null or p_state->>'phase' <> 'playing' or p_state->>'started_at' is null then return p_state; end if;
+  v_st := v_st || jsonb_build_object(
+    'empty_turns', coalesce((v_st->>'empty_turns')::integer, 0) + case when v_found = 0 then 1 else 0 end,
+    'max_passed', greatest(coalesce((v_st->>'max_passed')::integer, 0), v_pass),
+    'best_turn', greatest(coalesce((v_st->>'best_turn')::integer, 0), v_found),
+    'found_r3', coalesce((v_st->>'found_r3')::integer, 0) + case when v_round = 3 then v_found else 0 end,
+    'best_r2', greatest(coalesce((v_st->>'best_r2')::integer, 0), case when v_round = 2 then v_found else 0 end),
+    'carries', coalesce((v_st->>'carries')::integer, 0) + case when p_carry then 1 else 0 end);
+  return p_state || jsonb_build_object('tstat',
+    coalesce(p_state->'tstat', '{}'::jsonb) || jsonb_build_object(v_pid, v_st));
+end $$;
+
 -- Fin d'un passage (échéance, saut par l'hôte) : la carte en cours retourne en
 -- fin de pioche, rotation, écran « prêt ? » suivant.
 create or replace function public._dee_end_passage(p_state jsonb, p_server jsonb, p_reason text)
@@ -8040,6 +8254,7 @@ begin
   if p_state->>'phase' = 'playing' and jsonb_array_length(v_pile) > 1 then
     p_server := p_server || jsonb_build_object('pile', (v_pile - 0) || jsonb_build_array(v_pile->0));
   end if;
+  p_state := public._dee_note(p_state, false);
   p_state := p_state || jsonb_build_object('last_turn', public._dee_recap(p_state, p_reason), 'carry_seconds', null);
   p_state := public._dee_rotate(p_state);
   p_state := public._dee_ready(p_state, (p_state->>'turn_seconds')::integer, false);
@@ -8058,6 +8273,12 @@ as $$
            (select coalesce(max(value::integer), 0) from jsonb_each_text(coalesce(p_state->'speaker_points', '{}'::jsonb))) as all_max
   )
   select jsonb_build_object(
+    'empty_turns', coalesce((p_state->'tstat'->p_pid->>'empty_turns')::integer, 0),
+    'max_passed', coalesce((p_state->'tstat'->p_pid->>'max_passed')::integer, 0),
+    'best_turn', coalesce((p_state->'tstat'->p_pid->>'best_turn')::integer, 0),
+    'found_r3', coalesce((p_state->'tstat'->p_pid->>'found_r3')::integer, 0),
+    'best_r2', coalesce((p_state->'tstat'->p_pid->>'best_r2')::integer, 0),
+    'carries', coalesce((p_state->'tstat'->p_pid->>'carries')::integer, 0),
     'best_in_team', case when mine > 0 and mine >= team_max then 1 else 0 end,
     'sweep', case when jsonb_array_length(coalesce(p_state->'round_scores', '[]'::jsonb)) >= 3
         and not exists (select 1 from jsonb_array_elements(p_state->'round_scores') r
@@ -8108,6 +8329,9 @@ declare
   v_left integer;
 begin
   v_left := greatest(0, floor(extract(epoch from ((p_state->>'deadline')::timestamptz - now())))::integer);
+  -- Du rab : pioche vidée avec au moins 5 s gardées pour la manche suivante.
+  p_state := public._dee_note(p_state, v_left >= 5
+                                       and (p_state->>'round')::integer < (p_state->>'total_rounds')::integer);
   p_state := p_state || jsonb_build_object('last_turn', public._dee_recap(p_state, 'empty'));
   if (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
     return public._dee_finish(p_state, p_server);
@@ -8344,6 +8568,7 @@ revoke all on function public._dee_card_secrets(jsonb, jsonb, boolean) from publ
 revoke all on function public._dee_ready(jsonb, integer, boolean) from public, anon, authenticated;
 revoke all on function public._dee_rotate(jsonb) from public, anon, authenticated;
 revoke all on function public._dee_recap(jsonb, text) from public, anon, authenticated;
+revoke all on function public._dee_note(jsonb, boolean) from public, anon, authenticated;
 revoke all on function public._dee_end_passage(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._dee_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dee_tstats(jsonb, text, text, boolean) from public, anon, authenticated;
@@ -9733,7 +9958,7 @@ declare
   v_comeback boolean := false;
   v_lost    boolean := false;
   v_false_liar integer := 0; v_caught integer := 0; v_good_liar integer := 0;
-  v_exact integer := 0; v_big integer := 0; v_pile integer := 0;
+  v_exact integer := 0; v_big integer := 0; v_pile integer := 0; v_pure integer := 0;
   h         jsonb;
 begin
   for h in select value from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) loop
@@ -9742,6 +9967,7 @@ begin
       if h->'bid'->>'by' = p_pl and h->>'loser' = p_pl then v_caught := v_caught + 1; end if;
       if h->>'caller' = p_pl and h->>'loser' is not null and h->>'loser' <> p_pl then v_good_liar := v_good_liar + 1; end if;
       if h->'bid'->>'by' = p_pl and (h->>'count')::integer = (h->'bid'->>'qty')::integer then v_exact := v_exact + 1; end if;
+      if h->'bid'->>'by' = p_pl and coalesce((h->>'pure')::boolean, false) then v_pure := v_pure + 1; end if;
       if h->'bid'->>'by' = p_pl and (h->'bid'->>'qty')::integer >= 8
          and (h->>'count')::integer >= (h->'bid'->>'qty')::integer then v_big := v_big + 1; end if;
     elsif h->>'kind' = 'pile' and h->>'caller' = p_pl and h->>'loser' is null then
@@ -9762,7 +9988,7 @@ begin
     'first_out', case when p_state->'eliminated'->>0 = p_pl then 1 else 0 end,
     'false_liar', v_false_liar, 'caught', v_caught, 'good_liar', v_good_liar,
     'last_die_win', case when p_winner = p_pl and (p_state->'dice_count'->>p_pl)::integer = 1 then 1 else 0 end,
-    'pile_ok', v_pile, 'exact_bids', v_exact, 'big_bid', v_big,
+    'pile_ok', v_pile, 'exact_bids', v_exact, 'pure_bluffs', v_pure, 'big_bid', v_big,
     'comeback', case when p_winner = p_pl and v_comeback then 1 else 0 end,
     'captain', case when p_winner = p_pl and not v_lost and v_n >= 3 then 1 else 0 end);
 end $$;
@@ -9814,6 +10040,7 @@ declare
   v_n       integer;
   v_secs    numeric;
   v_entry   jsonb;
+  v_pure    boolean;
 begin
   select count(*)::integer into v_count
     from jsonb_each(coalesce(p_server->'dice', '{}'::jsonb)) as t(k, v),
@@ -9827,6 +10054,12 @@ begin
   else
     v_loser := p_caller;
   end if;
+
+  -- Coup de bluff : enchère contestée (« Menteur ! »), vraie, alors que l'enchérisseur n'avait aucun dé de
+  -- cette valeur ni joker. Calculé ici et stocké dans l'historique (les dés sont révélés de toute façon).
+  v_pure := p_kind = 'liar' and v_count >= v_q
+            and not exists (select 1 from jsonb_array_elements_text(coalesce(p_server->'dice'->v_by, '[]'::jsonb)) d(x)
+                             where x::integer = v_f or (v_f <> 1 and x::integer = 1));
 
   if v_loser is not null then
     v_n := (p_state->'dice_count'->>v_loser)::integer - 1;
@@ -9869,7 +10102,8 @@ begin
     'reveal', v_entry,
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(
       jsonb_build_object('round', p_state->'round', 'kind', p_kind, 'caller', p_caller, 'bid', v_bid,
-                         'count', v_count, 'loser', v_loser, 'gainer', v_gainer, 'eliminated', v_elim)),
+                         'count', v_count, 'loser', v_loser, 'gainer', v_gainer, 'eliminated', v_elim,
+                         'pure', v_pure)),
     'deadline', public._mtr_iso(now() + make_interval(secs => v_secs::double precision)));
 end $$;
 
@@ -10260,7 +10494,10 @@ begin
     'boards', v_boards,
     'next', case when v_ult and v_out is null then v_next end);
   if v_out = 'win' then
-    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : compteurs de fin de manche pour les trophées (L'ombre : Ultime gagné sans perdre un petit morpion)
+    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object('clean_ultimate',
+        v_ult and not exists (select 1 from jsonb_array_elements_text(v_boards) b where b = case v_sym when 'x' then 'o' else 'x' end)));
   end if;
   return jsonb_build_object('board', p_board, 'outcome', v_out);
 end $$;
@@ -10300,7 +10537,10 @@ as $$
     'win_ultimate', case when v.variant = 'ultimate' and v.wins >= 1 then 1 else 0 end,
     'classic_second_win', case when v.variant = 'classic' then (select count(*) from g where won and not i_started) else 0 end,
     'giant_fast_win', case when v.variant = 'giant' then (select count(*) from g where won and moves <= 13) else 0 end,
-    'ultimate_duel_wins', case when v.variant = 'ultimate' then v.wins else 0 end)
+    'ultimate_duel_wins', case when v.variant = 'ultimate' then v.wins else 0 end,
+    'clean_ultimate', case when v.variant = 'ultimate'
+        then (select count(*) from public._duel_games_x(p_state, p_pl) x
+               where x.won and coalesce((x.g->>'clean_ultimate')::boolean, false)) else 0 end)
   from v
 $$;
 revoke all on function public.game_morpion_trophy_stats(jsonb, text) from public, anon, authenticated;
@@ -10458,6 +10698,51 @@ begin
   return p_state;
 end $$;
 
+-- Compteurs de trophées par joueur dans server.pstats (jamais dans le state public) :
+-- ajoute p_n à p_key (ou prend le max si p_max).
+create or replace function public._pdb_pst(p_server jsonb, p_pl text, p_key text, p_n numeric, p_max boolean default false)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_cur numeric := coalesce((p_server->'pstats'->p_pl->>p_key)::numeric, 0);
+  v_new numeric := case when p_max then greatest(v_cur, p_n) else v_cur + p_n end;
+begin
+  return p_server || jsonb_build_object('pstats',
+    coalesce(p_server->'pstats', '{}'::jsonb) || jsonb_build_object(p_pl,
+      coalesce(p_server->'pstats'->p_pl, '{}'::jsonb) || jsonb_build_object(p_key, v_new)));
+end $$;
+
+-- Un cumul +2/+4 vient d'être pioché par p_player (p_count cartes) : plus gros tas, et les cartes
+-- sont créditées (« infligées ») à ceux qui ont empilé (server.pend_src).
+create or replace function public._pdb_cumul(p_server jsonb, p_player text, p_count integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  r record;
+begin
+  p_server := public._pdb_pst(p_server, p_player, 'big_draw', p_count, true);
+  for r in select key, value::integer as n from jsonb_each_text(coalesce(p_server->'pend_src', '{}'::jsonb)) loop
+    p_server := public._pdb_pst(p_server, r.key, 'inflicted', r.n);
+  end loop;
+  return p_server - 'pend_src';
+end $$;
+
+-- Met à jour le record de cartes en main de chaque joueur (appelé après chaque action et à la fin).
+create or replace function public._pdb_track_hands(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  p text;
+begin
+  for p in select jsonb_array_elements_text(p_state->'players') loop
+    p_server := public._pdb_pst(p_server, p, 'max_hand', coalesce((p_state->'counts'->>p)::integer, 0), true);
+  end loop;
+  return p_server;
+end $$;
+
 create or replace function public._pdb_log(p_state jsonb, p_entry jsonb)
 returns jsonb language plpgsql immutable
 set search_path = public, extensions
@@ -10500,6 +10785,7 @@ begin
     v_drawn := v_drawn || jsonb_build_array(v_card);
   end loop;
   p_server := jsonb_set(p_server, array['hands', p_player], v_hand, true);
+  p_server := public._pdb_pst(p_server, p_player, 'drawn', jsonb_array_length(v_drawn));
   p_state := jsonb_set(p_state, array['counts', p_player], to_jsonb(jsonb_array_length(v_hand)), true);
   p_state := p_state || jsonb_build_object('draw_count', jsonb_array_length(p_server->'deck'));
   return jsonb_build_object('state', p_state, 'server', p_server, 'drawn', v_drawn);
@@ -10541,15 +10827,30 @@ declare
                       || array(select jsonb_array_elements_text(p_state->'active'));
   v_results jsonb := '[]'::jsonb;
   v_hands   jsonb := '{}'::jsonb;
+  v_ps      jsonb;
   i         integer;
 begin
+  p_server := public._pdb_track_hands(p_state, p_server);
   for i in 1 .. cardinality(v_ranked) loop
+    v_ps := coalesce(p_server->'pstats'->v_ranked[i], '{}'::jsonb);
     v_results := v_results || jsonb_build_array(jsonb_build_object(
       'profile_id', v_ranked[i],
       'placement', i,
       'points', v_n - i,
       'won', (i = 1) or (v_n >= 5 and i <= 3),
-      'stats', '{}'::jsonb));
+      -- trophées (features/trophees.sql), cumulés dans server.pstats
+      'stats', jsonb_build_object(
+        'big_draw', coalesce((v_ps->>'big_draw')::integer, 0),
+        'denounced', coalesce((v_ps->>'denounced')::integer, 0),
+        'denounces', coalesce((v_ps->>'denounces')::integer, 0),
+        'special_cards', coalesce((v_ps->>'specials')::integer, 0),
+        'max_hand', coalesce((v_ps->>'max_hand')::integer, 0),
+        'inflicted', coalesce((v_ps->>'inflicted')::integer, 0),
+        'stacks', coalesce((v_ps->>'stacks')::integer, 0),
+        -- Main propre : 1er sorti ayant pioché 2 cartes au plus ; Remontada : 1er sorti après 10+ cartes en main
+        'clean_win', case when i = 1 and p_server->'pstats' is not null
+                           and coalesce((v_ps->>'drawn')::integer, 0) <= 2 then 1 else 0 end,
+        'comeback', case when i = 1 and coalesce((v_ps->>'max_hand')::integer, 0) >= 10 then 1 else 0 end)));
   end loop;
   -- Main du (des) perdant(s) révélée.
   select coalesce(jsonb_object_agg(a, coalesce(p_server->'hands'->a, '[]'::jsonb)), '{}'::jsonb) into v_hands
@@ -10705,6 +11006,7 @@ begin
       p_state := v_r->'state'; p_server := v_r->'server';
       p_state := public._pdb_log(p_state, jsonb_build_object(
         't', 'draw', 'p', v_turn, 'count', jsonb_array_length(v_r->'drawn'), 'auto', true, 'cumul', v_pending > 0));
+      if v_pending > 0 then p_server := public._pdb_cumul(p_server, v_turn, jsonb_array_length(v_r->'drawn')); end if;
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
     end if;
     p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_turn, 1), true);
@@ -10724,6 +11026,7 @@ begin
     v_r := public._pdb_draw(p_state, p_server, v_target, 2);
     p_state := v_r->'state'; p_server := v_r->'server';
     p_state := p_state #- array['last_card', v_target];
+    p_server := public._pdb_pst(public._pdb_pst(p_server, v_target, 'denounced', 1), v_me, 'denounces', 1);
     p_state := public._pdb_log(p_state, jsonb_build_object(
       't', 'denounce', 'p', v_me, 'target', v_target, 'count', jsonb_array_length(v_r->'drawn')));
 
@@ -10736,6 +11039,7 @@ begin
       p_state := v_r->'state'; p_server := v_r->'server';
       p_state := public._pdb_log(p_state, jsonb_build_object(
         't', 'draw', 'p', v_me, 'count', jsonb_array_length(v_r->'drawn'), 'cumul', true));
+      p_server := public._pdb_cumul(p_server, v_me, jsonb_array_length(v_r->'drawn'));
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
       p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_me, 1), true);
     else
@@ -10791,6 +11095,15 @@ begin
       end if;
     end if;
 
+    -- Compteurs de trophées (server.pstats)
+    if v_kind <> 'num' then p_server := public._pdb_pst(p_server, v_me, 'specials', 1); end if;
+    if v_kind in ('plus2', 'wild4') then
+      if v_pending > 0 then p_server := public._pdb_pst(p_server, v_me, 'stacks', 1); end if;
+      p_server := p_server || jsonb_build_object('pend_src', coalesce(p_server->'pend_src', '{}'::jsonb)
+        || jsonb_build_object(v_me, coalesce((p_server->'pend_src'->>v_me)::integer, 0)
+                                    + case when v_kind = 'plus2' then 2 else 4 end));
+    end if;
+
     -- La carte quitte la main et passe sur la défausse.
     v_hand := v_hand - v_idx;
     p_server := jsonb_set(p_server, array['hands', v_me], v_hand);
@@ -10841,6 +11154,7 @@ begin
           if p <> v_me then
             v_r := public._pdb_draw(p_state, p_server, p, 1);
             p_state := v_r->'state'; p_server := v_r->'server';
+            p_server := public._pdb_pst(p_server, v_me, 'inflicted', jsonb_array_length(v_r->'drawn'));
           end if;
         end loop;
       elsif v_perso = 'manon' then
@@ -10879,6 +11193,7 @@ begin
         -- Coup de griffe : la cible pioche 3.
         v_r := public._pdb_draw(p_state, p_server, v_target, 3);
         p_state := v_r->'state'; p_server := v_r->'server';
+        p_server := public._pdb_pst(p_server, v_me, 'inflicted', jsonb_array_length(v_r->'drawn'));
       elsif v_perso = 'marius' then
         -- Capuche : annule tout le cumul en attente ; sans cumul, le joueur suivant passe son tour.
         if v_pending > 0 then
@@ -10888,6 +11203,7 @@ begin
           v_entry := v_entry || jsonb_build_object('skipped', true);
         end if;
         p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
+        p_server := p_server - 'pend_src';
       elsif v_perso = 'nini' then
         -- Glissade : chaque joueur (qui a encore des cartes) passe sa main au voisin, dans le sens du jeu.
         v_act := array(select a from jsonb_array_elements_text(p_state->'active') as t(a)
@@ -10957,6 +11273,8 @@ begin
     end if;
   end loop;
 
+  p_server := public._pdb_track_hands(p_state, p_server);
+
   -- Secrets renvoyés uniquement pour les joueurs dont la main (ou la carte piochée) a changé.
   for p in select jsonb_array_elements_text(p_state->'players') loop
     v_od := case when v_old->'drawn'->>'player' = p then v_old->'drawn'->>'id' end;
@@ -10987,6 +11305,9 @@ revoke all on function public._pdb_shuffle(jsonb) from public, anon, authenticat
 revoke all on function public._pdb_iso(timestamptz) from public, anon, authenticated;
 revoke all on function public._pdb_next(jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._pdb_start_turn(jsonb, text, boolean) from public, anon, authenticated;
+revoke all on function public._pdb_pst(jsonb, text, text, numeric, boolean) from public, anon, authenticated;
+revoke all on function public._pdb_cumul(jsonb, text, integer) from public, anon, authenticated;
+revoke all on function public._pdb_track_hands(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pdb_log(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pdb_draw(jsonb, jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._pdb_playable(jsonb, jsonb) from public, anon, authenticated;
@@ -11078,6 +11399,15 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Compteur de trophées de la manche : det[pl][key] += 1.
+create or replace function public._pb_bump(p_det jsonb, p_pl text, p_key text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select p_det || jsonb_build_object(p_pl,
+    coalesce(p_det->p_pl, '{}'::jsonb) || jsonb_build_object(p_key, coalesce((p_det->p_pl->>p_key)::integer, 0) + 1))
+$$;
+
 -- Barème de la manche : unique valide 2, valide partagée 1, refusée/vide 0.
 -- Refusée si contestée par la majorité stricte des AUTRES joueurs.
 create or replace function public._pb_score(p_state jsonb, p_server jsonb)
@@ -11097,6 +11427,8 @@ declare
   v_detail  jsonb := '{}'::jsonb;
   v_points  jsonb;
   v_uniq    jsonb;
+  v_det     jsonb := '{}'::jsonb;
+  v_c       text;
 begin
   select jsonb_object_agg(x, 0) into v_points from jsonb_array_elements_text(p_state->'players') x;
   v_uniq := v_points;
@@ -11130,6 +11462,23 @@ begin
       end if;
     end loop;
     v_detail := v_detail || jsonb_build_object(v_cat, v_cd);
+
+    -- Compteurs de trophées : refusées, partagées, vides, grille pleine, contestations abouties
+    for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
+      v_status := v_cd->pl->>'status';
+      if v_status = 'refused' then
+        v_det := public._pb_bump(v_det, pl, 'refused');
+        for v_c in select x from jsonb_array_elements_text(
+                     coalesce(p_state#>array['validation', 'contests', v_cat, pl], '[]'::jsonb)) x loop
+          v_det := public._pb_bump(v_det, v_c, 'lawyer');
+        end loop;
+      elsif v_status = 'shared' then
+        v_det := public._pb_bump(v_det, pl, 'shared');
+      elsif v_status = 'empty' then
+        v_det := public._pb_bump(v_det, pl, 'empty');
+      end if;
+      if v_status in ('unique', 'shared') then v_det := public._pb_bump(v_det, pl, 'valid'); end if;
+    end loop;
   end loop;
 
   p_state := p_state || jsonb_build_object(
@@ -11143,7 +11492,7 @@ begin
         'round', p_state->'round', 'letter', p_state->'letter',
         'points', v_points, 'uniques', v_uniq, 'detail', v_detail),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points)));
+        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points, 'det', v_det)));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -11154,11 +11503,21 @@ set search_path = public, extensions
 as $$
   with h as (
     select coalesce((e.v->'points'->>p_pl)::integer, 0) as mine,
-           coalesce((select max(value::integer) from jsonb_each_text(e.v->'points')), 0) as mx
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'points')), 0) as mx,
+           coalesce((e.v->'det'->p_pl->>'refused')::integer, 0) as refused,
+           coalesce((e.v->'det'->p_pl->>'shared')::integer, 0) as shared,
+           coalesce((e.v->'det'->p_pl->>'empty')::integer, 0) as empty,
+           coalesce((e.v->'det'->p_pl->>'valid')::integer, 0) as valid,
+           coalesce((e.v->'det'->p_pl->>'lawyer')::integer, 0) as lawyer
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) as e(v)
   )
   select jsonb_build_object(
     'uniques', coalesce((p_state->'uniques'->>p_pl)::integer, 0),
+    'refused', coalesce(sum(refused), 0),
+    'shared', coalesce(sum(shared), 0),
+    'max_empty', coalesce(max(empty), 0),
+    'full_grids', count(*) filter (where valid >= jsonb_array_length(p_state->'categories')),
+    'lawyer', coalesce(sum(lawyer), 0),
     'zero_rounds', count(*) filter (where mine = 0),
     'perfect_rounds', count(*) filter (where mine = 2 * jsonb_array_length(p_state->'categories')),
     'best_rounds', count(*) filter (where mine > 0 and mine = mx),
@@ -11405,6 +11764,7 @@ revoke all on function public._pb_norm(text) from public, anon, authenticated;
 revoke all on function public._pb_clean(text) from public, anon, authenticated;
 revoke all on function public._pb_start_round(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._pb_build_answers(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._pb_bump(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public._pb_to_validation(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_score(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_finish(jsonb, jsonb) from public, anon, authenticated;
@@ -11475,6 +11835,40 @@ begin
   return case when jsonb_array_length(v_line) > 0 then v_line end;
 end $$;
 
+-- Trophées : directions gagnantes du dernier jeton posé en (c, r) : {"n": nb de directions alignant >= 4,
+-- "diag": une diagonale gagne, "five": un alignement de 5+ jetons}.
+create or replace function public._q4s_kinds(p_cols jsonb, p_c integer, p_r integer, p_who text)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_dirs integer[] := array[1,0, 0,1, 1,1, 1,-1];
+  v_n    integer := 0;
+  v_diag boolean := false;
+  v_five boolean := false;
+  v_len  integer;
+  dc     integer;
+  dr     integer;
+  k      integer;
+  i      integer;
+begin
+  for i in 0 .. 3 loop
+    dc := v_dirs[i * 2 + 1];
+    dr := v_dirs[i * 2 + 2];
+    v_len := 1;
+    k := 1;
+    while public._q4s_cell(p_cols, p_c + k * dc, p_r + k * dr) = p_who loop v_len := v_len + 1; k := k + 1; end loop;
+    k := 1;
+    while public._q4s_cell(p_cols, p_c - k * dc, p_r - k * dr) = p_who loop v_len := v_len + 1; k := k + 1; end loop;
+    if v_len >= 4 then
+      v_n := v_n + 1;
+      if i >= 2 then v_diag := true; end if;
+      if v_len >= 5 then v_five := true; end if;
+    end if;
+  end loop;
+  return jsonb_build_object('n', v_n, 'diag', v_diag, 'five', v_five);
+end $$;
+
 -- ---------------------------------------------------------------- hooks du socle
 
 create or replace function public.game_quatre_a_la_suite_board_new(p_ctx jsonb, p_a text, p_b text)
@@ -11512,7 +11906,12 @@ begin
     'last', jsonb_build_object('col', v_c, 'row', v_r, 'by', p_actor),
     'line', v_line);
   if v_line is not null then
-    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : compteurs de fin de manche pour les trophées (socle duel : games[].x)
+    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object(
+        'diag', (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'diag')::boolean,
+        'double', (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'n')::integer >= 2
+                  or (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'five')::boolean));
   elsif v_count >= 42 then
     return jsonb_build_object('board', p_board, 'outcome', 'draw');
   end if;
@@ -11541,8 +11940,10 @@ as $$
   select jsonb_build_object(
     'fast_loss', count(*) filter (where lost and moves <= 10),
     'long_win', count(*) filter (where won and moves >= 36),
-    'fast_win', count(*) filter (where won and moves <= 12))
-  from public._duel_games(p_state, p_pl)
+    'fast_win', count(*) filter (where won and moves <= 12),
+    'diag_wins', count(*) filter (where won and coalesce((g->>'diag')::boolean, false)),
+    'double_wins', count(*) filter (where won and coalesce((g->>'double')::boolean, false)))
+  from public._duel_games_x(p_state, p_pl)
 $$;
 revoke all on function public.game_quatre_a_la_suite_trophy_stats(jsonb, text) from public, anon, authenticated;
 
@@ -11566,6 +11967,7 @@ end $$;
 
 revoke all on function public._q4s_cell(jsonb, integer, integer) from public, anon, authenticated;
 revoke all on function public._q4s_line(jsonb, integer, integer, text) from public, anon, authenticated;
+revoke all on function public._q4s_kinds(jsonb, integer, integer, text) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_new(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_move(jsonb, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_auto(jsonb, jsonb, text) from public, anon, authenticated;
@@ -11650,7 +12052,8 @@ begin
     'skipped', p_skipped,
     -- log compact : [{n: nom, r: 'found'|'pass', s?: slug}]
     'log', coalesce((select jsonb_agg(
-                       jsonb_strip_nulls(jsonb_build_object('n', e->'card'->>'name', 'r', e->>'r', 's', e->'card'->>'slug'))
+                       jsonb_strip_nulls(jsonb_build_object('n', e->'card'->>'name', 'r', e->>'r', 's', e->'card'->>'slug',
+                                          'd', e->'card'->>'difficulty'))
                        order by o)
                        from jsonb_array_elements(coalesce(p_state->'turn_log', '[]'::jsonb)) with ordinality as x(e, o)),
                     '[]'::jsonb));
@@ -11674,7 +12077,7 @@ as $$
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
      where e.v->>'guesser' = p_pl and not coalesce((e.v->>'skipped')::boolean, false)
   ), l as (
-    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s
+    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s, x.e->>'d' as d
       from t, jsonb_array_elements(coalesce(t.log, '[]'::jsonb)) with ordinality as x(e, o)
   ), runs as (
     select turn_o, r, i - row_number() over (partition by turn_o, r order by i) as grp from l
@@ -11686,6 +12089,7 @@ as $$
     'best_turn', coalesce(max(found), 0),
     'steady', case when count(*) >= 2 and min(found) >= 5 then 1 else 0 end,
     'crew_found', (select count(*) from l where r = 'found' and s is not null),
+    'hard_found', (select count(*) from l where r = 'found' and d = '3'),
     'best_run', coalesce((select max(c) from (select count(*) as c from runs where r = 'found' group by turn_o, grp) z), 0))
   from t
 $$;
@@ -13399,6 +13803,10 @@ begin
       if v_pl = any(v_rebels) then
         if v_bonus then v_g := v_g + 1; end if;
         v_st := jsonb_set(v_st, '{rebel}', to_jsonb((v_st->>'rebel')::integer + 1));
+        -- Rebelle lucide : seul de son avis ET pari gagné sur la même manche
+        if v_bet = v_maj then
+          v_st := jsonb_set(v_st, '{rebel_right}', to_jsonb(coalesce((v_st->>'rebel_right')::integer, 0) + 1), true);
+        end if;
       end if;
     end if;
     v_gains  := v_gains || jsonb_build_object(v_pl, v_g);

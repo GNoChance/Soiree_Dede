@@ -177,6 +177,10 @@ begin
       if v_pl = any(v_rebels) then
         if v_bonus then v_g := v_g + 1; end if;
         v_st := jsonb_set(v_st, '{rebel}', to_jsonb((v_st->>'rebel')::integer + 1));
+        -- Rebelle lucide : seul de son avis ET pari gagné sur la même manche
+        if v_bet = v_maj then
+          v_st := jsonb_set(v_st, '{rebel_right}', to_jsonb(coalesce((v_st->>'rebel_right')::integer, 0) + 1), true);
+        end if;
       end if;
     end if;
     v_gains  := v_gains || jsonb_build_object(v_pl, v_g);

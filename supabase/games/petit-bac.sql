@@ -80,6 +80,15 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
+-- Compteur de trophées de la manche : det[pl][key] += 1.
+create or replace function public._pb_bump(p_det jsonb, p_pl text, p_key text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select p_det || jsonb_build_object(p_pl,
+    coalesce(p_det->p_pl, '{}'::jsonb) || jsonb_build_object(p_key, coalesce((p_det->p_pl->>p_key)::integer, 0) + 1))
+$$;
+
 -- Barème de la manche : unique valide 2, valide partagée 1, refusée/vide 0.
 -- Refusée si contestée par la majorité stricte des AUTRES joueurs.
 create or replace function public._pb_score(p_state jsonb, p_server jsonb)
@@ -99,6 +108,8 @@ declare
   v_detail  jsonb := '{}'::jsonb;
   v_points  jsonb;
   v_uniq    jsonb;
+  v_det     jsonb := '{}'::jsonb;
+  v_c       text;
 begin
   select jsonb_object_agg(x, 0) into v_points from jsonb_array_elements_text(p_state->'players') x;
   v_uniq := v_points;
@@ -132,6 +143,23 @@ begin
       end if;
     end loop;
     v_detail := v_detail || jsonb_build_object(v_cat, v_cd);
+
+    -- Compteurs de trophées : refusées, partagées, vides, grille pleine, contestations abouties
+    for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
+      v_status := v_cd->pl->>'status';
+      if v_status = 'refused' then
+        v_det := public._pb_bump(v_det, pl, 'refused');
+        for v_c in select x from jsonb_array_elements_text(
+                     coalesce(p_state#>array['validation', 'contests', v_cat, pl], '[]'::jsonb)) x loop
+          v_det := public._pb_bump(v_det, v_c, 'lawyer');
+        end loop;
+      elsif v_status = 'shared' then
+        v_det := public._pb_bump(v_det, pl, 'shared');
+      elsif v_status = 'empty' then
+        v_det := public._pb_bump(v_det, pl, 'empty');
+      end if;
+      if v_status in ('unique', 'shared') then v_det := public._pb_bump(v_det, pl, 'valid'); end if;
+    end loop;
   end loop;
 
   p_state := p_state || jsonb_build_object(
@@ -145,7 +173,7 @@ begin
         'round', p_state->'round', 'letter', p_state->'letter',
         'points', v_points, 'uniques', v_uniq, 'detail', v_detail),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points)));
+        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points, 'det', v_det)));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -156,11 +184,21 @@ set search_path = public, extensions
 as $$
   with h as (
     select coalesce((e.v->'points'->>p_pl)::integer, 0) as mine,
-           coalesce((select max(value::integer) from jsonb_each_text(e.v->'points')), 0) as mx
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'points')), 0) as mx,
+           coalesce((e.v->'det'->p_pl->>'refused')::integer, 0) as refused,
+           coalesce((e.v->'det'->p_pl->>'shared')::integer, 0) as shared,
+           coalesce((e.v->'det'->p_pl->>'empty')::integer, 0) as empty,
+           coalesce((e.v->'det'->p_pl->>'valid')::integer, 0) as valid,
+           coalesce((e.v->'det'->p_pl->>'lawyer')::integer, 0) as lawyer
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) as e(v)
   )
   select jsonb_build_object(
     'uniques', coalesce((p_state->'uniques'->>p_pl)::integer, 0),
+    'refused', coalesce(sum(refused), 0),
+    'shared', coalesce(sum(shared), 0),
+    'max_empty', coalesce(max(empty), 0),
+    'full_grids', count(*) filter (where valid >= jsonb_array_length(p_state->'categories')),
+    'lawyer', coalesce(sum(lawyer), 0),
     'zero_rounds', count(*) filter (where mine = 0),
     'perfect_rounds', count(*) filter (where mine = 2 * jsonb_array_length(p_state->'categories')),
     'best_rounds', count(*) filter (where mine > 0 and mine = mx),
@@ -407,6 +445,7 @@ revoke all on function public._pb_norm(text) from public, anon, authenticated;
 revoke all on function public._pb_clean(text) from public, anon, authenticated;
 revoke all on function public._pb_start_round(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._pb_build_answers(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._pb_bump(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public._pb_to_validation(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_score(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_finish(jsonb, jsonb) from public, anon, authenticated;

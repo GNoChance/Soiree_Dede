@@ -216,6 +216,9 @@ begin
     v_outcome := 'success';
     v_points := 1;
     v_stats := public._aov_bump(v_stats, v_t, 'success');
+    -- Ovation : défi réussi à l'unanimité (3 votants min.) ; Même pas peur : carte de niveau 3 réussie
+    if v_down = 0 and v_up >= 3 then v_stats := public._aov_bump(v_stats, v_t, 'unanimous'); end if;
+    if p_state->'card'->>'level' = '3' then v_stats := public._aov_bump(v_stats, v_t, 'hard_success'); end if;
   else
     v_outcome := 'fail';
     v_stats := public._aov_bump(v_stats, v_t, 'fails');

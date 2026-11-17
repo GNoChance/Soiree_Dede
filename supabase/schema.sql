@@ -1176,7 +1176,7 @@ begin
         'majority', to_jsonb(v_maj), 'scorers', to_jsonb(v_scorers)),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
         'round', p_state->'round', 'question', p_state->'question',
-        'counts', v_counts, 'majority', to_jsonb(v_maj))));
+        'counts', v_counts, 'majority', to_jsonb(v_maj), 'scorers', to_jsonb(v_scorers))));
 
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
@@ -1188,10 +1188,16 @@ set search_path = public, extensions
 as $$
   with h as (
     select e.o, coalesce((e.v->'counts'->>p_pl)::integer, 0) as mine,
-           coalesce((select max(value::integer) from jsonb_each_text(e.v->'counts')), 0) as mx
+           coalesce((select max(value::integer) from jsonb_each_text(e.v->'counts')), 0) as mx,
+           coalesce(e.v->'scorers', '[]'::jsonb) ? p_pl as maj
       from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
   )
   select jsonb_build_object(
+    -- plus longue série de manches où le joueur a voté avec la majorité (Le flair)
+    'maj_streak', (select coalesce(max(c), 0) from (
+        select count(*) as c from (
+          select maj, o - row_number() over (partition by maj order by o) as grp from h) x
+         where maj group by grp) y),
     'rounds', (p_state->>'total_rounds')::integer,
     -- manches sans point (hors majorité ; une manche sans vote compte aussi)
     'off_majority', greatest(0, (p_state->>'total_rounds')::integer - coalesce((p_state->'scores'->>p_pl)::integer, 0)),
@@ -1426,7 +1432,24 @@ begin
              'survived', case when alive then 1 else 0 end,
              'won_civil', case when won and role = 'civil' then 1 else 0 end,
              'won_mrwhite', case when won and role = 'mrwhite' then 1 else 0 end,
-             'won_infiltre', case when won and role in ('undercover', 'mrwhite') then 1 else 0 end))
+             'won_infiltre', case when won and role in ('undercover', 'mrwhite') then 1 else 0 end,
+             -- votes (server.vote_log) : civil -> civil, tout vote contre un infiltré, tous les votes sur des infiltrés
+             'civil_vs_civil', (select count(*) from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v
+                                where v.key = pl and role = 'civil' and v_roles->>v.value = 'civil'),
+             'infiltre_votes', (select count(*) from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v
+                                where v.key = pl and v_roles->>v.value in ('undercover', 'mrwhite')),
+             -- Sherlock : au moins 2 votes et tous contre un infiltré
+             'sherlock', (select case when count(*) >= 2 and bool_and(v_roles->>v.value in ('undercover', 'mrwhite'))
+                                      then 1 else 0 end
+                            from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                 jsonb_each_text(l.value) v where v.key = pl),
+             -- Insoupçonnable : victoire en undercover sans aucun vote reçu pendant toute la partie
+             'insoupconnable', case when won and role = 'undercover'
+                                     and not exists (select 1 from jsonb_array_elements(coalesce(p_server->'vote_log', '[]'::jsonb)) l,
+                                                          jsonb_each_text(l.value) v where v.value = pl)
+                                    then 1 else 0 end))
          order by placement, pl)
     into v_results
     from ranked;
@@ -1455,6 +1478,9 @@ declare
   v_role    text;
   v_rec     jsonb;
 begin
+  -- Journal des votes (trophées) : reste dans server, croisé avec les rôles seulement en fin de partie.
+  p_server := p_server || jsonb_build_object('vote_log',
+    coalesce(p_server->'vote_log', '[]'::jsonb) || jsonb_build_array(v_votes));
   select jsonb_object_agg(c, (select count(*)::integer from jsonb_each_text(v_votes) v where v.value = c))
     into v_counts from unnest(v_cands) c;
   select max(value::integer) into v_max from jsonb_each_text(v_counts);

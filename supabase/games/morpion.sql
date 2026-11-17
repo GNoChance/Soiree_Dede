@@ -199,7 +199,10 @@ begin
     'boards', v_boards,
     'next', case when v_ult and v_out is null then v_next end);
   if v_out = 'win' then
-    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : compteurs de fin de manche pour les trophées (L'ombre : Ultime gagné sans perdre un petit morpion)
+    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object('clean_ultimate',
+        v_ult and not exists (select 1 from jsonb_array_elements_text(v_boards) b where b = case v_sym when 'x' then 'o' else 'x' end)));
   end if;
   return jsonb_build_object('board', p_board, 'outcome', v_out);
 end $$;
@@ -239,7 +242,10 @@ as $$
     'win_ultimate', case when v.variant = 'ultimate' and v.wins >= 1 then 1 else 0 end,
     'classic_second_win', case when v.variant = 'classic' then (select count(*) from g where won and not i_started) else 0 end,
     'giant_fast_win', case when v.variant = 'giant' then (select count(*) from g where won and moves <= 13) else 0 end,
-    'ultimate_duel_wins', case when v.variant = 'ultimate' then v.wins else 0 end)
+    'ultimate_duel_wins', case when v.variant = 'ultimate' then v.wins else 0 end,
+    'clean_ultimate', case when v.variant = 'ultimate'
+        then (select count(*) from public._duel_games_x(p_state, p_pl) x
+               where x.won and coalesce((x.g->>'clean_ultimate')::boolean, false)) else 0 end)
   from v
 $$;
 revoke all on function public.game_morpion_trophy_stats(jsonb, text) from public, anon, authenticated;

@@ -94,7 +94,7 @@ Colonne « Donnée » des tableaux :
 | 5 | `qdn_bon_public` | Bon public | 60 points en cumul | OK (points) ✅ |
 | 6 | `qdn_invisible` | L'invisible | Finir une partie (8 manches min.) sans recevoir un seul vote | OK (`stats.designated` = 0) + FIN (nb de manches) ✅ |
 | 7 | `qdn_chouchou` | Le chouchou | Recevoir 30 votes en cumul | OK (`stats.designated`) ✅ |
-| 8 | `qdn_flair` | Le flair | Voter avec la majorité 5 manches d'affilée | NEW (`best_streak`, mis à jour à chaque révélation) ⏳ |
+| 8 | `qdn_flair` | Le flair | Voter avec la majorité 5 manches d'affilée | PHASE 2 (`best_streak`, mis à jour à chaque révélation) ✅ |
 | 9 | `qdn_plebiscite` | Plébiscite | Être le plus désigné sur 5 manches d'une même partie | FIN (`history[].majority`) ✅ |
 | 10 | `qdn_star_de_la_soiree` | Star de la soirée | Être le joueur le plus désigné de la partie, 3 fois (cumul) | FIN (`designated`) ✅ |
 | 11 | `qdn_telepathe` | Télépathe | 8 points ou plus sur une partie de 10 manches | OK (points) + FIN (nb de manches) ✅ |
@@ -106,14 +106,14 @@ Colonne « Donnée » des tableaux :
 |---|---|---|---|---|
 | 2 | `uc_grille` | Grillé ! | Être éliminé en premier | OK (`stats.undercover_first_out`) ✅ |
 | 3 | `uc_erreur_judiciaire` | Erreur judiciaire | Être éliminé en étant civil, 3 fois (cumul) | FIN (`roles`, `eliminated`) ✅ |
-| 4 | `uc_bavure` | La bavure | En civil, voter contre un autre civil 5 fois (cumul) | NEW (`wrong_votes`, à chaque dépouillement) ⏳ |
-| 5 | `uc_fin_limier` | Fin limier | Voter contre un infiltré 5 fois (cumul) | NEW (`good_votes`) ⏳ |
+| 4 | `uc_bavure` | La bavure | En civil, voter contre un autre civil 5 fois (cumul) | PHASE 2 (`wrong_votes`, à chaque dépouillement) ✅ |
+| 5 | `uc_fin_limier` | Fin limier | Voter contre un infiltré 5 fois (cumul) | PHASE 2 (`good_votes`) ✅ |
 | 6 | `uc_planque` | La planque | Être encore en vie à la fin de 5 parties (cumul) | FIN (`eliminated`) ✅ |
 | 7 | `uc_bon_citoyen` | Bon citoyen | Gagner 5 parties en civil (cumul) | FIN (`role` déjà dans `results`, à mettre dans `stats`) ✅ |
 | 8 | `uc_taupe` | La taupe | Gagner 2 parties en undercover (cumul) | OK (`stats.undercover_won_as_undercover`) ✅ |
 | 9 | `uc_page_blanche` | Page blanche | Gagner une partie en Mister White | FIN (`roles`, `winner`) ✅ |
-| 10 | `uc_sherlock` | Sherlock | En une partie, voter contre un infiltré à chaque vote (2 votes min.) | NEW (`good_votes` = `votes_cast`) ⏳ |
-| 11 | `uc_insoupconnable` | Insoupçonnable | Gagner en undercover sans recevoir un seul vote de la partie | NEW (`votes_received`) ⏳ |
+| 10 | `uc_sherlock` | Sherlock | En une partie, voter contre un infiltré à chaque vote (2 votes min.) | PHASE 2 (`good_votes` = `votes_cast`) ✅ |
+| 11 | `uc_insoupconnable` | Insoupçonnable | Gagner en undercover sans recevoir un seul vote de la partie | PHASE 2 (`votes_received`) ✅ |
 | 12 | `uc_agent_double` | Agent double | Gagner 5 parties en infiltré, undercover ou Mister White (cumul) | FIN (`roles`, `winner`) ✅ |
 
 ### Croupier 🃏 — Pas de bol ! (`pas-de-bol`)
@@ -123,15 +123,15 @@ Le journal public (`log`) ne garde que les 12 dernières entrées : presque tout
 | Slot | id | Nom | Condition | Donnée |
 |---|---|---|---|---|
 | 2 | `pdb_pas_de_bol` | Vraiment pas de bol | Finir dernier (le dernier avec des cartes) | OK (placement / `loser`) ✅ |
-| 3 | `pdb_addition_salee` | L'addition salée | Piocher 6 cartes ou plus d'un coup (cumul de +2 / +4) | NEW (`max_draw`) ⏳ |
-| 4 | `pdb_etourdi` | L'étourdi | Se faire dénoncer pour un « Dernière carte ! » oublié | NEW (`denounced`) ⏳ |
-| 5 | `pdb_beau_jeu` | Beau jeu | Poser 5 cartes spéciales en une partie (+2, +4, joker, sens, passe, perso) | NEW (`specials`) ⏳ |
-| 6 | `pdb_main_pleine` | Les mains pleines | Avoir 12 cartes ou plus en main | NEW (`max_hand`) ⏳ |
-| 7 | `pdb_genereux` | Trop généreux | Faire piocher 20 cartes aux autres (cumul) | NEW (`cards_given`) ⏳ |
-| 8 | `pdb_balance` | La balance | Dénoncer 3 oublis de « Dernière carte ! » (cumul) | NEW (`denounces`) ⏳ |
-| 9 | `pdb_retour_envoyeur` | Retour à l'envoyeur | Renvoyer un +2 / +4 en cumulant dessus, 5 fois (cumul) | NEW (`stacks`) ⏳ |
-| 10 | `pdb_main_propre` | Main propre | Sortir premier en ayant pioché 2 cartes au plus de toute la partie | NEW (`drawn`) + OK (placement) ⏳ |
-| 11 | `pdb_remontada` | Remontada | Sortir premier après avoir eu 10 cartes ou plus en main | NEW (`max_hand`) + OK (placement) ⏳ |
+| 3 | `pdb_addition_salee` | L'addition salée | Piocher 6 cartes ou plus d'un coup (cumul de +2 / +4) | PHASE 2 (`max_draw`) ✅ |
+| 4 | `pdb_etourdi` | L'étourdi | Se faire dénoncer pour un « Dernière carte ! » oublié | PHASE 2 (`denounced`) ✅ |
+| 5 | `pdb_beau_jeu` | Beau jeu | Poser 5 cartes spéciales en une partie (+2, +4, joker, sens, passe, perso) | PHASE 2 (`specials`) ✅ |
+| 6 | `pdb_main_pleine` | Les mains pleines | Avoir 12 cartes ou plus en main | PHASE 2 (`max_hand`) ✅ |
+| 7 | `pdb_genereux` | Trop généreux | Faire piocher 20 cartes aux autres (cumul) | PHASE 2 (`cards_given`) ✅ |
+| 8 | `pdb_balance` | La balance | Dénoncer 3 oublis de « Dernière carte ! » (cumul) | PHASE 2 (`denounces`) ✅ |
+| 9 | `pdb_retour_envoyeur` | Retour à l'envoyeur | Renvoyer un +2 / +4 en cumulant dessus, 5 fois (cumul) | PHASE 2 (`stacks`) ✅ |
+| 10 | `pdb_main_propre` | Main propre | Sortir premier en ayant pioché 2 cartes au plus de toute la partie | PHASE 2 (`drawn`) + OK (placement) ✅ |
+| 11 | `pdb_remontada` | Remontada | Sortir premier après avoir eu 10 cartes ou plus en main | PHASE 2 (`max_hand`) + OK (placement) ✅ |
 | 12 | `pdb_main_chaude` | Main chaude | Sortir premier 3 parties de suite | OK (historique `match_players` du jeu, par date) ✅ |
 
 ### Prof 🎓 — Cerveau en fête (`cerveau-en-fete`)
@@ -158,13 +158,13 @@ Le détail des réponses n'existe que pour la dernière manche (`last_round`) : 
 
 | Slot | id | Nom | Condition | Donnée |
 |---|---|---|---|---|
-| 2 | `pb_recale` | Recalé ! | Se faire refuser 3 réponses par le vote des autres (cumul) | NEW (`refused`) ⏳ |
+| 2 | `pb_recale` | Recalé ! | Se faire refuser 3 réponses par le vote des autres (cumul) | PHASE 2 (`refused`) ✅ |
 | 3 | `pb_page_blanche` | Page blanche | Marquer 0 point sur une manche | FIN (`history[].points`) ✅ |
-| 4 | `pb_copieur` | Le copieur | 10 réponses partagées avec un autre joueur (cumul) | NEW (`shared`) ⏳ |
+| 4 | `pb_copieur` | Le copieur | 10 réponses partagées avec un autre joueur (cumul) | PHASE 2 (`shared`) ✅ |
 | 5 | `pb_original` | L'original | 20 réponses uniques (cumul) | FIN (`uniques`) ✅ |
-| 6 | `pb_panne_seche` | Panne sèche | Laisser 3 cases vides sur une même manche | NEW (`max_empty`) ⏳ |
-| 7 | `pb_grille_pleine` | Grille pleine | Remplir toutes les cases d'une manche avec des réponses acceptées | NEW (`full_rounds`) ⏳ |
-| 8 | `pb_avocat` | L'avocat | Contester 5 réponses qui finissent refusées (cumul) | NEW (`contests_ok`) ⏳ |
+| 6 | `pb_panne_seche` | Panne sèche | Laisser 3 cases vides sur une même manche | PHASE 2 (`max_empty`) ✅ |
+| 7 | `pb_grille_pleine` | Grille pleine | Remplir toutes les cases d'une manche avec des réponses acceptées | PHASE 2 (`full_rounds`) ✅ |
+| 8 | `pb_avocat` | L'avocat | Contester 5 réponses qui finissent refusées (cumul) | PHASE 2 (`contests_ok`) ✅ |
 | 9 | `pb_carton_plein` | Carton plein | Une manche avec uniquement des réponses uniques (2 pts partout) | FIN (points de la manche = 2 × nb de catégories) ✅ |
 | 10 | `pb_meilleure_copie` | Meilleure copie | Avoir le meilleur score de la manche 10 fois (cumul) | FIN (`history[].points`) ✅ |
 | 11 | `pb_regulier` | Élève régulier | Marquer au moins 8 points à chaque manche d'une partie (3 manches min.) | FIN (`history[].points`) ✅ |
@@ -178,14 +178,14 @@ Le détail des réponses n'existe que pour la dernière manche (`last_round`) : 
 |---|---|---|---|---|
 | 2 | `dd_gribouillis` | Gribouillis | Dessiner un mot que personne ne trouve | FIN (`history[].found` vide) ✅ |
 | 3 | `dd_dans_le_flou` | Dans le flou | Ne pas trouver 3 dessins de suite | FIN (`history`) ✅ |
-| 4 | `dd_presque` | Presque ! | Recevoir 5 « Presque ! » (cumul) | NEW (`close`) ⏳ |
+| 4 | `dd_presque` | Presque ! | Recevoir 5 « Presque ! » (cumul) | PHASE 2 (`close`) ✅ |
 | 5 | `dd_oeil_de_lynx` | Œil de lynx | Trouver 25 mots (cumul) | FIN (`found_count`) ✅ |
-| 6 | `dd_in_extremis` | In extremis | Trouver un mot dans les 5 dernières secondes | NEW (`late_finds`) ⏳ |
+| 6 | `dd_in_extremis` | In extremis | Trouver un mot dans les 5 dernières secondes | PHASE 2 (`late_finds`) ✅ |
 | 7 | `dd_limpide` | Limpide | Tout le monde trouve ton dessin, 3 fois (cumul) | FIN (`history`) ✅ |
 | 8 | `dd_premier_servi` | Premier servi | Être le premier à trouver 10 fois (cumul) | FIN (`history[].found[0]`) ✅ |
-| 9 | `dd_eclair` | Coup d'œil | Trouver un mot en moins de 10 s | NEW (`fast_finds`) ⏳ |
-| 10 | `dd_sans_indice` | Sans indice | Trouver avant la première lettre révélée, 5 fois (cumul) | NEW (`no_hint_finds`) ⏳ |
-| 11 | `dd_defi_releve` | Défi relevé | Faire deviner un mot difficile (niveau 3) à tous les joueurs | NEW (difficulté du mot à ajouter au résumé du tour) ⏳ |
+| 9 | `dd_eclair` | Coup d'œil | Trouver un mot en moins de 10 s | PHASE 2 (`fast_finds`) ✅ |
+| 10 | `dd_sans_indice` | Sans indice | Trouver avant la première lettre révélée, 5 fois (cumul) | PHASE 2 (`no_hint_finds`) ✅ |
+| 11 | `dd_defi_releve` | Défi relevé | Faire deviner un mot difficile (niveau 3) à tous les joueurs | PHASE 2 (difficulté du mot à ajouter au résumé du tour) ✅ |
 | 12 | `dd_chef_d_oeuvre` | Chef-d'œuvre | En une partie (4 joueurs min.) : tout le monde trouve tous tes dessins et tu trouves tous ceux des autres | FIN (`history`) ✅ |
 
 ### Loup 🐺 — Loup-garou (`loup-garou`)
@@ -216,8 +216,8 @@ Le state final est très riche (`roles`, `dead`, `history` des votes, `chronicle
 | 5 | `bam_dico` | Le dico | 100 mots validés (cumul) | FIN (`word_counts`, non plafonné contrairement aux points) ✅ |
 | 6 | `bam_mot_a_rallonge` | Mot à rallonge | Valider un mot de 12 lettres ou plus | FIN (`words`) ✅ |
 | 7 | `bam_abecedaire` | L'abécédaire | Compléter l'alphabet bonus | FIN (`bonuses`) ✅ |
-| 8 | `bam_patate_chaude` | Patate chaude | Valider un mot en moins de 2 s, 10 fois (cumul) | NEW (`fast_words`, via `turn_started_at`) ⏳ |
-| 9 | `bam_sueurs_froides` | Sueurs froides | Valider un mot à moins d'1 s de l'explosion | NEW (`close_calls`, l'heure d'explosion est côté serveur) ⏳ |
+| 8 | `bam_patate_chaude` | Patate chaude | Valider un mot en moins de 2 s, 10 fois (cumul) | PHASE 2 (`fast_words`, via `turn_started_at`) ✅ |
+| 9 | `bam_sueurs_froides` | Sueurs froides | Valider un mot à moins d'1 s de l'explosion | PHASE 2 (`close_calls`, l'heure d'explosion est côté serveur) ✅ |
 | 10 | `bam_survivant` | Sur un fil | Gagner avec une seule vie restante | FIN (`lives`, `winner`) ✅ |
 | 11 | `bam_intouchable` | Intouchable | Gagner sans perdre une seule vie (3 joueurs min.) | FIN (`explosions`, `winner`) ✅ |
 | 12 | `bam_marathon` | Moulin à paroles | 20 mots validés en une partie | FIN (`word_counts`) ✅ |
@@ -234,7 +234,7 @@ Le state final est très riche (`roles`, `dead`, `history` des votes, `chronicle
 | 5 | `mtr_detecteur` | Détecteur de mensonges | Crier « Menteur ! » à raison 10 fois (cumul) | FIN (`history`) ✅ |
 | 6 | `mtr_dernier_de` | Le dernier dé | Gagner la partie avec un seul dé restant | FIN (`dice_count`, `winner`) ✅ |
 | 7 | `mtr_pile` | Pile ! | Réussir un « Pile ! » exact (option activée) | FIN (`history` : `kind = pile`, pas de perdant) ✅ |
-| 8 | `mtr_bluff` | Coup de bluff | Ton enchère est contestée, elle est vraie, et tu n'avais aucun dé de cette valeur ni joker | NEW (`pure_bluffs`, calculé à la révélation) ⏳ |
+| 8 | `mtr_bluff` | Coup de bluff | Ton enchère est contestée, elle est vraie, et tu n'avais aucun dé de cette valeur ni joker | PHASE 2 (`pure_bluffs`, calculé à la révélation) ✅ |
 | 9 | `mtr_pile_poil` | Pile-poil | Ton enchère contestée tombe exactement juste, 3 fois (cumul) | FIN (`count = bid.qty`) ✅ |
 | 10 | `mtr_grosse_voix` | Grosse voix | Une enchère de 8 dés ou plus, contestée, qui s'avère vraie | FIN (`history[].bid`) ✅ |
 | 11 | `mtr_revenant` | Le revenant | Gagner après être tombé à un seul dé alors qu'il restait 3 joueurs ou plus | FIN (rejouer `history` : perdant / gagnant / éliminé) ✅ |
@@ -270,7 +270,7 @@ Les feuilles de score complètes (`sheets`) sont dans le state final : tout est 
 | 5 | `tp_sondeur` | Le sondeur | 30 paris justes (cumul) | OK (`bets_ok`) ✅ |
 | 6 | `tp_mouton` | Le mouton | Choisir comme la majorité 30 fois (cumul) | OK (`norm`) ✅ |
 | 7 | `tp_tous_d_accord` | Tous d'accord | Une manche à l'unanimité (3 joueurs min.), 3 fois (cumul) | FIN (`history[].counts`) ✅ |
-| 8 | `tp_rebelle_lucide` | Rebelle lucide | Être seul de son avis et gagner son pari sur la même manche | NEW (`rebel_right`, calculé à la révélation) ⏳ |
+| 8 | `tp_rebelle_lucide` | Rebelle lucide | Être seul de son avis et gagner son pari sur la même manche | PHASE 2 (`rebel_right`, calculé à la révélation) ✅ |
 | 9 | `tp_rebelle_en_serie` | Rebelle en série | Être seul de son avis 3 fois en une partie | OK (`rebel`) ✅ |
 | 10 | `tp_devin` | Le devin | 8 paris justes en une partie (10 manches min.) | OK (`bets_ok`) + FIN (nb de manches) ✅ |
 | 11 | `tp_anticonformiste` | Anticonformiste | Gagner une partie en ayant été minoritaire plus d'une manche sur deux | OK (`won`, `norm`, `answered`) ✅ |
@@ -291,7 +291,7 @@ Les feuilles de score complètes (`sheets`) sont dans le state final : tout est 
 | 8 | `qsj_tac_tac` | Tac tac tac | 5 cartes trouvées d'affilée sans passer | FIN (`history[].log`) ✅ |
 | 9 | `qsj_rafale` | En rafale | 8 cartes trouvées en un seul tour | FIN (`history[].found`) ✅ |
 | 10 | `qsj_valeur_sure` | Valeur sûre | Au moins 5 cartes à chacun de ses tours (2 tours min.) | FIN (`history`) ✅ |
-| 11 | `qsj_cinephile` | Le cinéphile | Trouver 10 cartes difficiles (niveau 3, cumul) | NEW (`hard_found` : la difficulté n'est pas dans le résumé du tour) ⏳ |
+| 11 | `qsj_cinephile` | Le cinéphile | Trouver 10 cartes difficiles (niveau 3, cumul) | PHASE 2 (`hard_found` : la difficulté n'est pas dans le résumé du tour) ✅ |
 | 12 | `qsj_tapis_rouge` | Tapis rouge | 12 cartes trouvées en un seul tour | FIN (`history[].found`) ✅ |
 
 ### Archer 🏹 — Le plus proche (`le-plus-proche`)
@@ -323,9 +323,9 @@ Les feuilles de score complètes (`sheets`) sont dans le state final : tout est 
 | 4 | `aov_siffle` | Sifflé | Recevoir 10 👎 (cumul) | OK (`thumbs_down`) ✅ |
 | 5 | `aov_franc_jeu` | Franc-jeu | Choisir « Vérité » 10 fois (cumul) | OK (`verites`) ✅ |
 | 6 | `aov_chouchou_de_la_roue` | Chouchou de la roue | Être désigné 5 fois par la roue en une partie | OK (`turns`) ✅ |
-| 7 | `aov_ovation` | Ovation | Réussir un défi à l'unanimité (3 votants min.) | NEW (`unanimous`, calculé au verdict) ⏳ |
+| 7 | `aov_ovation` | Ovation | Réussir un défi à l'unanimité (3 votants min.) | PHASE 2 (`unanimous`, calculé au verdict) ✅ |
 | 8 | `aov_casse_cou` | Casse-cou | Choisir « Action » 15 fois (cumul) | OK (`actions`) ✅ |
-| 9 | `aov_niveau_3` | Même pas peur | Réussir une carte de niveau 3 | NEW (`hard_success` : le niveau n'est pas dans l'historique) ⏳ |
+| 9 | `aov_niveau_3` | Même pas peur | Réussir une carte de niveau 3 | PHASE 2 (`hard_success` : le niveau n'est pas dans l'historique) ✅ |
 | 10 | `aov_applaudi` | Applaudimètre | Recevoir 50 👍 (cumul) | OK (`thumbs_up`) ✅ |
 | 11 | `aov_jamais_degonfle` | Jamais dégonflé | 3 parties sans aucun refus (2 tours min. par partie, cumul) | OK (`refusals`, `turns`) ✅ |
 | 12 | `aov_standing_ovation` | Standing ovation | En une partie : 5 tours ou plus, tous réussis | OK (`success = turns`) ✅ |
@@ -337,14 +337,14 @@ Le détail des passages n'est pas conservé (seul `last_turn` l'est) : compteurs
 | Slot | id | Nom | Condition | Donnée |
 |---|---|---|---|---|
 | 2 | `dee_sur_le_banc` | Sur le banc | Perdre 3 parties avec son équipe (cumul) | OK (`won`) ✅ |
-| 3 | `dee_bredouille` | Bredouille | Finir un passage d'orateur sans aucun mot trouvé | NEW (`empty_turns`) ⏳ |
-| 4 | `dee_suivant` | Suivant ! | Passer 3 mots dans un même passage | NEW (`max_passed`) ⏳ |
+| 3 | `dee_bredouille` | Bredouille | Finir un passage d'orateur sans aucun mot trouvé | PHASE 2 (`empty_turns`) ✅ |
+| 4 | `dee_suivant` | Suivant ! | Passer 3 mots dans un même passage | PHASE 2 (`max_passed`) ✅ |
 | 5 | `dee_orateur` | Belle éloquence | Faire deviner 30 mots (cumul) | OK (`stats.found`) ✅ |
-| 6 | `dee_mime` | Roi du mime | Faire deviner 5 mots en manche Mime (cumul) | NEW (`found_r3`) ⏳ |
+| 6 | `dee_mime` | Roi du mime | Faire deviner 5 mots en manche Mime (cumul) | PHASE 2 (`found_r3`) ✅ |
 | 7 | `dee_pilier` | Pilier de l'équipe | Être le meilleur orateur de son équipe 3 fois (cumul) | FIN (`speaker_points`, `teams`) ✅ |
-| 8 | `dee_un_seul_mot` | En un mot | 4 mots trouvés dans un passage de la manche « Un seul mot » | NEW (`best_r2`) ⏳ |
-| 9 | `dee_du_rab` | Du rab | Vider la pioche et garder du temps pour la manche suivante | NEW (`carries`) ⏳ |
-| 10 | `dee_rafale` | La rafale | 6 mots trouvés en un seul passage | NEW (`best_turn`) ⏳ |
+| 8 | `dee_un_seul_mot` | En un mot | 4 mots trouvés dans un passage de la manche « Un seul mot » | PHASE 2 (`best_r2`) ✅ |
+| 9 | `dee_du_rab` | Du rab | Vider la pioche et garder du temps pour la manche suivante | PHASE 2 (`carries`) ✅ |
+| 10 | `dee_rafale` | La rafale | 6 mots trouvés en un seul passage | PHASE 2 (`best_turn`) ✅ |
 | 11 | `dee_trois_manches` | Carton plein | Son équipe gagne les 3 manches d'une partie | FIN (`round_scores`) ✅ |
 | 12 | `dee_mvp` | MVP | Gagner en étant le meilleur orateur des deux équipes avec 10 mots ou plus | FIN (`speaker_points`) + OK (`won`) ✅ |
 
@@ -361,8 +361,8 @@ Une session = un match. `session.stats` (`played`, `wins`, `draws`, `losses`, `b
 | 4 | `q4_grille_pleine` | Grille pleine | Faire match nul (grille pleine) | FIN (`draws`) ✅ |
 | 5 | `q4_parieur` | Le parieur | Gagner 10 paris en spectateur (cumul) | FIN (`bets_won`) ✅ |
 | 6 | `q4_marathon` | Guerre des nerfs | Gagner une manche de 36 jetons ou plus | FIN (`games[].moves`) ✅ |
-| 7 | `q4_diagonale` | En diagonale | Gagner 3 manches par une diagonale (cumul) | NEW (`diag_wins`, lu sur `board.line`) ⏳ |
-| 8 | `q4_double_menace` | Double menace | Gagner avec deux alignements à la fois, ou 5 jetons alignés | NEW (`double_wins`, lu sur `board.line`) ⏳ |
+| 7 | `q4_diagonale` | En diagonale | Gagner 3 manches par une diagonale (cumul) | PHASE 2 (`diag_wins`, lu sur `board.line`) ✅ |
+| 8 | `q4_double_menace` | Double menace | Gagner avec deux alignements à la fois, ou 5 jetons alignés | PHASE 2 (`double_wins`, lu sur `board.line`) ✅ |
 | 9 | `q4_express` | Express | Gagner une manche en 12 jetons ou moins (au total) | FIN (`games[].moves`) ✅ |
 | 10 | `q4_trois_a_la_suite` | 3 à la suite | Gagner 3 duels d'affilée dans une session | FIN (`history`) ✅ |
 | 11 | `q4_champion` | Champion de la table | Finir premier d'une session de 4 joueurs ou plus, 2 fois (cumul) | OK (`won`) + FIN (nb de joueurs) ✅ |
@@ -383,7 +383,7 @@ La variante (`classic` / `giant` / `ultimate`) est dans `session.board_options`.
 | 8 | `mor_contre_attaque` | Contre-attaque | Gagner une manche en classique en jouant ⭕ (en second) | FIN (`games[].starter ≠ winner`) ✅ |
 | 9 | `mor_eclair` | L'éclair | Gagner une manche en Géant en 13 coups ou moins (au total) | FIN (`games[].moves`) ✅ |
 | 10 | `mor_ultime` | Maître de l'Ultime | Gagner 3 duels en Ultime (cumul) | FIN (`history`, variante) ✅ |
-| 11 | `mor_ombre` | L'ombre | Gagner une manche en Ultime sans perdre un seul petit morpion | NEW (`clean_ultimate`, lu sur `board.boards`) ⏳ |
+| 11 | `mor_ombre` | L'ombre | Gagner une manche en Ultime sans perdre un seul petit morpion | PHASE 2 (`clean_ultimate`, lu sur `board.boards`) ✅ |
 | 12 | `mor_ninja` | Insaisissable | Gagner 4 duels d'affilée dans une session | FIN (`history`) ✅ |
 
 ### Amiral ⚓ — Bataille navale (`bataille-navale`)
@@ -392,17 +392,17 @@ La variante (`classic` / `giant` / `ultimate`) est dans `session.board_options`.
 
 | Slot | id | Nom | Condition | Donnée |
 |---|---|---|---|---|
-| 2 | `bn_plouf` | Plouf plouf | 10 tirs à l'eau d'affilée | NEW (`miss_streak`, seule la série de touchés est suivie) ⏳ |
-| 3 | `bn_naufrage` | Naufrage total | Perdre une manche sans couler un seul bateau adverse | NEW (report de `waters[adversaire].left`) ⏳ |
-| 4 | `bn_si_pres` | Si près du but | Perdre alors qu'il ne restait qu'un bateau adverse | NEW (report de `waters[adversaire].left`) ⏳ |
-| 5 | `bn_canonnier` | Le canonnier | 100 tirs touchés (cumul) | NEW (report de `board.stats.hits`) ⏳ |
-| 6 | `bn_guerre_d_usure` | Guerre d'usure | Gagner une manche de 120 tirs ou plus (au total) | NEW (report de `board.count`) ⏳ |
+| 2 | `bn_plouf` | Plouf plouf | 10 tirs à l'eau d'affilée | PHASE 2 (`miss_streak`, seule la série de touchés est suivie) ✅ |
+| 3 | `bn_naufrage` | Naufrage total | Perdre une manche sans couler un seul bateau adverse | PHASE 2 (report de `waters[adversaire].left`) ✅ |
+| 4 | `bn_si_pres` | Si près du but | Perdre alors qu'il ne restait qu'un bateau adverse | PHASE 2 (report de `waters[adversaire].left`) ✅ |
+| 5 | `bn_canonnier` | Le canonnier | 100 tirs touchés (cumul) | PHASE 2 (report de `board.stats.hits`) ✅ |
+| 6 | `bn_guerre_d_usure` | Guerre d'usure | Gagner une manche de 120 tirs ou plus (au total) | PHASE 2 (report de `board.count`) ✅ |
 | 7 | `bn_parieur` | Le parieur | Gagner 10 paris en spectateur (cumul) | FIN (`bets_won`) ✅ |
-| 8 | `bn_premier_tir` | Du premier coup | Toucher au tout premier tir d'une manche, 3 fois (cumul) | NEW (`first_shot_hits`) ⏳ |
-| 9 | `bn_rafale` | En rafale | 5 touchés d'affilée | NEW (report de `board.stats.best`) ⏳ |
-| 10 | `bn_precision` | Tireur d'élite | Gagner une manche avec 40 % de tirs touchés ou plus | NEW (report de `hits / shots`) ⏳ |
-| 11 | `bn_eclair` | Guerre éclair | Gagner une manche en 40 tirs ou moins | NEW (report de `board.stats.shots`) ⏳ |
-| 12 | `bn_flotte_intacte` | Flotte intacte | Gagner une manche sans perdre un seul bateau | NEW (report de `waters[moi].left` = 5) ⏳ |
+| 8 | `bn_premier_tir` | Du premier coup | Toucher dès son premier tir d'une manche, 3 fois (cumul) | PHASE 2 (`first_shot_hits` : son propre premier tir de la manche, pas seulement le tout premier de la manche) ✅ |
+| 9 | `bn_rafale` | En rafale | 5 touchés d'affilée | PHASE 2 (report de `board.stats.best`) ✅ |
+| 10 | `bn_precision` | Tireur d'élite | Gagner une manche avec 40 % de tirs touchés ou plus | PHASE 2 (report de `hits / shots`) ✅ |
+| 11 | `bn_eclair` | Guerre éclair | Gagner une manche en 40 tirs ou moins | PHASE 2 (report de `board.stats.shots`) ✅ |
+| 12 | `bn_flotte_intacte` | Flotte intacte | Gagner une manche sans perdre un seul bateau | PHASE 2 (report de `waters[moi].left` = 5) ✅ |
 
 ### Magnat 🎩 — Le Tour des Potes (`tour-des-potes`)
 
@@ -428,13 +428,13 @@ La variante (`classic` / `giant` / `ultimate`) est dans `session.board_options`.
 
 | Slot | id | Nom | Condition | Donnée |
 |---|---|---|---|---|
-| 2 | `dk_tete_a_queue` | Tête-à-queue | Se faire toucher 5 fois par une boule ou une glue (cumul) | NEW (`hits_taken`, sur l'action `hit` de la victime) ⏳ |
+| 2 | `dk_tete_a_queue` | Tête-à-queue | Se faire toucher 5 fois par une boule ou une glue (cumul) | PHASE 2 (`hits_taken`, sur l'action `hit` de la victime) ✅ |
 | 3 | `dk_lanterne_rouge` | Lanterne rouge | Finir dernier d'une course (4 karts min.) | FIN (`standings`) ✅ |
 | 4 | `dk_panne` | En panne | Ne pas franchir la ligne avant la fin d'une course | FIN (`places[].time` nul) ✅ |
 | 5 | `dk_podium` | Sur le podium | 10 podiums (4 karts min., cumul) | FIN (`standings`) ✅ |
 | 6 | `dk_tireur` | Fine gâchette | Toucher 10 karts avec une boule ou une glue (cumul) | FIN (`hits`) ✅ |
 | 7 | `dk_touriste` | Tour du monde | Gagner une course sur chacun des 3 circuits (cumul) | FIN (3 drapeaux `win_track_1..3`) ✅ |
-| 8 | `dk_coup_bas` | Coups bas | Utiliser au moins une fois le nuage, les confettis et le demi-tour (cumul) | NEW (`used_cloud`, `used_confetti`, `used_reverse`, sur l'action `use`) ⏳ |
+| 8 | `dk_coup_bas` | Coups bas | Utiliser au moins une fois le nuage, les confettis et le demi-tour (cumul) | PHASE 2 (`used_cloud`, `used_confetti`, `used_reverse`, sur l'action `use`) ✅ |
 | 9 | `dk_remontada` | Remontada | En coupe, gagner une course après avoir fini hors du podium à la précédente | FIN (`standings`) ✅ |
 | 10 | `dk_sniper` | Sniper | 5 touches réussies en une coupe | FIN (`hits`) ✅ |
 | 11 | `dk_echappee` | L'échappée | Gagner une course avec 5 s d'avance ou plus sur le 2e | FIN (`places[].time`) ✅ |
@@ -455,7 +455,7 @@ Transverses, sans sticker de planche : récompense proposée = badge sur le prof
 | `gen_marathon` | Marathonien | Jouer 8 parties dans une même soirée | OK (`matches.soiree_id` + `match_players`) ✅ |
 | `gen_hote` | Hôte de la maison | Organiser 5 soirées menées à leur terme | OK (`soirees.host_id`) ✅ |
 | `gen_grande_tablee` | Grande tablée | Participer à une soirée de 6 joueurs ou plus | OK (`soiree_players`) ✅ |
-| `gen_pipelette` | Pipelette | Envoyer 50 stickers dans le chat | NEW (`player_stats.stickers_sent` : les messages sont purgés en fin de soirée) ⏳ |
+| `gen_pipelette` | Pipelette | Envoyer 50 stickers dans le chat | PHASE 2 (`player_stats.stickers_sent` : les messages sont purgés en fin de soirée) ✅ |
 | `gen_garde_robe` | Garde-robe | Débloquer 5 tenues | OK (`tenue_unlocks`) ✅ |
 | `gen_collectionneur` | Collectionneur | Compléter une planche de tenue (les 11 trophées) | OK (`trophy_unlocks`) ✅ |
 
@@ -494,6 +494,16 @@ Nouveaux compteurs à incrémenter en cours de partie (NEW) :
 | général | `player_stats.stickers_sent` |
 
 Sans nouveau compteur : `cerveau-en-fete`, `loup-garou`, `bowling`, `le-plus-proche`, `tour-des-potes`.
+
+### Phase 2 : réalisé (53 trophées branchés, 230/230 actifs)
+
+Les noms de compteurs réellement implémentés diffèrent parfois de la liste ci-dessus (cf. les règles dans `features/trophees.sql`). Principes :
+
+- Compteurs simples accumulés dans `state.stats` / `state.tstat` (tu-preferes, action-ou-verite, devine-en-equipe, dede-kart) ou calculés à la fin depuis `history` (qui-de-nous, petit-bac, dessine-devine, menteur, qui-suis-je).
+- Infos secrètes (rôles et votes d'Undercover ; mains de Pas de bol ; heure d'explosion de la bombe) : accumulées dans `server` (`vote_log`, `pstats`, `fast_words`, `close_calls`), recopiées seulement dans `results[].stats` à la fin.
+- Duels : `board_move` peut renvoyer `game` (bilan de manche), rangé par le socle dans `duel.games[].x` puis relu par les hooks `game_<id>_trophy_stats` via `_duel_games_x`. Bataille navale : bilan par joueur et par manche (tirs, touchés, séries, bateaux restants).
+- Pipelette : colonne persistante `player_stats.stickers_sent` incrémentée par `send_soiree_message` (sticker), règle `special` nommée `stickers`, évaluée à l'envoi (`evaluate_trophy`, un seul trophée).
+- Reformulation : `bn_premier_tir` devient « Toucher dès son premier tir d'une manche » (le premier tir de chaque joueur compte, pas seulement le tout premier de la manche).
 
 ## 5. Points tranchés (validés par l'utilisateur)
 

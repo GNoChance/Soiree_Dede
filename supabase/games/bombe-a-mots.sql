@@ -148,7 +148,10 @@ begin
            'points', least(25, coalesce((p_state->'word_counts'->>pid)::integer, 0)),
            'won', pid = v_winner,
            'placement', o::integer,
-           'stats', public._bam_tstats(p_state, pid, v_winner)) order by o)
+           -- fast_words / close_calls : comptés dans server (l'heure d'explosion est secrète)
+           'stats', public._bam_tstats(p_state, pid, v_winner) || jsonb_build_object(
+             'fast_words', coalesce((p_server->'fast_words'->>pid)::integer, 0),
+             'close_calls', coalesce((p_server->'close_calls'->>pid)::integer, 0))) order by o)
     into v_results
     from jsonb_array_elements_text(v_ranked) with ordinality t(pid, o);
 
@@ -354,6 +357,17 @@ begin
     end if;
     p_state := p_state || jsonb_build_object('bonuses', coalesce(p_state->'bonuses', '[]'::jsonb)
       || jsonb_build_array(jsonb_build_object('p', v_me, 'n', v_n, 'life', v_bonus)));
+  end if;
+
+  -- Trophées : mot validé en moins de 2 s (Patate chaude) / à moins d'1 s de l'explosion (Sueurs froides).
+  if p_state->>'turn_started_at' is not null
+     and now() - (p_state->>'turn_started_at')::timestamptz < interval '2 seconds' then
+    p_server := p_server || jsonb_build_object('fast_words', coalesce(p_server->'fast_words', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_server->'fast_words'->>v_me)::integer, 0) + 1));
+  end if;
+  if v_explode is not null and v_explode - now() < interval '1 second' then
+    p_server := p_server || jsonb_build_object('close_calls', coalesce(p_server->'close_calls', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_server->'close_calls'->>v_me)::integer, 0) + 1));
   end if;
 
   v_next := public._bam_next(p_state, v_me);

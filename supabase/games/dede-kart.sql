@@ -110,6 +110,10 @@ as $$
     'dnf', count(*) filter (where me->>'time' is null),
     'podiums', count(*) filter (where nk >= 4 and place <= 3),
     'hits', coalesce((p_state->'hits'->>p_pl)::integer, 0),
+    'hits_taken', coalesce((p_state->'taken'->>p_pl)::integer, 0),
+    'used_cloud', coalesce((p_state->'used'->p_pl->>'cloud')::integer, 0),
+    'used_confetti', coalesce((p_state->'used'->p_pl->>'confetti')::integer, 0),
+    'used_reverse', coalesce((p_state->'used'->p_pl->>'reverse')::integer, 0),
     'win_track_1', count(*) filter (where place = 1 and track = 1),
     'win_track_2', count(*) filter (where place = 1 and track = 2),
     'win_track_3', count(*) filter (where place = 1 and track = 3),
@@ -312,6 +316,10 @@ begin
         'at', now())));
     else
       if jsonb_typeof(p_action->'targets') <> 'array' then raise exception 'invalid_action'; end if;
+      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour utilisés
+      p_state := p_state || jsonb_build_object('used', coalesce(p_state->'used', '{}'::jsonb) || jsonb_build_object(v_id,
+        coalesce(p_state->'used'->v_id, '{}'::jsonb) || jsonb_build_object(v_item,
+          coalesce((p_state->'used'->v_id->>v_item)::integer, 0) + 1)));
       for v_target in
         select distinct t from jsonb_array_elements_text(p_action->'targets') t
          where public._dk_racers(p_state) ? t and t <> v_id limit 11
@@ -335,6 +343,9 @@ begin
     p_state := p_state || jsonb_build_object(
       'hazards', coalesce((select jsonb_agg(h) from jsonb_array_elements(p_state->'hazards') h
                             where (h->>'id')::integer <> (p_action->>'hazard')::integer), '[]'::jsonb));
+    -- Trophées (Tête-à-queue) : touches subies par la victime
+    p_state := p_state || jsonb_build_object('taken', coalesce(p_state->'taken', '{}'::jsonb)
+                 || jsonb_build_object(v_id, coalesce((p_state->'taken'->>v_id)::integer, 0) + 1));
     if v_owner <> v_id then
       p_state := p_state || jsonb_build_object('hits', coalesce(p_state->'hits', '{}'::jsonb)
                    || jsonb_build_object(v_owner, coalesce((p_state->'hits'->>v_owner)::integer, 0) + 1));

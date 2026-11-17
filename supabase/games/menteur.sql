@@ -147,7 +147,7 @@ declare
   v_comeback boolean := false;
   v_lost    boolean := false;
   v_false_liar integer := 0; v_caught integer := 0; v_good_liar integer := 0;
-  v_exact integer := 0; v_big integer := 0; v_pile integer := 0;
+  v_exact integer := 0; v_big integer := 0; v_pile integer := 0; v_pure integer := 0;
   h         jsonb;
 begin
   for h in select value from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) loop
@@ -156,6 +156,7 @@ begin
       if h->'bid'->>'by' = p_pl and h->>'loser' = p_pl then v_caught := v_caught + 1; end if;
       if h->>'caller' = p_pl and h->>'loser' is not null and h->>'loser' <> p_pl then v_good_liar := v_good_liar + 1; end if;
       if h->'bid'->>'by' = p_pl and (h->>'count')::integer = (h->'bid'->>'qty')::integer then v_exact := v_exact + 1; end if;
+      if h->'bid'->>'by' = p_pl and coalesce((h->>'pure')::boolean, false) then v_pure := v_pure + 1; end if;
       if h->'bid'->>'by' = p_pl and (h->'bid'->>'qty')::integer >= 8
          and (h->>'count')::integer >= (h->'bid'->>'qty')::integer then v_big := v_big + 1; end if;
     elsif h->>'kind' = 'pile' and h->>'caller' = p_pl and h->>'loser' is null then
@@ -176,7 +177,7 @@ begin
     'first_out', case when p_state->'eliminated'->>0 = p_pl then 1 else 0 end,
     'false_liar', v_false_liar, 'caught', v_caught, 'good_liar', v_good_liar,
     'last_die_win', case when p_winner = p_pl and (p_state->'dice_count'->>p_pl)::integer = 1 then 1 else 0 end,
-    'pile_ok', v_pile, 'exact_bids', v_exact, 'big_bid', v_big,
+    'pile_ok', v_pile, 'exact_bids', v_exact, 'pure_bluffs', v_pure, 'big_bid', v_big,
     'comeback', case when p_winner = p_pl and v_comeback then 1 else 0 end,
     'captain', case when p_winner = p_pl and not v_lost and v_n >= 3 then 1 else 0 end);
 end $$;
@@ -228,6 +229,7 @@ declare
   v_n       integer;
   v_secs    numeric;
   v_entry   jsonb;
+  v_pure    boolean;
 begin
   select count(*)::integer into v_count
     from jsonb_each(coalesce(p_server->'dice', '{}'::jsonb)) as t(k, v),
@@ -241,6 +243,12 @@ begin
   else
     v_loser := p_caller;
   end if;
+
+  -- Coup de bluff : enchère contestée (« Menteur ! »), vraie, alors que l'enchérisseur n'avait aucun dé de
+  -- cette valeur ni joker. Calculé ici et stocké dans l'historique (les dés sont révélés de toute façon).
+  v_pure := p_kind = 'liar' and v_count >= v_q
+            and not exists (select 1 from jsonb_array_elements_text(coalesce(p_server->'dice'->v_by, '[]'::jsonb)) d(x)
+                             where x::integer = v_f or (v_f <> 1 and x::integer = 1));
 
   if v_loser is not null then
     v_n := (p_state->'dice_count'->>v_loser)::integer - 1;
@@ -283,7 +291,8 @@ begin
     'reveal', v_entry,
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(
       jsonb_build_object('round', p_state->'round', 'kind', p_kind, 'caller', p_caller, 'bid', v_bid,
-                         'count', v_count, 'loser', v_loser, 'gainer', v_gainer, 'eliminated', v_elim)),
+                         'count', v_count, 'loser', v_loser, 'gainer', v_gainer, 'eliminated', v_elim,
+                         'pure', v_pure)),
     'deadline', public._mtr_iso(now() + make_interval(secs => v_secs::double precision)));
 end $$;
 

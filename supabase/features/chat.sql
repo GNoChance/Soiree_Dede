@@ -33,6 +33,9 @@ grant select on table public.soiree_messages to authenticated;
 -- p_slot : rang du sticker dans la planche de la tenue portée (cf. equip_expression) ; envoyé par le
 -- front seulement pour un sticker de tenue. Vérifié par _tenue_slot_ok (features/trophees.sql).
 drop function if exists public.send_soiree_message(uuid, text, text);
+-- Compteur persistant des stickers envoyés (trophée Pipelette) : les messages sont purgés en fin de soirée.
+alter table public.player_stats add column if not exists stickers_sent integer not null default 0;
+
 create or replace function public.send_soiree_message(p_soiree_id uuid, p_kind text, p_body text, p_slot integer default null)
 returns bigint language plpgsql security definer
 set search_path = public, extensions
@@ -76,6 +79,13 @@ begin
   insert into public.soiree_messages(soiree_id, profile_id, kind, body, tenue)
   values (p_soiree_id, v_me, p_kind, v_body, coalesce(v_tenue, 'default'))
   returning id into v_id;
+
+  -- Pipelette : compte le sticker puis évalue ce seul trophée (évaluation légère, sans repasser tout le catalogue).
+  if p_kind = 'sticker' then
+    insert into public.player_stats(profile_id) values (v_me) on conflict do nothing;
+    update public.player_stats set stickers_sent = stickers_sent + 1 where profile_id = v_me;
+    perform public.evaluate_trophy(v_me, 'gen_pipelette');
+  end if;
 
   -- on ne garde que les 200 derniers messages de la soirée
   delete from public.soiree_messages m

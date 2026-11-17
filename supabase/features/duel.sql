@@ -516,8 +516,10 @@ begin
     'turn', null,
     'games', coalesce(v_d->'games', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'no', v_d->'game_no', 'starter', v_d->'starter',
-      'winner', case when p_outcome = 'win' then p_winner end, 'moves', v_d->'moves')))
-    || coalesce(p_extra, '{}'::jsonb);
+      'winner', case when p_outcome = 'win' then p_winner end, 'moves', v_d->'moves')
+      -- p_extra->'game' : compteurs de fin de manche propres au jeu (trophées), lus par les hooks trophy_stats
+      || case when p_extra ? 'game' then jsonb_build_object('x', p_extra->'game') else '{}'::jsonb end))
+    || coalesce(p_extra - 'game', '{}'::jsonb);
   v_done := (p_outcome = 'win' and (v_d->'wins'->>p_winner)::integer >= v_need)
             or (v_d->>'game_no')::integer >= v_bo;
   p_state := p_state || jsonb_build_object('duel', v_d);
@@ -547,7 +549,9 @@ begin
     'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto));
   v_state := v_state || jsonb_build_object('board', v_r->'board', 'duel', v_d);
   if v_out is not null then
-    v_state := public._duel_end_game(v_state, v_out, v_r->>'winner', null);
+    -- board_move peut renvoyer 'game' : compteurs de fin de manche pour les trophées (rangés dans games[].x)
+    v_state := public._duel_end_game(v_state, v_out, v_r->>'winner',
+                 case when v_r ? 'game' then jsonb_build_object('game', v_r->'game') end);
   else
     v_turn := coalesce(v_r->>'turn', public._duel_other(v_d, p_actor));
     if v_turn not in (v_d->>'a', v_d->>'b') then raise exception 'invalid_board'; end if;
@@ -609,6 +613,23 @@ as $$
          g->>'winner' is not null and g->>'winner' <> p_pl,
          coalesce((g->>'moves')::integer, 0),
          coalesce(g->>'starter' = p_pl, false)
+    from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) d,
+         jsonb_array_elements(coalesce(d->'games', '[]'::jsonb)) g
+   where d->>'a' = p_pl or d->>'b' = p_pl
+$$;
+
+-- Variante de _duel_games avec g = games[].x (compteurs de fin de manche renvoyés par board_move
+-- dans 'game' ; null pour les manches sans ces compteurs, ex. anciennes parties).
+create or replace function public._duel_games_x(p_state jsonb, p_pl text)
+returns table (won boolean, lost boolean, moves integer, i_started boolean, g jsonb)
+language sql immutable
+set search_path = public, extensions
+as $$
+  select coalesce(g->>'winner' = p_pl, false),
+         g->>'winner' is not null and g->>'winner' <> p_pl,
+         coalesce((g->>'moves')::integer, 0),
+         coalesce(g->>'starter' = p_pl, false),
+         g->'x'
     from jsonb_array_elements(coalesce(p_state->'session'->'history', '[]'::jsonb)) d,
          jsonb_array_elements(coalesce(d->'games', '[]'::jsonb)) g
    where d->>'a' = p_pl or d->>'b' = p_pl
@@ -942,6 +963,7 @@ revoke all on function public._duel_setup_begin(text, jsonb) from public, anon, 
 revoke all on function public._duel_setup_call(text, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_finish(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_games(jsonb, text) from public, anon, authenticated;
+revoke all on function public._duel_games_x(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_tstats(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_advance(text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_start(text, uuid[], jsonb) from public, anon, authenticated;

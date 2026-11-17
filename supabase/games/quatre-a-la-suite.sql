@@ -59,6 +59,40 @@ begin
   return case when jsonb_array_length(v_line) > 0 then v_line end;
 end $$;
 
+-- Trophées : directions gagnantes du dernier jeton posé en (c, r) : {"n": nb de directions alignant >= 4,
+-- "diag": une diagonale gagne, "five": un alignement de 5+ jetons}.
+create or replace function public._q4s_kinds(p_cols jsonb, p_c integer, p_r integer, p_who text)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_dirs integer[] := array[1,0, 0,1, 1,1, 1,-1];
+  v_n    integer := 0;
+  v_diag boolean := false;
+  v_five boolean := false;
+  v_len  integer;
+  dc     integer;
+  dr     integer;
+  k      integer;
+  i      integer;
+begin
+  for i in 0 .. 3 loop
+    dc := v_dirs[i * 2 + 1];
+    dr := v_dirs[i * 2 + 2];
+    v_len := 1;
+    k := 1;
+    while public._q4s_cell(p_cols, p_c + k * dc, p_r + k * dr) = p_who loop v_len := v_len + 1; k := k + 1; end loop;
+    k := 1;
+    while public._q4s_cell(p_cols, p_c - k * dc, p_r - k * dr) = p_who loop v_len := v_len + 1; k := k + 1; end loop;
+    if v_len >= 4 then
+      v_n := v_n + 1;
+      if i >= 2 then v_diag := true; end if;
+      if v_len >= 5 then v_five := true; end if;
+    end if;
+  end loop;
+  return jsonb_build_object('n', v_n, 'diag', v_diag, 'five', v_five);
+end $$;
+
 -- ---------------------------------------------------------------- hooks du socle
 
 create or replace function public.game_quatre_a_la_suite_board_new(p_ctx jsonb, p_a text, p_b text)
@@ -96,7 +130,12 @@ begin
     'last', jsonb_build_object('col', v_c, 'row', v_r, 'by', p_actor),
     'line', v_line);
   if v_line is not null then
-    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : compteurs de fin de manche pour les trophées (socle duel : games[].x)
+    return jsonb_build_object('board', p_board, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object(
+        'diag', (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'diag')::boolean,
+        'double', (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'n')::integer >= 2
+                  or (public._q4s_kinds(v_cols, v_c, v_r, p_actor)->>'five')::boolean));
   elsif v_count >= 42 then
     return jsonb_build_object('board', p_board, 'outcome', 'draw');
   end if;
@@ -125,8 +164,10 @@ as $$
   select jsonb_build_object(
     'fast_loss', count(*) filter (where lost and moves <= 10),
     'long_win', count(*) filter (where won and moves >= 36),
-    'fast_win', count(*) filter (where won and moves <= 12))
-  from public._duel_games(p_state, p_pl)
+    'fast_win', count(*) filter (where won and moves <= 12),
+    'diag_wins', count(*) filter (where won and coalesce((g->>'diag')::boolean, false)),
+    'double_wins', count(*) filter (where won and coalesce((g->>'double')::boolean, false)))
+  from public._duel_games_x(p_state, p_pl)
 $$;
 revoke all on function public.game_quatre_a_la_suite_trophy_stats(jsonb, text) from public, anon, authenticated;
 
@@ -150,6 +191,7 @@ end $$;
 
 revoke all on function public._q4s_cell(jsonb, integer, integer) from public, anon, authenticated;
 revoke all on function public._q4s_line(jsonb, integer, integer, text) from public, anon, authenticated;
+revoke all on function public._q4s_kinds(jsonb, integer, integer, text) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_new(jsonb, text, text) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_move(jsonb, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_board_auto(jsonb, jsonb, text) from public, anon, authenticated;

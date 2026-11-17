@@ -125,6 +125,31 @@ as $$
     'reason', p_reason)
 $$;
 
+-- Compteurs de trophées par orateur (state.tstat[pid]) : appelé à la fin d'un passage joué.
+-- Cumul : empty_turns, found_r3 (mots en manche Mime), carries ; record : max_passed, best_r2, best_turn.
+create or replace function public._dee_note(p_state jsonb, p_carry boolean)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_pid   text := p_state->>'speaker';
+  v_st    jsonb := coalesce(p_state->'tstat'->v_pid, '{}'::jsonb);
+  v_found integer := coalesce((p_state->>'turn_found')::integer, 0);
+  v_pass  integer := coalesce((p_state->>'turn_passed')::integer, 0);
+  v_round integer := coalesce((p_state->>'round')::integer, 0);
+begin
+  if v_pid is null or p_state->>'phase' <> 'playing' or p_state->>'started_at' is null then return p_state; end if;
+  v_st := v_st || jsonb_build_object(
+    'empty_turns', coalesce((v_st->>'empty_turns')::integer, 0) + case when v_found = 0 then 1 else 0 end,
+    'max_passed', greatest(coalesce((v_st->>'max_passed')::integer, 0), v_pass),
+    'best_turn', greatest(coalesce((v_st->>'best_turn')::integer, 0), v_found),
+    'found_r3', coalesce((v_st->>'found_r3')::integer, 0) + case when v_round = 3 then v_found else 0 end,
+    'best_r2', greatest(coalesce((v_st->>'best_r2')::integer, 0), case when v_round = 2 then v_found else 0 end),
+    'carries', coalesce((v_st->>'carries')::integer, 0) + case when p_carry then 1 else 0 end);
+  return p_state || jsonb_build_object('tstat',
+    coalesce(p_state->'tstat', '{}'::jsonb) || jsonb_build_object(v_pid, v_st));
+end $$;
+
 -- Fin d'un passage (échéance, saut par l'hôte) : la carte en cours retourne en
 -- fin de pioche, rotation, écran « prêt ? » suivant.
 create or replace function public._dee_end_passage(p_state jsonb, p_server jsonb, p_reason text)
@@ -137,6 +162,7 @@ begin
   if p_state->>'phase' = 'playing' and jsonb_array_length(v_pile) > 1 then
     p_server := p_server || jsonb_build_object('pile', (v_pile - 0) || jsonb_build_array(v_pile->0));
   end if;
+  p_state := public._dee_note(p_state, false);
   p_state := p_state || jsonb_build_object('last_turn', public._dee_recap(p_state, p_reason), 'carry_seconds', null);
   p_state := public._dee_rotate(p_state);
   p_state := public._dee_ready(p_state, (p_state->>'turn_seconds')::integer, false);
@@ -155,6 +181,12 @@ as $$
            (select coalesce(max(value::integer), 0) from jsonb_each_text(coalesce(p_state->'speaker_points', '{}'::jsonb))) as all_max
   )
   select jsonb_build_object(
+    'empty_turns', coalesce((p_state->'tstat'->p_pid->>'empty_turns')::integer, 0),
+    'max_passed', coalesce((p_state->'tstat'->p_pid->>'max_passed')::integer, 0),
+    'best_turn', coalesce((p_state->'tstat'->p_pid->>'best_turn')::integer, 0),
+    'found_r3', coalesce((p_state->'tstat'->p_pid->>'found_r3')::integer, 0),
+    'best_r2', coalesce((p_state->'tstat'->p_pid->>'best_r2')::integer, 0),
+    'carries', coalesce((p_state->'tstat'->p_pid->>'carries')::integer, 0),
     'best_in_team', case when mine > 0 and mine >= team_max then 1 else 0 end,
     'sweep', case when jsonb_array_length(coalesce(p_state->'round_scores', '[]'::jsonb)) >= 3
         and not exists (select 1 from jsonb_array_elements(p_state->'round_scores') r
@@ -205,6 +237,9 @@ declare
   v_left integer;
 begin
   v_left := greatest(0, floor(extract(epoch from ((p_state->>'deadline')::timestamptz - now())))::integer);
+  -- Du rab : pioche vidée avec au moins 5 s gardées pour la manche suivante.
+  p_state := public._dee_note(p_state, v_left >= 5
+                                       and (p_state->>'round')::integer < (p_state->>'total_rounds')::integer);
   p_state := p_state || jsonb_build_object('last_turn', public._dee_recap(p_state, 'empty'));
   if (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
     return public._dee_finish(p_state, p_server);
@@ -441,6 +476,7 @@ revoke all on function public._dee_card_secrets(jsonb, jsonb, boolean) from publ
 revoke all on function public._dee_ready(jsonb, integer, boolean) from public, anon, authenticated;
 revoke all on function public._dee_rotate(jsonb) from public, anon, authenticated;
 revoke all on function public._dee_recap(jsonb, text) from public, anon, authenticated;
+revoke all on function public._dee_note(jsonb, boolean) from public, anon, authenticated;
 revoke all on function public._dee_end_passage(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._dee_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dee_tstats(jsonb, text, text, boolean) from public, anon, authenticated;

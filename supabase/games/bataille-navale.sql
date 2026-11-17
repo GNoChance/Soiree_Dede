@@ -374,7 +374,13 @@ begin
     'shots', coalesce((v_st->>'shots')::integer, 0) + 1,
     'hits', coalesce((v_st->>'hits')::integer, 0) + case when v_r = 'miss' then 0 else 1 end,
     'streak', v_streak,
-    'best', greatest(coalesce((v_st->>'best')::integer, 0), v_streak));
+    'best', greatest(coalesce((v_st->>'best')::integer, 0), v_streak),
+    -- trophées : série de tirs à l'eau (en cours / record) et 1er tir de la manche touché ?
+    'mstreak', case when v_r = 'miss' then coalesce((v_st->>'mstreak')::integer, 0) + 1 else 0 end,
+    'mbest', greatest(coalesce((v_st->>'mbest')::integer, 0),
+                      case when v_r = 'miss' then coalesce((v_st->>'mstreak')::integer, 0) + 1 else 0 end),
+    'fh', case when coalesce((v_st->>'shots')::integer, 0) = 0 then (v_r <> 'miss')::integer
+               else coalesce((v_st->>'fh')::integer, 0) end);
 
   p_board := p_board || jsonb_build_object(
     'waters', coalesce(p_board->'waters', '{}'::jsonb) || jsonb_build_object(v_target, v_w),
@@ -388,7 +394,26 @@ begin
     -- Toute la flotte adverse est coulée : manche gagnée, flottes révélées.
     p_board := p_board || jsonb_build_object('reveal', jsonb_build_object(
       v_a, p_server->'fleets'->v_a, v_b, p_server->'fleets'->v_b));
-    return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', 'win', 'winner', p_actor);
+    -- 'game' : bilan de la manche pour les trophées, par joueur (socle duel : games[].x). Les stats de
+    -- board sont remplacées à chaque manche, on les recopie donc ici dans l'historique de la session.
+    return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', 'win', 'winner', p_actor,
+      'game', jsonb_build_object('total', (p_board->>'count')::integer, 'p', jsonb_build_object(
+        v_a, jsonb_build_object(
+          'shots', coalesce((p_board->'stats'->v_a->>'shots')::integer, 0),
+          'hits', coalesce((p_board->'stats'->v_a->>'hits')::integer, 0),
+          'best', coalesce((p_board->'stats'->v_a->>'best')::integer, 0),
+          'mbest', coalesce((p_board->'stats'->v_a->>'mbest')::integer, 0),
+          'fh', coalesce((p_board->'stats'->v_a->>'fh')::integer, 0),
+          'left', coalesce((p_board->'waters'->v_a->>'left')::integer, 5),
+          'enemy_left', coalesce((p_board->'waters'->v_b->>'left')::integer, 5)),
+        v_b, jsonb_build_object(
+          'shots', coalesce((p_board->'stats'->v_b->>'shots')::integer, 0),
+          'hits', coalesce((p_board->'stats'->v_b->>'hits')::integer, 0),
+          'best', coalesce((p_board->'stats'->v_b->>'best')::integer, 0),
+          'mbest', coalesce((p_board->'stats'->v_b->>'mbest')::integer, 0),
+          'fh', coalesce((p_board->'stats'->v_b->>'fh')::integer, 0),
+          'left', coalesce((p_board->'waters'->v_b->>'left')::integer, 5),
+          'enemy_left', coalesce((p_board->'waters'->v_a->>'left')::integer, 5)))));
   elsif v_r = 'miss' then
     return jsonb_build_object('board', p_board, 'secrets', v_sec, 'outcome', null);   -- à l'eau : tour adverse
   end if;
@@ -445,6 +470,34 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- moteur (délégation au socle)
+
+-- Hook de trophées du socle duel (features/duel.sql, _duel_tstats) : tout vient des bilans de manche
+-- (games[].x.p[joueur]) enregistrés à la fin de chaque manche. left = mes bateaux à flot,
+-- enemy_left = bateaux adverses à flot. Seuils : tirs 40 / 120, précision 40 %.
+create or replace function public.game_bataille_navale_trophy_stats(p_state jsonb, p_pl text)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  with m as (
+    select won, lost, g->'total' as total, g->'p'->p_pl as me
+      from public._duel_games_x(p_state, p_pl)
+     where g->'p'->p_pl is not null
+  )
+  select jsonb_build_object(
+    'miss_streak', coalesce(max((me->>'mbest')::integer), 0),
+    'hits', coalesce(sum((me->>'hits')::integer), 0),
+    'best_hit_streak', coalesce(max((me->>'best')::integer), 0),
+    'first_shot_hits', coalesce(sum((me->>'fh')::integer), 0),
+    'lost_no_sink', count(*) filter (where lost and (me->>'enemy_left')::integer >= 5),
+    'lost_close', count(*) filter (where lost and (me->>'enemy_left')::integer = 1),
+    'long_win', count(*) filter (where won and (total)::text::integer >= 120),
+    'precise_win', count(*) filter (where won and (me->>'shots')::integer > 0
+                                      and (me->>'hits')::integer * 100 >= (me->>'shots')::integer * 40),
+    'fast_win', count(*) filter (where won and (me->>'shots')::integer <= 40),
+    'intact_win', count(*) filter (where won and (me->>'left')::integer >= 5))
+  from m
+$$;
+revoke all on function public.game_bataille_navale_trophy_stats(jsonb, text) from public, anon, authenticated;
 
 create or replace function public.game_bataille_navale_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer

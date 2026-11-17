@@ -116,6 +116,51 @@ begin
   return p_state;
 end $$;
 
+-- Compteurs de trophées par joueur dans server.pstats (jamais dans le state public) :
+-- ajoute p_n à p_key (ou prend le max si p_max).
+create or replace function public._pdb_pst(p_server jsonb, p_pl text, p_key text, p_n numeric, p_max boolean default false)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_cur numeric := coalesce((p_server->'pstats'->p_pl->>p_key)::numeric, 0);
+  v_new numeric := case when p_max then greatest(v_cur, p_n) else v_cur + p_n end;
+begin
+  return p_server || jsonb_build_object('pstats',
+    coalesce(p_server->'pstats', '{}'::jsonb) || jsonb_build_object(p_pl,
+      coalesce(p_server->'pstats'->p_pl, '{}'::jsonb) || jsonb_build_object(p_key, v_new)));
+end $$;
+
+-- Un cumul +2/+4 vient d'être pioché par p_player (p_count cartes) : plus gros tas, et les cartes
+-- sont créditées (« infligées ») à ceux qui ont empilé (server.pend_src).
+create or replace function public._pdb_cumul(p_server jsonb, p_player text, p_count integer)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  r record;
+begin
+  p_server := public._pdb_pst(p_server, p_player, 'big_draw', p_count, true);
+  for r in select key, value::integer as n from jsonb_each_text(coalesce(p_server->'pend_src', '{}'::jsonb)) loop
+    p_server := public._pdb_pst(p_server, r.key, 'inflicted', r.n);
+  end loop;
+  return p_server - 'pend_src';
+end $$;
+
+-- Met à jour le record de cartes en main de chaque joueur (appelé après chaque action et à la fin).
+create or replace function public._pdb_track_hands(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  p text;
+begin
+  for p in select jsonb_array_elements_text(p_state->'players') loop
+    p_server := public._pdb_pst(p_server, p, 'max_hand', coalesce((p_state->'counts'->>p)::integer, 0), true);
+  end loop;
+  return p_server;
+end $$;
+
 create or replace function public._pdb_log(p_state jsonb, p_entry jsonb)
 returns jsonb language plpgsql immutable
 set search_path = public, extensions
@@ -158,6 +203,7 @@ begin
     v_drawn := v_drawn || jsonb_build_array(v_card);
   end loop;
   p_server := jsonb_set(p_server, array['hands', p_player], v_hand, true);
+  p_server := public._pdb_pst(p_server, p_player, 'drawn', jsonb_array_length(v_drawn));
   p_state := jsonb_set(p_state, array['counts', p_player], to_jsonb(jsonb_array_length(v_hand)), true);
   p_state := p_state || jsonb_build_object('draw_count', jsonb_array_length(p_server->'deck'));
   return jsonb_build_object('state', p_state, 'server', p_server, 'drawn', v_drawn);
@@ -199,15 +245,30 @@ declare
                       || array(select jsonb_array_elements_text(p_state->'active'));
   v_results jsonb := '[]'::jsonb;
   v_hands   jsonb := '{}'::jsonb;
+  v_ps      jsonb;
   i         integer;
 begin
+  p_server := public._pdb_track_hands(p_state, p_server);
   for i in 1 .. cardinality(v_ranked) loop
+    v_ps := coalesce(p_server->'pstats'->v_ranked[i], '{}'::jsonb);
     v_results := v_results || jsonb_build_array(jsonb_build_object(
       'profile_id', v_ranked[i],
       'placement', i,
       'points', v_n - i,
       'won', (i = 1) or (v_n >= 5 and i <= 3),
-      'stats', '{}'::jsonb));
+      -- trophées (features/trophees.sql), cumulés dans server.pstats
+      'stats', jsonb_build_object(
+        'big_draw', coalesce((v_ps->>'big_draw')::integer, 0),
+        'denounced', coalesce((v_ps->>'denounced')::integer, 0),
+        'denounces', coalesce((v_ps->>'denounces')::integer, 0),
+        'special_cards', coalesce((v_ps->>'specials')::integer, 0),
+        'max_hand', coalesce((v_ps->>'max_hand')::integer, 0),
+        'inflicted', coalesce((v_ps->>'inflicted')::integer, 0),
+        'stacks', coalesce((v_ps->>'stacks')::integer, 0),
+        -- Main propre : 1er sorti ayant pioché 2 cartes au plus ; Remontada : 1er sorti après 10+ cartes en main
+        'clean_win', case when i = 1 and p_server->'pstats' is not null
+                           and coalesce((v_ps->>'drawn')::integer, 0) <= 2 then 1 else 0 end,
+        'comeback', case when i = 1 and coalesce((v_ps->>'max_hand')::integer, 0) >= 10 then 1 else 0 end)));
   end loop;
   -- Main du (des) perdant(s) révélée.
   select coalesce(jsonb_object_agg(a, coalesce(p_server->'hands'->a, '[]'::jsonb)), '{}'::jsonb) into v_hands
@@ -363,6 +424,7 @@ begin
       p_state := v_r->'state'; p_server := v_r->'server';
       p_state := public._pdb_log(p_state, jsonb_build_object(
         't', 'draw', 'p', v_turn, 'count', jsonb_array_length(v_r->'drawn'), 'auto', true, 'cumul', v_pending > 0));
+      if v_pending > 0 then p_server := public._pdb_cumul(p_server, v_turn, jsonb_array_length(v_r->'drawn')); end if;
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
     end if;
     p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_turn, 1), true);
@@ -382,6 +444,7 @@ begin
     v_r := public._pdb_draw(p_state, p_server, v_target, 2);
     p_state := v_r->'state'; p_server := v_r->'server';
     p_state := p_state #- array['last_card', v_target];
+    p_server := public._pdb_pst(public._pdb_pst(p_server, v_target, 'denounced', 1), v_me, 'denounces', 1);
     p_state := public._pdb_log(p_state, jsonb_build_object(
       't', 'denounce', 'p', v_me, 'target', v_target, 'count', jsonb_array_length(v_r->'drawn')));
 
@@ -394,6 +457,7 @@ begin
       p_state := v_r->'state'; p_server := v_r->'server';
       p_state := public._pdb_log(p_state, jsonb_build_object(
         't', 'draw', 'p', v_me, 'count', jsonb_array_length(v_r->'drawn'), 'cumul', true));
+      p_server := public._pdb_cumul(p_server, v_me, jsonb_array_length(v_r->'drawn'));
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
       p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_me, 1), true);
     else
@@ -449,6 +513,15 @@ begin
       end if;
     end if;
 
+    -- Compteurs de trophées (server.pstats)
+    if v_kind <> 'num' then p_server := public._pdb_pst(p_server, v_me, 'specials', 1); end if;
+    if v_kind in ('plus2', 'wild4') then
+      if v_pending > 0 then p_server := public._pdb_pst(p_server, v_me, 'stacks', 1); end if;
+      p_server := p_server || jsonb_build_object('pend_src', coalesce(p_server->'pend_src', '{}'::jsonb)
+        || jsonb_build_object(v_me, coalesce((p_server->'pend_src'->>v_me)::integer, 0)
+                                    + case when v_kind = 'plus2' then 2 else 4 end));
+    end if;
+
     -- La carte quitte la main et passe sur la défausse.
     v_hand := v_hand - v_idx;
     p_server := jsonb_set(p_server, array['hands', v_me], v_hand);
@@ -499,6 +572,7 @@ begin
           if p <> v_me then
             v_r := public._pdb_draw(p_state, p_server, p, 1);
             p_state := v_r->'state'; p_server := v_r->'server';
+            p_server := public._pdb_pst(p_server, v_me, 'inflicted', jsonb_array_length(v_r->'drawn'));
           end if;
         end loop;
       elsif v_perso = 'manon' then
@@ -537,6 +611,7 @@ begin
         -- Coup de griffe : la cible pioche 3.
         v_r := public._pdb_draw(p_state, p_server, v_target, 3);
         p_state := v_r->'state'; p_server := v_r->'server';
+        p_server := public._pdb_pst(p_server, v_me, 'inflicted', jsonb_array_length(v_r->'drawn'));
       elsif v_perso = 'marius' then
         -- Capuche : annule tout le cumul en attente ; sans cumul, le joueur suivant passe son tour.
         if v_pending > 0 then
@@ -546,6 +621,7 @@ begin
           v_entry := v_entry || jsonb_build_object('skipped', true);
         end if;
         p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
+        p_server := p_server - 'pend_src';
       elsif v_perso = 'nini' then
         -- Glissade : chaque joueur (qui a encore des cartes) passe sa main au voisin, dans le sens du jeu.
         v_act := array(select a from jsonb_array_elements_text(p_state->'active') as t(a)
@@ -615,6 +691,8 @@ begin
     end if;
   end loop;
 
+  p_server := public._pdb_track_hands(p_state, p_server);
+
   -- Secrets renvoyés uniquement pour les joueurs dont la main (ou la carte piochée) a changé.
   for p in select jsonb_array_elements_text(p_state->'players') loop
     v_od := case when v_old->'drawn'->>'player' = p then v_old->'drawn'->>'id' end;
@@ -645,6 +723,9 @@ revoke all on function public._pdb_shuffle(jsonb) from public, anon, authenticat
 revoke all on function public._pdb_iso(timestamptz) from public, anon, authenticated;
 revoke all on function public._pdb_next(jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._pdb_start_turn(jsonb, text, boolean) from public, anon, authenticated;
+revoke all on function public._pdb_pst(jsonb, text, text, numeric, boolean) from public, anon, authenticated;
+revoke all on function public._pdb_cumul(jsonb, text, integer) from public, anon, authenticated;
+revoke all on function public._pdb_track_hands(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pdb_log(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pdb_draw(jsonb, jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._pdb_playable(jsonb, jsonb) from public, anon, authenticated;
