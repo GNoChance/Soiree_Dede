@@ -15,6 +15,7 @@ import { TrophyBoard } from '@/features/trophees/TrophyBoard'
 import { rpcErrorMessage } from '@/lib/rpcError'
 import { useSession } from '@/store/session'
 import { gameLabel, useProfileStats } from './api'
+import { WeeklyMedals } from './WeeklyMedals'
 
 function Stat({ label, value, suffix, tone }: { label: string; value: number; suffix?: string; tone: string }) {
   return (
@@ -76,6 +77,10 @@ export function ProfilePage() {
               <Stat label="victoires" value={data.wins} tone="bg-sun" />
               <Stat label="de victoires" value={data.win_rate} suffix=" %" tone="bg-mint" />
             </div>
+          </StaggerItem>
+          {/* empty:hidden : sans médaille (profil d'un autre), pas de trou dans la liste */}
+          <StaggerItem className="empty:hidden">
+            <WeeklyMedals profileId={id} mine={mine} />
           </StaggerItem>
           {data.games_played === 0 ? (
             <StaggerItem>

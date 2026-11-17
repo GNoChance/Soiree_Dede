@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { useNavigate } from 'react-router'
 import { Crown } from 'lucide-react'
 import { getCharacter } from '@/data/characters'
@@ -17,9 +17,11 @@ import { useSession } from '@/store/session'
 import { GAMES } from '@/games/registry'
 import { fx } from '@/lib/feedback'
 import type { ExpressionId, GameId, UUID } from '@/types/db'
+import { fetchLeaderboardWeek, fmtTimeLeft, fmtWeek, type LeaderboardWeek } from '@/features/stats/weekly'
 
 type Board = 'general' | GameId | (string & {})
 type Scope = 'all' | 'friends'
+type Period = 'all' | 'week'
 
 interface Row {
   profile_id: UUID
@@ -55,10 +57,28 @@ export function LeaderboardPage() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [friendIds, setFriendIds] = useState<Set<UUID>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  const [period, setPeriod] = useState<Period>('all')
+  const [week, setWeek] = useState<LeaderboardWeek | null>(null)
 
   const load = useCallback(async () => {
     if (!me) return
     try {
+      if (period === 'week') {
+        const [w, fr] = await Promise.all([
+          fetchLeaderboardWeek(board === 'general' ? null : board),
+          supabase
+            .from('friendships')
+            .select('*')
+            .eq('status', 'accepted')
+            .or(`requester_id.eq.${me},addressee_id.eq.${me}`),
+        ])
+        if (fr.error) throw fr.error
+        setWeek(w)
+        setRows(w.rows as unknown as Row[])
+        setFriendIds(new Set((fr.data ?? []).map((f) => (f.requester_id === me ? f.addressee_id : f.requester_id))))
+        setError(null)
+        return
+      }
       const [gen, fr, game] = await Promise.all([
         supabase.from('leaderboard_general').select('*').order('rank', { ascending: true }),
         supabase
@@ -84,7 +104,7 @@ export function LeaderboardPage() {
     } catch (e) {
       setError(rpcErrorMessage(e))
     }
-  }, [me, board])
+  }, [me, board, period])
 
   useEffect(() => {
     void load()
@@ -96,15 +116,30 @@ export function LeaderboardPage() {
     setBoard(b)
   }
 
+  const changePeriod = (p: Period) => {
+    setRows(null)
+    setPeriod(p)
+  }
+
   const visible = rows
     ? reRank(scope === 'friends' ? rows.filter((r) => r.profile_id === me || friendIds.has(r.profile_id)) : rows)
     : null
   const podium = visible?.filter((r) => r.games_played > 0 && r.rank <= 3).slice(0, 3) ?? []
+  const leaders = (rows ?? []).filter((r) => r.rank === 1 && r.wins > 0)
   const rest = visible?.filter((r) => !podium.includes(r)) ?? []
 
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-4xl">Classement</h1>
+      <SegmentedControl<Period>
+        ariaLabel="Période"
+        value={period}
+        onChange={changePeriod}
+        options={[
+          { value: 'all', label: 'Depuis toujours' },
+          { value: 'week', label: 'Cette semaine' },
+        ]}
+      />
       <BoardPicker value={board} onChange={changeBoard} />
       <SegmentedControl<Scope>
         ariaLabel="Portée"
@@ -126,7 +161,8 @@ export function LeaderboardPage() {
           ))}
         </div>
       ) : (
-        <motion.div key={`${board}-${scope}`} className="flex flex-col gap-4" initial="hidden" animate="show">
+        <motion.div key={`${board}-${scope}-${period}`} className="flex flex-col gap-4" initial="hidden" animate="show">
+          {period === 'week' && week && <WeekBanner week={week} leader={board === 'general' ? leaders : []} />}
           {podium.length === 0 ? (
             <p className="sticker rounded-card bg-surface p-5 text-center font-display text-lg font-bold text-muted">
               Personne n'a encore joué ici. Lancez une soirée !
@@ -142,6 +178,38 @@ export function LeaderboardPage() {
             ))}
           </StaggerList>
         </motion.div>
+      )}
+    </div>
+  )
+}
+
+function WeekBanner({ week, leader }: { week: LeaderboardWeek; leader: Row[] }) {
+  const reduce = useReducedMotion()
+  const last = week.last_week
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="sticker rounded-card bg-sky p-3 text-center text-[#1f1b2e]">
+        <p className="font-display text-lg font-extrabold">Semaine {fmtWeek(week.week_start, week.week_end)}</p>
+        <p className="text-sm font-bold">Fin de la semaine dans {fmtTimeLeft(week.ends_at)}</p>
+      </div>
+      {leader.length > 0 && (
+        <div className="sticker flex items-center gap-3 rounded-card bg-sun p-3 text-[#1f1b2e]">
+          <motion.span
+            className="text-4xl"
+            animate={reduce ? undefined : { rotate: [-12, 12, -12], scale: [1, 1.15, 1] }}
+            transition={{ duration: 1.6, repeat: Infinity }}
+          >
+            🏅
+          </motion.span>
+          <p className="font-display text-base font-extrabold leading-tight">
+            {leader.map((r) => r.nickname).join(' et ')} en route pour la médaille « Victorieux de la semaine » !
+          </p>
+        </div>
+      )}
+      {last && (
+        <p className="text-center text-sm font-bold text-muted">
+          🏅 Semaine dernière : {last.champions.map((c) => c.nickname).join(' et ')} ({last.wins} victoire{last.wins > 1 ? 's' : ''})
+        </p>
       )}
     </div>
   )
