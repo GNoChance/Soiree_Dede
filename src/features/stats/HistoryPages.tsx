@@ -1,4 +1,5 @@
-import { ArrowLeft, Clock, Crown, Gamepad2 } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, Clock, Crown, Gamepad2, PartyPopper } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -7,6 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { getGame } from '@/games/registry'
+import { SoireeRecap } from '@/features/recap/RecapViewer'
 import { rpcErrorMessage } from '@/lib/rpcError'
 import { useSession } from '@/store/session'
 import { fmtDate, fmtDuration, gameLabel, useHistoryDetail, useMyHistory } from './api'
@@ -91,9 +93,11 @@ export function HistoryDetailPage() {
   const { id } = useParams()
   const meId = useSession((s) => s.profile?.id)
   const { data, error, loading } = useHistoryDetail(id)
+  const [recapOpen, setRecapOpen] = useState(false)
   return (
     <div className="flex flex-col gap-4">
       <Header title="Détail de la soirée" back="/historique" />
+      {recapOpen && id && <SoireeRecap soireeId={id} doneLabel="Fermer" onDone={() => setRecapOpen(false)} />}
       {loading && <Skeleton className="h-48 w-full" />}
       {error != null && !data && <Card className="font-bold">{rpcErrorMessage(error)}</Card>}
       {data && (
@@ -104,6 +108,11 @@ export function HistoryDetailPage() {
               <p className="font-bold text-muted">
                 Chez {data.host?.nickname ?? '?'} · {fmtDuration(data.duration_min)} · {data.matches.length} partie{data.matches.length > 1 ? 's' : ''}
               </p>
+              {data.matches.length > 0 && (
+                <Button className="mt-2" fullWidth icon={<PartyPopper className="size-6" />} onClick={() => setRecapOpen(true)}>
+                  Revoir le récap
+                </Button>
+              )}
             </Card>
           </StaggerItem>
           {data.winner_ids.length > 0 && (

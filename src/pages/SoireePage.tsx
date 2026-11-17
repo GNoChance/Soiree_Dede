@@ -24,6 +24,7 @@ import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, t
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
 import { SoireePodium, SoireeStandingsCard } from '@/features/stats/SoireeStandings'
+import { SoireeRecap } from '@/features/recap/RecapViewer'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -39,6 +40,9 @@ export function SoireePage() {
   const [podiumSeen, setPodiumSeen] = useState(false)
   const [hostPodium, setHostPodium] = useState<{ next: NewUnlocks | null } | null>(null)
   /** Soirée terminée pendant que je suis dans le salon (temps réel) : raison de fin. */
+  /** Récap « Wrapped » juste après le podium (hôte : avant les déblocages ; autres : avant l'écran de fin). */
+  const [hostRecap, setHostRecap] = useState<{ next: NewUnlocks | null } | null>(null)
+  const [recapSeen, setRecapSeen] = useState(false)
   const [ended, setEnded] = useState<{ reason: SoireeEndReason | null } | null>(null)
   const endingRef = useRef(false)
   /** Vrai dès que j'ai vu mon nom dans le salon : s'il disparaît ensuite, j'ai été exclu·e. */
@@ -254,15 +258,26 @@ export function SoireePage() {
         <SoireePodium
           soireeId={soiree.id}
           onDone={() => {
-            const next = hostPodium.next
+            setHostRecap({ next: hostPodium.next })
             setHostPodium(null)
             if (next) setEndUnlocks(next)
+          }}
+        />
+      )}
+      {hostRecap && (
+        <SoireeRecap
+          soireeId={soiree.id}
+          doneLabel="Retour à l’accueil"
+          onDone={() => {
+            const next = hostRecap.next
+            setHostRecap(null)
             else navigate('/', { replace: true })
           }}
         />
       )}
       {ended && !podiumSeen && !hostPodium && <SoireePodium soireeId={soiree.id} onDone={() => setPodiumSeen(true)} />}
-      {ended && podiumSeen && (
+      {ended && podiumSeen && !recapSeen && !hostRecap && <SoireeRecap soireeId={soiree.id} doneLabel="Retour à l’accueil" onDone={() => setRecapSeen(true)} />}
+      {ended && podiumSeen && recapSeen && (
         <SoireeEndedOverlay
           reason={ended.reason}
           host={isHost ? 'toi' : playerOrPlaceholder(byId, soiree.host_id).nickname}

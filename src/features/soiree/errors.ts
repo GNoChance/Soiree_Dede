@@ -11,6 +11,7 @@ const MESSAGES: Record<string, string> = {
   player_busy: 'Déjà dans 5 soirées',
   soiree_not_found: 'Aucune soirée avec ce code…',
   soiree_ended: 'Cette soirée est terminée.',
+  soiree_not_ended: 'Le récap sera disponible quand la soirée sera terminée.',
   profile_not_found: 'Ce joueur est introuvable.',
   not_in_soiree:'Tu n’es plus dans cette soirée.',
   invalid_message: 'Message vide ou trop long (200 caractères max).',
