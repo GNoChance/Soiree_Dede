@@ -5,6 +5,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { BottomSheet } from '@/components/ui/Modal'
 import { tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
+import { EXPRESSIONS } from '@/data/expressions'
+import type { ExpressionId } from '@/types/db'
 import { cn } from '@/lib/cn'
 import { playSound } from '@/lib/feedback'
 import { useActiveSoireesStore } from '@/features/soiree/activeSoirees'
@@ -78,9 +80,16 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
     }
   }, [open, lastId, seen, soireeId])
 
+  // seuls les stickers débloqués (comme dans l'inventaire) : les autres, il faut les gagner !
+  const unlocks = useSession((s) => s.unlocks)
   const stickers = useMemo(
-    () => [...tenuePalette(me.slug, me.equippedTenue), ...tenueExtras(me.slug, me.equippedTenue).map((x) => x.id)],
-    [me.slug, me.equippedTenue],
+    () => [
+      ...tenuePalette(me.slug, me.equippedTenue).filter(
+        (e) => e === 'joie' || EXPRESSIONS[e as ExpressionId]?.default || unlocks[e as ExpressionId],
+      ),
+      ...tenueExtras(me.slug, me.equippedTenue).map((x) => x.id),
+    ],
+    [me.slug, me.equippedTenue, unlocks],
   )
 
   const submit = async () => {
