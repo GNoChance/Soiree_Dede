@@ -11,7 +11,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
-import { hasTenueArt, tenuePalette } from '@/components/ui/tenueArt'
+import { hasTenueArt, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
 import { getTenue } from '@/data/tenues'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
@@ -30,7 +30,7 @@ export function InventoryPage() {
   const unlocks = useSession((s) => s.unlocks)
   const stats = useSession((s) => s.stats)
   const patchProfile = useSession((s) => s.patchProfile)
-  const [selected, setSelected] = useState<ExpressionId | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [friends, setFriends] = useState(0)
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState<'expressions' | 'tenues'>('expressions')
@@ -54,13 +54,18 @@ export function InventoryPage() {
 
   if (!profile) return null
 
-  const isUnlocked = (id: ExpressionId) => Boolean(EXPRESSIONS[id]?.default || unlocks[id])
+  // Stickers bonus (extra1…) : libres dès que la tenue est portée.
+  const isUnlocked = (id: string) => /^extrad+$/.test(id) || Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
   // Palette de la tenue portée : la tenue débloque la planche, chaque expression garde son défi.
   const tenue = profile.equipped_tenue ?? 'default'
   const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
   const tenueDef = tenue !== 'default' && hasTenueArt(profile.slug, tenue) ? getTenue(tenue) : undefined
   const unlockedCount = all.filter(isUnlocked).length
-  const sel = selected ? EXPRESSIONS[selected] : null
+  const extras = tenueDef ? tenueExtras(profile.slug, tenue) : []
+  const extraSel = selected ? extras.find((x) => x.id === selected) : undefined
+  const sel: ExpressionDef | null = extraSel
+    ? { id: extraSel.id as ExpressionId, label: extraSel.label, emoji: extraSel.emoji, condition: 'Sticker bonus de la tenue', default: true }
+    : selected ? (EXPRESSIONS[selected as ExpressionId] ?? null) : null
 
   const progressOf = (def: ExpressionDef) => {
     const p = def.progress
@@ -69,10 +74,10 @@ export function InventoryPage() {
     return { value: Math.min(raw, p.target), target: p.target, unit: p.unit }
   }
 
-  const equip = async (id: ExpressionId) => {
+  const equip = async (id: string) => {
     setBusy(true)
     try {
-      const { data, error } = await supabase.rpc('equip_expression', { p_expression: id })
+      const { data, error } = await supabase.rpc('equip_expression', { p_expression: id as ExpressionId })
       if (error) throw error
       patchProfile(data)
       void usePlayersStore.getState().load(true)
@@ -183,6 +188,44 @@ export function InventoryPage() {
           )
         })}
       </StaggerList>
+      {extras.length > 0 && (
+        <>
+          <StaggerItem>
+            <h2 className="text-2xl">Bonus {tenueDef?.emoji}</h2>
+            <p className="text-sm font-bold text-muted">Les stickers en plus de ta tenue : équipables tant que tu la portes.</p>
+          </StaggerItem>
+          <StaggerList className="grid grid-cols-3 gap-3">
+            {extras.map((x) => {
+              const equipped = profile.equipped_expression === x.id
+              return (
+                <StaggerItem key={x.id}>
+                  <motion.button
+                    whileTap={{ scale: 0.92, rotate: 3 }}
+                    whileHover={{ y: -4 }}
+                    onClick={() => {
+                      fx.pop()
+                      setSelected(x.id)
+                    }}
+                    aria-label={x.label}
+                    className={cn(
+                      'relative flex w-full flex-col items-center gap-1 rounded-card border-[3px] border-ink px-1 py-2 shadow-sticker',
+                      equipped ? 'bg-sun text-[#1f1b2e]' : 'bg-surface text-text',
+                    )}
+                  >
+                    <ChibiImage slug={profile.slug} expression={x.id} tenue={tenue} size={84} thumb />
+                    <span className="font-display text-center text-sm font-extrabold leading-tight">{x.label}</span>
+                    {equipped && (
+                      <span className="absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border-2 border-ink bg-mint text-[#1f1b2e]">
+                        <Check className="size-4" strokeWidth={4} />
+                      </span>
+                    )}
+                  </motion.button>
+                </StaggerItem>
+              )
+            })}
+          </StaggerList>
+        </>
+      )}
       </>
       )}
 

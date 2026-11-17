@@ -19,10 +19,14 @@ const BAD = [
 const EXPR = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine'.split(' ');
 const art = [];
 const portraits = [];
+const extras = {}; // "slug/dossier" -> nombre de stickers bonus (extra1..extraN)
 for (const slug of Object.keys(manifest).sort()) {
   for (const c of manifest[slug].costumes ?? []) {
     if (!fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, 'joie.webp'))) continue;
     art.push(`${slug}/${c}`);
+    let n = 0;
+    while (fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, `extra${n + 1}.webp`))) n++;
+    if (n) extras[`${slug}/${c}`] = n;
     // expressions non dessinées sur la planche : écartées (repli sur une voisine)
     for (const e of EXPR) if (!fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, `${e}.webp`)) && !BAD.includes(`${slug}/${c}/${e}`)) BAD.push(`${slug}/${c}/${e}`);
   }
@@ -41,6 +45,9 @@ fs.writeFileSync(path.join(ROOT, 'src/data/tenues-art.generated.ts'), [
   '',
   '// "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).',
   list('TENUE_PORTRAITS', portraits),
+  '',
+  '// Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.',
+  'export const TENUE_EXTRAS: Readonly<Record<string, number>> = ' + JSON.stringify(extras, null, 2) + ';',
   '',
   '// "slug/dossier/expression" ratés au découpage : repli sur une expression voisine.',
   list('TENUE_ART_BAD', BAD),

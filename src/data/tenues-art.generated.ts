@@ -266,6 +266,21 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'nini/philosopher',
 ]
 
+// Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.
+export const TENUE_EXTRAS: Readonly<Record<string, number>> = {
+  "kevin/croupier": 2,
+  "marius/admiral": 2,
+  "marius/tycoon": 2,
+  "marius/star": 2,
+  "marius/spy": 2,
+  "marius/croupier": 2,
+  "marius/teacher": 2,
+  "marius/student": 2,
+  "marius/painter": 2,
+  "marius/werewolf": 2,
+  "marius/pyro": 2
+};
+
 // "slug/dossier/expression" ratés au découpage : repli sur une expression voisine.
 export const TENUE_ART_BAD: readonly string[] = [
   'carole/actor/pouces',

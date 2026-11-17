@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { getCharacter } from '@/data/characters'
 import { COSTUME_EXPRESSIONS, expressionIn } from '@/data/expressions'
 import { DEFAULT_TENUE, getTenue } from '@/data/tenues'
+import { tenueExtrasOf } from '@/data/tenue-extras'
 import { TENUE_ART, TENUE_ART_BAD, TENUE_PORTRAITS } from '@/data/tenues-art.generated'
 
 /**
@@ -48,6 +49,12 @@ export function tenuePalette(slug: string, tenue: string): readonly string[] {
   return COSTUME_EXPRESSIONS.filter((e) => !bad.has(`${slug}/${dir}/${e}`))
 }
 
+/** Stickers bonus de la tenue portée (hors liste standard), vide si aucun. */
+export function tenueExtras(slug: string, tenue: string) {
+  if (tenue === DEFAULT_TENUE || !hasTenueArt(slug, tenue)) return []
+  return tenueExtrasOf(slug, tenueArtDir(tenue, slug)!)
+}
+
 export function markTenueArtMissing(slug: string, tenue: string) {
   if (tenue === DEFAULT_TENUE || failed.has(key(slug, tenue))) return
   failed.add(key(slug, tenue))
@@ -78,7 +85,7 @@ export function useTenueArt(slug: string, tenue: string | undefined, expression 
     /** Dossier des images. */
     dir: shown === DEFAULT_TENUE ? 'default' : tenueArtDir(shown, slug)!,
     /** Expression à afficher. */
-    expression: expressionIn(tenuePalette(slug, shown), expression),
+    expression: expressionIn([...tenuePalette(slug, shown), ...tenueExtras(slug, shown).map((x) => x.id)], expression),
     /** Emoji à afficher en coin quand la tenue équipée n'a pas (encore) d'illustration. */
     missingEmoji: ok ? null : (getTenue(wanted)?.emoji ?? null),
   }

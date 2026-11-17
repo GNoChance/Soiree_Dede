@@ -515,14 +515,21 @@ as $$
 declare
   v_me uuid := public._require_profile();
 begin
-  if not exists (select 1 from public.profiles where id = v_me and p_expression = any(expressions))
-     and not (p_expression = any(public._costume_expressions())) then
-    raise exception 'unknown_expression';
-  end if;
-  if p_expression <> 'joie' and not exists (
-    select 1 from public.unlocks where profile_id = v_me and expression = p_expression
-  ) then
-    raise exception 'expression_locked';
+  if p_expression ~ '^extra[1-9]$' then
+    -- Sticker bonus d'une planche de tenue : dispo dès qu'une tenue (déjà débloquée, cf. equip_tenue) est portée.
+    if not exists (select 1 from public.profiles where id = v_me and equipped_tenue is not null and equipped_tenue <> 'default') then
+      raise exception 'expression_locked';
+    end if;
+  else
+    if not exists (select 1 from public.profiles where id = v_me and p_expression = any(expressions))
+       and not (p_expression = any(public._costume_expressions())) then
+      raise exception 'unknown_expression';
+    end if;
+    if p_expression <> 'joie' and not exists (
+      select 1 from public.unlocks where profile_id = v_me and expression = p_expression
+    ) then
+      raise exception 'expression_locked';
+    end if;
   end if;
   update public.profiles set equipped_expression = p_expression where id = v_me;
   return public._profile_json(v_me);
