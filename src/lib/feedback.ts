@@ -78,9 +78,69 @@ function noiseSweep(c: AudioContext, dur: number, from: number, to: number, gain
   src.start(t0)
 }
 
-export type SoundName = 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare' | 'cash'
+/** Suite de notes courtes (arpège), douces par défaut. */
+function arp(c: AudioContext, freqs: number[], { step = 0.09, dur = 0.16, type = 'triangle' as OscillatorType, gain = 0.16, start = 0 } = {}) {
+  freqs.forEach((f, i) => tone(c, { freq: f, start: start + i * step, dur, type, gain }))
+}
+
+export type SoundName =
+  | 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare' | 'cash'
+  // cartes (Pas de bol)
+  | 'slap' | 'deal' | 'shuffle' | 'plus2' | 'plus4' | 'reverse' | 'skip' | 'wild' | 'bell'
+  | 'perso_kevin' | 'perso_cycy' | 'perso_dede' | 'perso_manon' | 'perso_mika' | 'perso_cecile' | 'perso_carole' | 'perso_marius' | 'perso_nini'
 
 const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
+  // carte posée sur la table : claque sèche
+  slap: (c) => {
+    noiseSweep(c, 0.08, 2200, 900, 0.14)
+    tone(c, { freq: 180, slideTo: 70, dur: 0.09, gain: 0.18 })
+  },
+  // carte piochée : petit glissement
+  deal: (c) => noiseSweep(c, 0.14, 1100, 3200, 0.1),
+  shuffle: (c) => {
+    noiseSweep(c, 0.12, 1500, 3500, 0.09)
+    for (const t of [110, 220, 330]) setTimeout(() => noiseSweep(c, 0.12, 1500, 3500, 0.09), t)
+  },
+  plus2: (c) => {
+    arp(c, [523, 659], { step: 0.09 })
+    noiseSweep(c, 0.18, 700, 2200, 0.08)
+  },
+  plus4: (c) => {
+    tone(c, { freq: 300, slideTo: 110, dur: 0.45, type: 'triangle', gain: 0.2 })
+    arp(c, [440, 415, 392, 370, 330], { step: 0.09, dur: 0.2, gain: 0.15 })
+  },
+  reverse: (c) => {
+    tone(c, { freq: 380, slideTo: 900, dur: 0.16, gain: 0.18 })
+    tone(c, { freq: 900, slideTo: 380, start: 0.15, dur: 0.18, gain: 0.18 })
+  },
+  skip: (c) => tone(c, { freq: 420, slideTo: 140, dur: 0.22, type: 'triangle', gain: 0.22 }),
+  wild: (c) => arp(c, [523, 659, 784, 988, 1319], { step: 0.07, dur: 0.14, gain: 0.14 }),
+  bell: (c) => arp(c, [988, 1319], { step: 0.1, dur: 0.35, type: 'sine', gain: 0.16 }),
+  // une petite signature par personnage
+  perso_kevin: (c) => arp(c, [523, 784], { step: 0.08 }),
+  perso_cycy: (c) => arp(c, [659, 880, 659, 440], { step: 0.08, type: 'sine' }),
+  perso_dede: (c) => {
+    arp(c, [523, 659, 784, 1047], { step: 0.09 })
+    tone(c, { freq: 1568, start: 0.4, dur: 0.4, gain: 0.08 })
+  },
+  perso_manon: (c) => arp(c, [440, 415, 392], { step: 0.14, type: 'sine', gain: 0.12, dur: 0.25 }),
+  perso_mika: (c) => {
+    tone(c, { freq: 380, slideTo: 900, dur: 0.16, gain: 0.18 })
+    tone(c, { freq: 900, slideTo: 380, start: 0.15, dur: 0.18, gain: 0.18 })
+  },
+  perso_cecile: (c) => {
+    noiseSweep(c, 0.25, 3000, 800, 0.1)
+    arp(c, [880, 1175], { step: 0.1, start: 0.2, type: 'sine' })
+  },
+  perso_carole: (c) => {
+    tone(c, { freq: 900, slideTo: 220, dur: 0.22, type: 'sawtooth', gain: 0.07 })
+    noiseSweep(c, 0.12, 3500, 1200, 0.1)
+  },
+  perso_marius: (c) => arp(c, [262, 196], { step: 0.15, type: 'sine', gain: 0.16, dur: 0.3 }),
+  perso_nini: (c) => {
+    tone(c, { freq: 300, slideTo: 900, dur: 0.15, gain: 0.16 })
+    tone(c, { freq: 900, slideTo: 300, start: 0.15, dur: 0.15, gain: 0.16 })
+  },
   pop: (c) => tone(c, { freq: 620, slideTo: 220, dur: 0.1, gain: 0.22 }),
   tick: (c) => tone(c, { freq: 1400, dur: 0.035, type: 'square', gain: 0.08 }),
   success: (c) => {
@@ -131,7 +191,9 @@ export function vibrate(pattern: number | number[]) {
 
 /** Combos son + haptique prets a l'emploi. */
 export const fx = {
-  pop: () => { playSound('pop'); vibrate(10) },
+  slap: () => { playSound('slap'); vibrate(12) },
+  deal: () => { playSound('deal'); vibrate(6) },
+  pop:() => { playSound('pop'); vibrate(10) },
   tick: () => { playSound('tick'); vibrate(5) },
   success: () => { playSound('success'); vibrate([15, 40, 25]) },
   fail: () => { playSound('fail'); vibrate([60, 40, 90]) },

@@ -5,7 +5,7 @@ import { Eye } from 'lucide-react'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { Modal } from '@/components/ui/Modal'
 import { burst } from '@/components/ui/confetti'
-import { fx, vibrate } from '@/lib/feedback'
+import { fx, playSound, vibrate, type SoundName } from '@/lib/feedback'
 import { mood } from '@/features/soiree/players'
 import { serverNow } from '@/features/soiree/useServerClock'
 import type { PlayerInfo } from '../types'
@@ -49,13 +49,16 @@ export function useLogSplashes(s: PdbState, meId: string) {
     for (const e of fresh) {
       switch (e.t) {
         case 'play':
+          // mes propres cartes ont déjà fait « claque » au toucher ; les spéciales ont leur son à elles
           if (e.card.kind === 'perso') add.push({ k: e.n, kind: 'perso', e })
-          else if (e.card.kind === 'plus2' || e.card.kind === 'wild4') fx.whoosh()
-          else fx.pop()
+          else if (e.card.kind === 'num') {
+            if (e.p !== meId) fx.slap()
+          } else playSound(e.card.kind === 'wild4' ? 'plus4' : e.card.kind)
           break
         case 'draw':
           if (e.count >= 4) add.push({ k: e.n, kind: 'pasdebol', p: e.p, count: e.count })
           else if (e.p === meId) vibrate(12)
+          else for (let i = 0; i < Math.min(e.count, 3); i++) window.setTimeout(() => fx.deal(), i * 120)
           break
         case 'out':
           add.push({ k: e.n, kind: 'out', p: e.p, place: e.place })
@@ -118,10 +121,17 @@ function SplashBody({ splash, get, meId }: { splash: Splash; get: Get; meId: str
     } else if (splash.kind === 'out') {
       fx.fanfare()
       burst({ x: 0.5, y: 0.45 }, 140)
-    } else if (splash.kind === 'perso') fx.whoosh()
-    else if (splash.kind === 'denounce') fx.fail()
-    else if (splash.kind === 'announce') fx.success()
-    else fx.whoosh()
+    } else if (splash.kind === 'perso') {
+      playSound(`perso_${splash.e.card.perso}` as SoundName)
+      vibrate([15, 30, 15])
+    } else if (splash.kind === 'denounce') fx.fail()
+    else if (splash.kind === 'announce') {
+      playSound('bell')
+      vibrate([15, 40, 25])
+    } else {
+      playSound('shuffle')
+      vibrate(8)
+    }
   }, [splash])
 
   const name = (id: string) => (id === meId ? 'Toi' : get(id).nickname)
@@ -242,6 +252,74 @@ function SplashBody({ splash, get, meId }: { splash: Splash; get: Get; meId: str
     <motion.div className="sticker relative bg-surface px-5 py-3 text-center" initial={{ scale: 0, rotate: -10 }} animate={{ scale: 1, rotate: reduce ? 0 : 360 }} transition={{ duration: 0.6 }}>
       <p className="font-display text-2xl font-extrabold">🔀 On remélange la défausse !</p>
     </motion.div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cartes qui volent de la pioche vers celui qui pioche                         */
+/* -------------------------------------------------------------------------- */
+
+type Pt = { x: number; y: number }
+type Flight = { id: string; from: Pt; to: Pt; delay: number }
+
+const centerOf = (el: Element): Pt => {
+  const r = el.getBoundingClientRect()
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+}
+
+/** Repères dans le DOM : la pioche (`data-pdb-pile`) et les places (`data-seat`, « me » = ma main). */
+export function DrawFlights({ s, meId }: { s: PdbState; meId: string }) {
+  const seen = useRef(s.log_seq)
+  const reduce = useReducedMotion()
+  const [flights, setFlights] = useState<Flight[]>([])
+
+  useEffect(() => {
+    const fresh = s.log.filter((e) => e.n > seen.current)
+    if (!fresh.length) return
+    seen.current = Math.max(...fresh.map((e) => e.n))
+    if (reduce) return
+    const pile = document.querySelector('[data-pdb-pile]')
+    if (!pile) return
+    const from = centerOf(pile)
+    const targets: Array<[string, number]> = []
+    for (const e of fresh) {
+      if (e.t === 'draw') targets.push([e.p, Math.min(e.count, 4)])
+      else if (e.t === 'denounce') targets.push([e.target, Math.min(e.count, 4)])
+      else if (e.t === 'play' && e.card.kind === 'perso') {
+        if (e.card.perso === 'carole' && e.target) targets.push([e.target, 3])
+        if (e.card.perso === 'dede') for (const id of s.active) if (id !== e.p) targets.push([id, 1])
+      }
+    }
+    const batch = `${fresh[0].n}-${Math.random().toString(36).slice(2, 6)}`
+    const add: Flight[] = []
+    let slot = 0
+    for (const [id, count] of targets) {
+      const el = document.querySelector(`[data-seat="${id === meId ? 'me' : id}"]`)
+      if (!el) continue
+      const to = centerOf(el)
+      for (let i = 0; i < count; i++) add.push({ id: `${batch}-${slot++}`, from, to, delay: i * 0.1 })
+    }
+    if (!add.length) return
+    setFlights((f) => [...f, ...add])
+    window.setTimeout(() => setFlights((f) => f.filter((x) => !x.id.startsWith(batch))), 1500)
+  }, [s.log, s.active, meId, reduce])
+
+  return createPortal(
+    <div className="pointer-events-none fixed inset-0 z-30">
+      {flights.map((f) => (
+        <motion.div
+          key={f.id}
+          className="absolute"
+          style={{ left: f.from.x - 17, top: f.from.y - 25 }}
+          initial={{ x: 0, y: 0, scale: 1, rotate: -10, opacity: 0 }}
+          animate={{ x: f.to.x - f.from.x, y: f.to.y - f.from.y, scale: 0.6, rotate: 14, opacity: [0, 1, 1, 0] }}
+          transition={{ delay: f.delay, duration: 0.6, ease: 'easeInOut', opacity: { delay: f.delay, duration: 0.6, times: [0, 0.1, 0.8, 1] } }}
+        >
+          <PdbCardView back w={34} />
+        </motion.div>
+      ))}
+    </div>,
+    document.body,
   )
 }
 

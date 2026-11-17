@@ -11,7 +11,7 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { ColorGlyph, PdbCardView } from './Card'
-import { PeekModal, SplashLayer, useLogSplashes } from './Effects'
+import { DrawFlights, PeekModal, SplashLayer, useLogSplashes } from './Effects'
 import { COLOR_META, PDB_COLORS, PERSOS, hashOf, isPlayable, needsColor, needsTarget, pdbActions, sortHand } from './rules'
 import type { PdbAction, PdbCard, PdbColor, PdbSecret, PdbState } from './types'
 
@@ -58,6 +58,9 @@ function useMySecret(matchId: string, propSecret: unknown, ver: number | undefin
 /* -------------------------------------------------------------------------- */
 
 type Choice = { card: PdbCard; step: 'color' | 'target' }
+
+/** Gros symbole qui éclate sur la défausse quand une carte spéciale est posée. */
+const IMPACT: Partial<Record<PdbCard['kind'], string>> = { plus2: '+2', wild4: '+4', reverse: '⇄', skip: '⊘', wild: '🌈' }
 
 export default function PasDeBolPlay({ matchId, state, secret, meId, players, act }: GamePlayProps) {
   const s = state as unknown as PdbState
@@ -133,7 +136,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
     if (needsTarget(c) && !extra.target) return setChoice({ card: c, step: 'target' })
     setChoice(null)
     setGhost(c.id)
-    fx.whoosh()
+    fx.slap()
     const r = await send(pdbActions.play(c.id, extra))
     setGhost(null)
     if (!r) fx.fail()
@@ -141,7 +144,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
 
   const draw = async () => {
     if (!myTurn || s.turn_phase !== 'play' || busy) return
-    fx.whoosh()
+    fx.deal()
     await send(pdbActions.draw())
   }
 
@@ -268,6 +271,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
         onTarget={(c, target) => void play(c, { target })}
       />
       <PeekModal peek={sec?.peek} get={get} />
+      <DrawFlights s={s} meId={meId} />
       <SplashLayer splash={splash} get={get} meId={meId} onSkip={skip} />
     </div>
   )
@@ -309,7 +313,7 @@ function PlayerRail({ s, seats, get, meId, left, total, canDenounce, onDenounce,
               transition={{ delay: i * 0.04 }}
               className={cn('flex w-[4.4rem] shrink-0 flex-col items-center gap-0.5', out && 'opacity-70')}
             >
-              <div className="relative flex size-16 items-center justify-center">
+              <div data-seat={id} className="relative flex size-16 items-center justify-center">
                 {active && <TurnRing frac={left / total} size={64} />}
                 <motion.div animate={active && !reduce ? { y: [0, -4, 0] } : { y: 0 }} transition={{ repeat: active ? Infinity : 0, duration: 0.9 }}>
                   <Avatar slug={p.slug} expression={expr} size={48} className={cn(out && 'grayscale-[0.4]')} />
@@ -407,6 +411,7 @@ function Table({ s, get, meId, flyFrom, canDraw, shakeDraw, onDraw }: { s: PdbSt
         onClick={onDraw}
         disabled={!canDraw}
         aria-label={`Pioche (${s.draw_count} cartes)`}
+        data-pdb-pile
         className="relative mt-4 disabled:cursor-default"
         animate={shakeDraw && !reduce ? { rotate: [0, -6, 6, -4, 4, 0], y: [0, -4, 0] } : { rotate: 0 }}
         transition={shakeDraw ? { repeat: Infinity, duration: 0.9, repeatDelay: 0.6 } : undefined}
@@ -425,6 +430,18 @@ function Table({ s, get, meId, flyFrom, canDraw, shakeDraw, onDraw }: { s: PdbSt
 
       {/* défausse */}
       <div className="relative mt-4" style={{ width: 92, height: 133 }}>
+        {IMPACT[top.kind] && !reduce && (
+          <motion.span
+            key={`impact-${top.id}`}
+            className="pointer-events-none absolute top-1/2 left-1/2 z-30 -translate-x-1/2 -translate-y-1/2 font-display text-5xl font-extrabold text-white"
+            style={{ WebkitTextStroke: '3px #1f1b2e', paintOrder: 'stroke fill', textShadow: '3px 3px 0 #1f1b2e' }}
+            initial={{ scale: 0.2, opacity: 1, rotate: -15 }}
+            animate={{ scale: [0.2, 1.5, 1.9], opacity: [1, 1, 0], rotate: [-15, 6, 0] }}
+            transition={{ duration: 0.9 }}
+          >
+            {IMPACT[top.kind]}
+          </motion.span>
+        )}
         {under.map((c, i) => {
           const h = hashOf(c.id + i)
           return (
@@ -546,7 +563,7 @@ function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay, me }: { hand: P
   const draggingRef = useRef(false)
 
   return (
-    <div className="relative">
+    <div className="relative" data-seat="me">
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="flex shrink-0 items-center gap-2 font-display font-extrabold whitespace-nowrap">
           <Avatar slug={me.slug} expression={myTurn ? mood(me, 'happy') : me.equipped} size={34} />
@@ -655,7 +672,7 @@ function OpponentSeat({ s, id, index, get, left, total, cw, fanW, maxShow, canDe
       transition={{ delay: index * 0.06 }}
       className={cn('flex min-w-0 flex-1 flex-col items-center gap-0.5', out && 'opacity-70')}
     >
-      <div className="relative flex size-14 items-center justify-center">
+      <div data-seat={id} className="relative flex size-14 items-center justify-center">
         {active && <TurnRing frac={left / total} size={56} />}
         <motion.div animate={active && !reduce ? { y: [0, -4, 0] } : { y: 0 }} transition={{ repeat: active ? Infinity : 0, duration: 0.9 }}>
           <Avatar slug={p.slug} expression={expr} size={42} className={cn(out && 'grayscale-[0.4]')} />
