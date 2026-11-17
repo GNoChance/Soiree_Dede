@@ -271,6 +271,8 @@ export const TENUE_ART_BAD: readonly string[] = [
   'carole/actor/pouces',
   'cecile/pyro/colere',
   'cecile/philosopher/pouces',
+  'kevin/croupier/pleurs',
+  'kevin/croupier/surprise',
   'marius/admiral/timide',
   'marius/tycoon/timide',
   'marius/spy/timide',
