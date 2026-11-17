@@ -12,7 +12,7 @@ import type { BaseGameState } from '@/games/types'
 import { useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { DuelTvContext, TV_VIEWER_ID, isDuelState, readOnlyAct } from '@/features/duel/tv'
-import { useWakeLock } from '@/games/qui-suis-je/device'
+import { useWakeLock } from '@/lib/wakeLock'
 import { cn } from '@/lib/cn'
 
 /** Plein écran du navigateur (si disponible). */

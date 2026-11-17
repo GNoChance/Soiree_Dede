@@ -8,6 +8,7 @@ import { burst, confettiRain } from '@/components/ui/confetti'
 import { supabase } from '@/lib/supabase'
 import { fx, playSound, vibrate } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
+import { useWakeLock } from '@/lib/wakeLock'
 import { ConfirmModal } from '@/features/soiree/components'
 import { pickExpression, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
@@ -66,37 +67,6 @@ function useAutoTick(s: TeamState, act: ActFn, meId: string, isHost: boolean) {
     timer = window.setTimeout(fire, Math.max(0, target - serverNow()) + delay)
     return () => clearTimeout(timer)
   }, [target, role])
-}
-
-type WakeLockLike = { release: () => Promise<void> }
-
-/** Garde l'écran allumé tant que `active` (re-demandé au retour au premier plan). */
-function useWakeLock(active: boolean) {
-  useEffect(() => {
-    const wl = (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLockLike> } }).wakeLock
-    if (!active || !wl) return
-    let lock: WakeLockLike | null = null
-    let cancelled = false
-    const request = async () => {
-      try {
-        const l = await wl.request('screen')
-        if (cancelled) void l.release().catch(() => undefined)
-        else lock = l
-      } catch {
-        /* refusé (batterie faible, onglet caché…) : pas grave */
-      }
-    }
-    void request()
-    const onVis = () => {
-      if (document.visibilityState === 'visible') void request()
-    }
-    document.addEventListener('visibilitychange', onVis)
-    return () => {
-      cancelled = true
-      document.removeEventListener('visibilitychange', onVis)
-      void lock?.release().catch(() => undefined)
-    }
-  }, [active])
 }
 
 /* -------------------------------------------------------------------------- */
