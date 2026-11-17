@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { CHECKPOINTS, type TrackDef } from '../tracks'
 import { BallSim, BOX_ROWS, boxMaterial, rollItem, type Fx, type Hazard, type ItemId, type UsePayload } from './items'
 import { buildKart, SPARKS } from './kart'
+import { Particles } from './particles'
 import { Sfx } from './sfx'
 import { Track, WALL_MARGIN } from './track'
 
@@ -42,6 +43,8 @@ export interface Hud {
   /** Objet en main (null = rien), roulette en cours. */
   item: ItemId | null
   rolling: boolean
+  /** Mini-carte : karts en coordonnées normalisées 0..1. */
+  dots: { x: number; y: number; c: string; me: boolean }[]
   /** Effets subis / actifs sur mon kart. */
   fx: { spin: boolean; slow: boolean; confetti: boolean; reverse: boolean; star: boolean; bubble: boolean }
 }
@@ -186,7 +189,7 @@ const angDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a
 export class Game {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
-  private camera = new THREE.PerspectiveCamera(70, 1, 0.5, 600)
+  private camera = new THREE.PerspectiveCamera(70, 1, 0.5, 1100)
   private track: Track
   private racers: Racer[] = []
   private byId = new Map<string, Racer>()
@@ -202,6 +205,10 @@ export class Game {
   private camLook = new THREE.Vector3()
   private camSnap = true
   private tmp = new THREE.Vector3()
+  /** Cadre de la mini-carte : [x0, z0, côté]. */
+  private box: [number, number, number] = [0, 0, 1]
+  private dust = new Particles(500, 1.1)
+  private glow = new Particles(300, 0.55, true)
   private hudAt = 0
   private keys = new Set<string>()
   private pointer: { id: number; steer: number } | null = null
@@ -219,6 +226,15 @@ export class Game {
     this.o = o
     const def = o.track
     this.track = new Track(def)
+    {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+      for (let i = 0; i < this.track.n; i++) {
+        x0 = Math.min(x0, this.track.px[i]); x1 = Math.max(x1, this.track.px[i])
+        z0 = Math.min(z0, this.track.pz[i]); z1 = Math.max(z1, this.track.pz[i])
+      }
+      const span = Math.max(x1 - x0, z1 - z0) * 1.1
+      this.box = [(x0 + x1) / 2 - span / 2, (z0 + z1) / 2 - span / 2, span]
+    }
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     el.appendChild(this.renderer.domElement)
@@ -229,6 +245,7 @@ export class Game {
     sun.position.set(40, 80, 20)
     this.scene.add(sun)
     this.scene.add(this.track.build())
+    this.scene.add(this.dust.points, this.glow.points)
 
     const loader = new THREE.TextureLoader()
     const bots = new Set(o.localBots)
@@ -293,6 +310,13 @@ export class Game {
 
   setMuted(m: boolean) {
     this.sfx.setMuted(m)
+  }
+
+  /** Contour du circuit pour la mini-carte (coordonnées 0..1). */
+  outline(): [number, number][] {
+    const out: [number, number][] = []
+    for (let i = 0; i < this.track.n; i += 6) out.push([(this.track.px[i] - this.box[0]) / this.box[2], (this.track.pz[i] - this.box[1]) / this.box[2]])
+    return out
   }
 
   /** Bouton Drift de l'écran tactile. */
@@ -533,6 +557,32 @@ export class Game {
     this.renderer.domElement.remove()
   }
 
+  /** Poussière hors piste, fumée et étincelles de dérapage, gerbe du turbo (près de la caméra seulement). */
+  private emitFx(r: Racer, lift: number) {
+    if (lift > 0.3 || r.speed < 6) return
+    const cam = this.camPos
+    if ((r.x - cam.x) ** 2 + (r.z - cam.z) ** 2 > 90 * 90) return
+    const h = r.heading + r.yaw
+    const cx = Math.cos(h)
+    const cz = Math.sin(h)
+    const rand = (s: number) => (Math.random() - 0.5) * s
+    for (const side of [-1, 1]) {
+      const wx = r.x - cx * 0.95 - cz * side * 0.82
+      const wz = r.z - cz * 0.95 + cx * side * 0.82
+      const back = -r.speed * 0.15
+      if (Math.abs(r.lat) > this.track.half && r.star <= 0) {
+        if (Math.random() < 0.6) this.dust.emit(wx, 0.3, wz, cx * back + rand(2), 1 + Math.random(), cz * back + rand(2), this.track.def.colors.ground, 0.7)
+      } else if (r.driftDir) {
+        if (Math.random() < 0.5) this.dust.emit(wx, 0.25, wz, cx * back + rand(1.5), 0.8, cz * back + rand(1.5), '#D9D9E3', 0.5)
+        const lvl = r.kind === 'remote' ? 2 : DRIFT_LEVELS.filter((v) => r.charge >= v).length
+        if (lvl) this.glow.emit(wx, 0.2, wz, rand(5) - cx * 3, 1.5 + Math.random() * 2, rand(5) - cz * 3, SPARKS[lvl - 1], 0.35)
+      }
+    }
+    if (r.boost > 0 && Math.random() < 0.8) {
+      this.glow.emit(r.x - cx * 1.9, 0.7, r.z - cz * 1.9, -cx * 6 + rand(2), rand(1.5), -cz * 6 + rand(2), Math.random() < 0.5 ? '#FFB627' : '#FF5A1F', 0.3)
+    }
+  }
+
   private makeKart(d: Driver, loader: THREE.TextureLoader) {
     const k = buildKart(d.color, d.sprite, d.kart ?? 0, loader)
     return {
@@ -699,7 +749,9 @@ export class Game {
     r.driftDir = cur.d
     r.boost = cur.b ? 0.2 : 0
     r.e = cur.e ?? 0
-    r.idx = this.track.locate(r.x, r.z, r.idx).i
+    const loc = this.track.locate(r.x, r.z, r.idx)
+    r.idx = loc.i
+    r.lat = loc.lat
   }
 
   private botInput(r: Racer) {
@@ -804,6 +856,7 @@ export class Game {
       for (const s of r.steerPivots) s.rotation.y = -r.steerS * 0.45
       // ombre : se resserre pendant un saut
       r.shadow.scale.setScalar(1 - lift * 0.15)
+      this.emitFx(r, lift)
       if (e & E_STAR) r.body.color.setHSL((performance.now() / 400) % 1, 0.9, 0.55)
       else r.body.color.set(r.d.color)
       r.bubbleMesh.visible = Boolean(e & E_BUBBLE)
@@ -820,6 +873,9 @@ export class Game {
       r.flame.visible = r.boost > 0
       if (r.boost > 0) r.flame.scale.setScalar(0.8 + 0.4 * Math.random())
     }
+
+    this.dust.update(dt)
+    this.glow.update(dt)
 
     // caméra derrière mon kart (spectateur : derrière le 1er), champ élargi pendant les turbos
     const rank = this.ranking()
@@ -863,6 +919,7 @@ export class Game {
         boost: m.boost > 0,
         wrongWay: wrong && this.phase === 'racing' && m === this.me,
         results: this.phase === 'finished' ? rank.map((r) => ({ id: r.d.id, name: r.d.name, time: r.finish, me: r === this.me })) : null,
+        dots: this.racers.map((r) => ({ x: (r.x - this.box[0]) / this.box[2], y: (r.z - this.box[1]) / this.box[2], c: r.d.color, me: r === this.me })),
         item: this.me?.item ?? null,
         rolling: (this.me?.roll ?? 0) > 0,
         fx: {

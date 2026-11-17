@@ -126,12 +126,12 @@ export function buildKart(color: string, sprite: string, variant: number, loader
 
   // variantes : bolide (grand aileron), buggy (arceau), classique (petit becquet + phares)
   if (variant === 1) {
-    for (const z of [-0.45, 0.45]) put(S.box, S.dark, -1.3, 1.05, z, 0.1, 0.55, 0.06)
-    put(S.box, bodyMat, -1.36, 1.36, 0, 0.5, 0.08, 1.8)
-    put(S.box, accent, -1.36, 1.42, 0, 0.4, 0.03, 1.82)
+    for (const z of [-0.45, 0.45]) put(S.box, S.dark, -1.3, 0.92, z, 0.1, 0.4, 0.06)
+    put(S.box, bodyMat, -1.36, 1.14, 0, 0.5, 0.08, 1.8)
+    put(S.box, accent, -1.36, 1.2, 0, 0.4, 0.03, 1.82)
   } else if (variant === 2) {
-    for (const z of [-0.5, 0.5]) put(S.cyl, S.metal, -0.9, 1.35, z, 0.05, 1.1, 0.05)
-    const bar = put(S.cyl, S.metal, -0.9, 1.9, 0, 0.05, 1.05, 0.05)
+    for (const z of [-0.5, 0.5]) put(S.cyl, S.metal, 0.15, 1.2, z, 0.05, 0.9, 0.05)
+    const bar = put(S.cyl, S.metal, 0.15, 1.65, 0, 0.05, 1.05, 0.05)
     bar.rotation.x = Math.PI / 2
   } else {
     put(S.box, accent, -1.28, 1.0, 0, 0.3, 0.06, 1.2)

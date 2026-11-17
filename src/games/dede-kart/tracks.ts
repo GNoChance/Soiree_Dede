@@ -57,7 +57,7 @@ export const TRACKS: TrackDef[] = [
     colors: {
       sky: '#7FD1FF',
       ground: '#F7D9A0',
-      road: '#B07A52',
+      road: '#6E4A33',
       kerbA: '#2EC4B6',
       kerbB: '#FFFFFF',
       decor: ['#FF5A5F', '#FFD23F', '#2EC4B6', '#FF8C42', '#4CC9F0'],

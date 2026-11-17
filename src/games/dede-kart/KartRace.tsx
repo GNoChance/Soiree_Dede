@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Game, type Driver, type Hud, type RaceResult } from './engine/Game'
 import { ITEM_IDS, ITEMS, type UsePayload } from './engine/items'
 import type { TrackDef } from './tracks'
@@ -99,23 +99,51 @@ export default function KartRace(p: Props) {
               <span className="text-base">{hud.place === 1 ? 'er' : 'e'}</span>
               <span className="text-sm"> / {hud.total}</span>
             </div>
-            <div className="rounded-chip border-[3px] border-ink bg-surface px-3 py-1 text-center text-text shadow-sticker-sm">
-              <div className="text-lg leading-tight">Tour {hud.lap}/{hud.laps}</div>
-              <div className="text-sm tabular-nums">{fmtTime(hud.time)}</div>
+            <div className="flex flex-col items-end gap-2">
+              <div className="rounded-chip border-[3px] border-ink bg-surface px-3 py-1 text-center text-text shadow-sticker-sm">
+                <div className="text-lg leading-tight">Tour {hud.lap}/{hud.laps}</div>
+                <div className="text-sm tabular-nums">{fmtTime(hud.time)}</div>
+              </div>
+              <MiniMap game={game.current} dots={hud.dots} />
             </div>
           </div>
 
-          {hud.phase === 'countdown' && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-white [text-shadow:4px_4px_0_#1B1B2F]">
-              <div className="font-display text-3xl font-extrabold">
+          {hud.boost && (
+            <div
+              className="pointer-events-none absolute inset-0 animate-pulse"
+              style={{
+                background: 'repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,0.22) 0deg 1.2deg, transparent 1.2deg 9deg)',
+                maskImage: 'radial-gradient(circle at 50% 55%, transparent 32%, black 75%)',
+                WebkitMaskImage: 'radial-gradient(circle at 50% 55%, transparent 32%, black 75%)',
+              }}
+            />
+          )}
+
+          {(hud.phase === 'countdown' || (hud.phase === 'racing' && hud.time < 1)) && (
+            <div className="pointer-events-none absolute inset-x-0 top-1/4 flex flex-col items-center gap-3">
+              <div className="font-display text-2xl font-extrabold text-white [text-shadow:3px_3px_0_#1B1B2F]">
                 {track.emoji} {track.name}
               </div>
-              {hud.count > 0 && <div className="font-display text-9xl font-extrabold">{hud.count}</div>}
-            </div>
-          )}
-          {hud.phase === 'racing' && hud.time < 1 && (
-            <div className="pointer-events-none absolute inset-0 grid place-items-center font-display text-7xl font-extrabold text-sun [text-shadow:5px_5px_0_#1B1B2F]">
-              PARTEZ !
+              {/* feux de départ : rouges un à un, puis tous verts */}
+              <div className="flex gap-3 rounded-card border-[4px] border-ink bg-[#1B1B2F] px-4 py-3 shadow-sticker">
+                {[3, 2, 1].map((n) => {
+                  const go = hud.phase === 'racing'
+                  const on = go || (hud.count > 0 && hud.count <= n)
+                  return (
+                    <span
+                      key={n}
+                      className="size-12 rounded-full border-[3px] border-black/60"
+                      style={{
+                        background: on ? (go ? '#38E07B' : '#FF3B3B') : '#3A3A48',
+                        boxShadow: on ? `0 0 18px ${go ? '#38E07B' : '#FF3B3B'}` : 'none',
+                      }}
+                    />
+                  )
+                })}
+              </div>
+              {hud.phase === 'racing' && (
+                <div className="font-display text-6xl font-extrabold text-sun [text-shadow:5px_5px_0_#1B1B2F]">PARTEZ !</div>
+              )}
             </div>
           )}
           {hud.wrongWay && (
@@ -207,4 +235,37 @@ export default function KartRace(p: Props) {
       {children}
     </div>
   )
+}
+
+/** Mini-carte : contour du circuit + un point par kart (le mien plus gros, cerclé). */
+function MiniMap({ game, dots }: { game: Game | null; dots: Hud['dots'] }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const outline = useMemo(() => game?.outline() ?? [], [game])
+  useEffect(() => {
+    const c = ref.current
+    const g = c?.getContext('2d')
+    if (!c || !g || !outline.length) return
+    const S = c.width
+    g.clearRect(0, 0, S, S)
+    g.lineJoin = 'round'
+    g.beginPath()
+    outline.forEach(([x, y], i) => (i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S)))
+    g.closePath()
+    g.strokeStyle = 'rgba(27,27,47,0.9)'
+    g.lineWidth = 9
+    g.stroke()
+    g.strokeStyle = '#F4F4F4'
+    g.lineWidth = 4
+    g.stroke()
+    for (const d of [...dots].sort((a, b) => Number(a.me) - Number(b.me))) {
+      g.beginPath()
+      g.arc(d.x * S, d.y * S, d.me ? 7 : 5, 0, Math.PI * 2)
+      g.fillStyle = d.c
+      g.fill()
+      g.lineWidth = d.me ? 3 : 2
+      g.strokeStyle = d.me ? '#FFFFFF' : '#1B1B2F'
+      g.stroke()
+    }
+  }, [outline, dots])
+  return <canvas ref={ref} width={120} height={120} className="size-[96px] rounded-card border-[3px] border-ink bg-black/25" />
 }

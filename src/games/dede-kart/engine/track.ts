@@ -82,6 +82,7 @@ export class Track {
   private ribbon(i0: number, i1: number, a: number, b: number, y: number, col: (k: number) => THREE.Color) {
     const pos: number[] = []
     const colors: number[] = []
+    const uvs: number[] = []
     const idx: number[] = []
     for (let k = i0; k <= i1; k++) {
       const i = this.wrap(k)
@@ -90,6 +91,7 @@ export class Track {
       const c = col(k)
       pos.push(this.px[i] + nx * a, y, this.pz[i] + nz * a, this.px[i] + nx * b, y, this.pz[i] + nz * b)
       colors.push(c.r, c.g, c.b, c.r, c.g, c.b)
+      uvs.push(0, k * 0.12, (b - a) / 6, k * 0.12)
       if (k > i0) {
         const v = (k - i0) * 2
         idx.push(v - 2, v - 1, v, v - 1, v + 1, v)
@@ -98,6 +100,7 @@ export class Track {
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     g.setIndex(idx)
     return g
   }
@@ -112,7 +115,12 @@ export class Track {
     const roadB = road.clone().multiplyScalar(0.93)
     const kA = new THREE.Color(c.kerbA)
     const kB = new THREE.Color(c.kerbB)
-    add(this.ribbon(0, this.n, -h, h, 0.02, (k) => (Math.floor(k / 8) % 2 ? road : roadB)))
+    // bitume texturé (grain) légèrement varié
+    const roadMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, map: noiseTexture(200, 255, 2600) })
+    group.add(new THREE.Mesh(this.ribbon(0, this.n, -h, h, 0.02, (k) => (Math.floor(k / 8) % 2 ? road : roadB)), roadMat))
+    // ligne blanche centrale en pointillés
+    const dash = new THREE.Color('#F4F4F4')
+    for (let k = 4; k < this.n - 4; k += 12) add(this.ribbon(k, k + 5, -0.18, 0.18, 0.035, () => dash))
     add(this.ribbon(0, this.n, -h - 1.2, -h, 0.03, (k) => (Math.floor(k / 4) % 2 ? kA : kB)))
     add(this.ribbon(0, this.n, h, h + 1.2, 0.03, (k) => (Math.floor(k / 4) % 2 ? kA : kB)))
     // ligne de départ (damier)
@@ -142,7 +150,9 @@ export class Track {
       add(ramp)
     }
     // sol
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.MeshBasicMaterial({ color: c.ground }))
+    const groundTex = noiseTexture(210, 255, 1800)
+    groundTex.repeat.set(140, 140)
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.MeshBasicMaterial({ color: c.ground, map: groundTex }))
     ground.rotation.x = -Math.PI / 2
     group.add(ground)
     // décor : cubes de couleur en instancing, hors de la piste
@@ -183,6 +193,119 @@ export class Track {
       })
       group.add(mesh)
     }
+    this.addWalls(group, rnd)
+    this.addGantry(group)
+    group.add(skyDome(c.sky))
     return group
   }
+
+  /** Murs de pneus (rouge / blanc) le long des bords infranchissables. */
+  private addWalls(group: THREE.Group, rnd: () => number) {
+    const tire = new THREE.TorusGeometry(0.5, 0.24, 6, 12)
+    tire.rotateX(Math.PI / 2)
+    const spots: [number, number, number][] = []
+    for (let i = 0; i < this.n; i += 3) {
+      for (const side of [-1, 1]) {
+        const [x, z] = this.pointAt(i, side * (this.half + WALL_MARGIN + 0.6))
+        // pas de pneus là où le mur d'en face passe trop près (épingle)
+        if (Math.abs(this.locate(x, z).lat) < this.half + WALL_MARGIN - 0.5) continue
+        for (const y of [0.24, 0.66]) spots.push([x, y, z])
+      }
+    }
+    const mesh = new THREE.InstancedMesh(tire, new THREE.MeshLambertMaterial(), spots.length)
+    const m = new THREE.Matrix4()
+    const red = new THREE.Color('#E63946')
+    const white = new THREE.Color('#F1F1F1')
+    const black = new THREE.Color('#2A2A33')
+    spots.forEach(([x, y, z], k) => {
+      m.makeTranslation(x, y, z)
+      mesh.setMatrixAt(k, m)
+      mesh.setColorAt(k, y < 0.5 ? black : Math.floor(k / 4) % 2 ? red : white)
+    })
+    void rnd
+    group.add(mesh)
+  }
+
+  /** Portique de départ au-dessus de la ligne. */
+  private addGantry(group: THREE.Group) {
+    const mat = new THREE.MeshLambertMaterial({ color: '#2B2D42' })
+    const span = this.half + 1.6
+    const [x0, z0] = this.pointAt(1, 0)
+    const ang = Math.atan2(this.tz[1], this.tx[1])
+    const g = new THREE.Group()
+    for (const s of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 7, 10), mat)
+      post.position.set(0, 3.5, s * span)
+      g.add(post)
+    }
+    const c = document.createElement('canvas')
+    c.width = 512
+    c.height = 96
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = '#FF8C42'
+    ctx.fillRect(0, 0, 512, 96)
+    for (let i = 0; i < 16; i++) {
+      ctx.fillStyle = i % 2 ? '#1B1B2F' : '#FFFFFF'
+      ctx.fillRect(i * 32, 0, 32, 14)
+      ctx.fillStyle = i % 2 ? '#FFFFFF' : '#1B1B2F'
+      ctx.fillRect(i * 32, 82, 32, 14)
+    }
+    ctx.fillStyle = '#FFFFFF'
+    ctx.font = 'bold 54px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('DÉDÉ KART', 256, 50)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.6, span * 2 + 0.8), [
+      mat, mat, mat, mat,
+      new THREE.MeshBasicMaterial({ map: tex }),
+      new THREE.MeshBasicMaterial({ map: tex }),
+    ])
+    banner.position.y = 6.6
+    banner.rotation.y = Math.PI / 2
+    const holder = new THREE.Group()
+    holder.add(banner)
+    holder.rotation.y = -Math.PI / 2
+    g.add(holder)
+    g.position.set(x0, 0, z0)
+    g.rotation.y = -ang
+    group.add(g)
+  }
+}
+
+/** Grain gris clair (multiplie la couleur) : bitume, sable, neige. */
+function noiseTexture(lo: number, hi: number, dots: number) {
+  const c = document.createElement('canvas')
+  c.width = c.height = 128
+  const g = c.getContext('2d')!
+  g.fillStyle = `rgb(${hi},${hi},${hi})`
+  g.fillRect(0, 0, 128, 128)
+  let seed = 3
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  for (let i = 0; i < dots; i++) {
+    const v = Math.round(lo + rnd() * (hi - lo))
+    g.fillStyle = `rgb(${v},${v},${v})`
+    g.fillRect(Math.floor(rnd() * 128), Math.floor(rnd() * 128), 1 + Math.floor(rnd() * 2), 1 + Math.floor(rnd() * 2))
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return t
+}
+
+/** Ciel en dégradé (horizon clair -> zénith plus profond). */
+function skyDome(horizon: string) {
+  const geo = new THREE.SphereGeometry(520, 24, 12)
+  const h = new THREE.Color(horizon)
+  const top = h.clone().offsetHSL(0.02, 0.15, -0.22)
+  const pos = geo.getAttribute('position')
+  const cols: number[] = []
+  const tmp = new THREE.Color()
+  for (let i = 0; i < pos.count; i++) {
+    const f = Math.max(0, pos.getY(i) / 520)
+    tmp.copy(h).lerp(top, Math.pow(f, 0.6))
+    cols.push(tmp.r, tmp.g, tmp.b)
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }))
 }
