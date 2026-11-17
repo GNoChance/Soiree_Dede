@@ -10,6 +10,7 @@ import { SoireePage } from '@/pages/SoireePage'
 import { MatchPage } from '@/pages/MatchPage'
 import { HistoryDetailPage, HistoryPage } from '@/features/stats/HistoryPages'
 import { ProfilePage } from '@/features/stats/ProfilePage'
+import { DailyPage } from '@/features/daily/DailyPage'
 import { RouteError } from '@/pages/RouteError'
 
 const router = createBrowserRouter([
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
             children: [
               { path: '/soiree/:id', element: <SoireePage /> },
               { path: '/partie/:matchId', element: <MatchPage /> },
+              { path: '/defi', element: <DailyPage /> },
             ],
           },
         ],

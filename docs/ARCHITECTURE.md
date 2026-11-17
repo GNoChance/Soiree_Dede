@@ -299,3 +299,13 @@ Tout est dérivé de `soirees` / `soiree_players` / `matches` / `match_players` 
 
 ## Récap de soirée « Wrapped » (`supabase/features/recap.sql`, `src/features/recap/`)
 Après le podium, cartes plein écran (chiffres, jeu de la soirée, awards, classement, « À la prochaine ! », partage PNG 1080x1920 dessiné sur canvas). Le chat étant purgé à la fin, le récap est figé dans `soiree_recaps(soiree_id, data jsonb, created_at)` par le trigger `soirees_a_recap` (AFTER UPDATE OF status -> 'ended', alphabétiquement avant `soirees_chat_purge` ; erreurs avalées). RPC `soiree_recap(p_soiree_id)` (accès comme `soiree_history_detail`, soirée terminée) = jsonb stocké + `standings` + `winner_ids` ; sans ligne stockée : calcul à la volée sans chat (`has_chat=false`). Awards : serie, bluff, deuxieme, pasdebol, bavard, sticker (règles en tête du SQL). Ouverture : `SoireePage` (après le podium) et bouton « Revoir le récap » de `HistoryDetailPage`.
+
+
+## Défi du jour (solo, asynchrone)
+
+- **SQL** : `supabase/features/daily.sql`. Table `daily_runs(profile_id, day, started_at, finished_at, score, answers jsonb)` PK (profile_id, day), RLS select pour tout `authenticated`, aucune écriture directe.
+- **Jour** = date Europe/Paris (`_daily_day()`). RPC : `daily_today()` → `{day, status todo|running|done|missed, score, rank, players, streak, secs_left}` ; `start_daily()` (erreur `daily_already_started` si déjà commencé) ; `submit_daily(p_answers)` (6 `{points, ms}` ; points bornés par manche, 10 min max après le start sinon score 0 `expired`) → `{score, xp, rank, players, streak}` ; `daily_board(p_day?)` ; `daily_week_board()` (lundi→dimanche, somme, `days`). `streak` = jours consécutifs terminés finissant aujourd'hui/hier. XP ajoutée à la soumission : `min(score/10, 50)`.
+- **Tirage** (`src/features/daily/challenge.ts`) : graine = FNV-1a(`defi-<day>`) → mulberry32 ; mêmes banques que Cerveau en fête / Le plus proche (chargées en `import()`). Composition : QCM diff 1, 1, 2, 2 (thèmes variés, sans image), 1 estimation (diff ≤ 2), 1 QCM diff 3 bonus ×2. Changer les banques change le défi du jour en cours.
+- **Barème** (`scoring.ts`, miroir de `_daily_round_max`) : QCM juste 70 + 30 de rapidité (20 s) ; estimation `100 × (1 − écart relatif)` (30 s) ; bonus 140 + 60 de rapidité. Max 700.
+- **Score calculé côté client** (jeu entre amis) : le serveur garantit 1 tentative/jour et plafonne chaque manche, mais ne connaît pas les réponses attendues.
+- **Front** : `DailyCard` (hub), route `/defi` → `DailyPage` (accueil, `DailyPlay`, résultat, `DailyBoardView` jour/semaine). Quitter en cours de partie = tentative perdue.

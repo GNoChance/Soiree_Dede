@@ -135,6 +135,11 @@ const MESSAGES: Record<string, string> = {
   no_buildings: 'Aucun bâtiment à vendre ici.',
   sell_uneven: 'Vends d’abord sur les lieux les plus construits du quartier.',
   no_jail_card: 'Tu n’as pas de carte « Sortie du violon ».',
+  // Défi du jour
+  daily_already_started: 'Tu as déjà tenté le défi d’aujourd’hui. À demain !',
+  daily_not_started: 'Le défi n’a pas été démarré.',
+  daily_already_done: 'Défi déjà terminé aujourd’hui.',
+  invalid_answers: 'Réponses invalides.',
 }
 
 function raw(err: unknown): string {

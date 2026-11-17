@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { GAMES } from '@/games/registry'
 import type { GameDefinition } from '@/games/types'
 import { GameInfoModal } from '@/features/tutos/GameInfoModal'
+import { DailyCard } from '@/features/daily/DailyCard'
 import { SoireeLauncher } from '@/features/soiree/SoireeLauncher'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -47,6 +48,9 @@ export function HubPage() {
           </Card>
         </StaggerItem>
       )}
+      <StaggerItem>
+        <DailyCard />
+      </StaggerItem>
       <StaggerItem>
         <SoireeLauncher />
       </StaggerItem>
