@@ -70,6 +70,9 @@ const MESSAGES: Record<string, string> = {
   no_potion: 'Tu n’as plus cette potion.',
   // Bowling
   wrong_roll: 'Ce lancer ne correspond pas à ta feuille de score.',
+  too_early: 'Attends le feu vert !',
+  wrong_lap: 'Tour non reconnu : continue la course.',
+  too_fast: 'Tour trop rapide pour être honnête 😏',
   invalid_roll: 'Lancer invalide : ces quilles sont déjà tombées.',
   already_done: 'Tu as déjà fini ta partie !',
   // Qui suis-je ?

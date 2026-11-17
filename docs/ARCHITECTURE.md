@@ -246,9 +246,9 @@ Course de karts 3D arcade, **3 à 12 joueurs, tous en même temps**, chacun sur 
 
 ### Course
 Phases : `countdown` (3-2-1, `deadline` = feu vert) → `racing` → `results` (classement de la course + points) → course suivante ou `finished`. Course terminée quand tous ont fini, ou 30 s après l'arrivée du 1er (les autres classés à leur progression), ou l'hôte la coupe.
-- Progression : le client envoie `{"type":"cp","lap":l,"cp":i}` à chaque checkpoint ; le serveur vérifie l'ordre et que le temps écoulé depuis le précédent ≥ `min_cp_ms` du circuit (anti-triche minimal, comme le bowling).
-- Arrivée : `{"type":"finish"}` après le dernier checkpoint du dernier tour ; l'ordre d'arrivée = ordre de réception serveur.
-- Positions : **broadcast** `match:<matchId>` (~10 Hz : x, z, cap, vitesse, drift, état), jamais en base. Les karts des autres sont interpolés.
+- Progression : chaque téléphone vérifie lui-même ses checkpoints (8 par tour) et n'envoie au serveur qu'**un tour bouclé** : `{"type":"lap","lap":n}` (l'hôte ajoute `"bot":"botK"` pour ses bots). Le serveur vérifie l'ordre des tours et un temps minimum par tour (`_dk_min_lap_ms`, 12 s) ; doublons ignorés. ~36 écritures par course à 12.
+- Arrivée : le dernier tour bouclé = arrivée ; `finish[id]` = ms depuis `go_at`, `arrival` = ordre d'arrivée.
+- Positions : **broadcast** `kart:<matchId>` (~10 Hz : x, z, cap, vitesse, drift, état), jamais en base. Les karts des autres sont interpolés.
 
 ### Objets (nom provisoire → effet)
 | Objet | Effet |
@@ -269,7 +269,7 @@ Poids de tirage : 1er → Bulle/Boule/Glue ; milieu → tout équilibré ; derni
 Points par place (12 places) : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 (moins de joueurs : on prend le début de la liste). Total des courses ; égalité → meilleure place, puis dernière course. `finish_match` : `points` = total, `placement` = rang final, `won` = rang 1.
 
 ### Contrat SQL — `supabase/games/dede-kart.sql`
-`game_dede_kart_start(p_players, p_options)` et `game_dede_kart_action(...)` (actions : `cp`, `finish`, `box`, `use`, `hit`, `tick`, `next`). Table interne `_dk_tracks(id, checkpoints, min_cp_ms)`. State public : `phase, race, races, track, laps, deadline, order[], progress{pid:{lap,cp}}, items{pid}, hazards[], fx{pid}, points{pid}, race_results[]`.
+`game_dede_kart_start` / `game_dede_kart_action` (actions : `lap`, `tick`, `next` (hôte), `end_game` (hôte) ; objets : étape 4). Options `{races: 1|3, laps: 2|3, fill: 0|6|8|12}` (bots = fill − joueurs). State public : `phase (racing/results/finished), race, races, track, laps, go_at, deadline, players, bots, laps_done{}, lap_at{}, finish{}, arrival[], points{}, standings[{race, track, places[{id, place, pts, time, laps}]}]`. Points finaux = total ÷ nombre de courses (XP comparable aux autres jeux).
 
 ### Étapes de réalisation
 1 cadrage (ce document) · 2 course solo (moteur 3D, kart, drift, circuit 1) · 3 multi (broadcast, karts des autres) · 4 objets + SQL · 5 3 circuits, coupe, résumé, karts par perso.
