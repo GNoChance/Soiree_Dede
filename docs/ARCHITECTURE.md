@@ -274,3 +274,9 @@ Points par place (12 places) : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 (moins de j
 
 ### Étapes de réalisation
 1 cadrage (ce document) · 2 course solo (moteur 3D, kart, drift, circuit 1) · 3 multi (broadcast, karts des autres) · 4 objets + SQL · 5 3 circuits, coupe, résumé, karts par perso.
+
+## Chat de soirée (`supabase/features/chat.sql`, `src/features/chat/`)
+Un fil par soirée, visible au salon ET pendant les jeux : bulle flottante (`SoireeChat`, montée une fois dans `Root`, suit la soirée déclarée par `useViewingSoiree`), feuille de discussion, aperçus des messages reçus.
+- Table `soiree_messages(id, soiree_id, profile_id, kind, body, tenue, created_at)` : `kind = text` (1 à 200 caractères) ou `sticker` (`body` = id d'expression, `tenue` = tenue de l'auteur à l'envoi). Lecture : membres de la soirée (RLS `is_soiree_member`) + Realtime `postgres_changes` INSERT.
+- Écriture : RPC `send_soiree_message(p_soiree_id, p_kind, p_body)` uniquement. Erreurs : `not_in_soiree`, `soiree_ended`, `invalid_message`, `chat_too_fast` (6 messages / 10 s). 200 derniers messages gardés par soirée ; purge complète quand la soirée passe à `ended` (trigger `soirees_chat_purge`).
+- Front : `useSoireeChat` (100 derniers messages + temps réel), non-lus mémorisés par soirée dans `localStorage`. Stickers proposés = palette de la tenue équipée + stickers bonus. Les jeux qui écoutent le clavier doivent ignorer les champs de saisie (cf. `Game.onKey` de Dédé Kart).

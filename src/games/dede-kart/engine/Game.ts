@@ -602,6 +602,12 @@ export class Game {
   }
 
   private onKey = (e: KeyboardEvent) => {
+    // on écrit dans le chat (ou un autre champ) : le clavier ne pilote pas le kart
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+      this.keys.clear()
+      return
+    }
     if (e.type === 'keydown') this.keys.add(e.code)
     else this.keys.delete(e.code)
     if (e.type === 'keydown' && !e.repeat && (e.code === 'Enter' || e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyE')) this.useBtn = true

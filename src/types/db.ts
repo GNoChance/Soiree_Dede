@@ -429,6 +429,19 @@ type Table<R> = {
 };
 type View<R> = { Row: R; Relationships: [] };
 
+/** Message du chat de soirée (supabase/features/chat.sql). */
+export type SoireeMessageRow = {
+  id: number;
+  soiree_id: UUID;
+  profile_id: UUID;
+  kind: 'text' | 'sticker';
+  /** Texte du message, ou id d'expression pour un sticker. */
+  body: string;
+  /** Tenue portée par l'auteur à l'envoi (rendu du sticker). */
+  tenue: string;
+  created_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -443,6 +456,7 @@ export type Database = {
       unlocks: Table<UnlockRow>;
       tenues: Table<TenueRow>;
       tenue_unlocks: Table<TenueUnlockRow>;
+      soiree_messages: Table<SoireeMessageRow>;
       player_stats: Table<PlayerStatsRow>;
     };
     Views: {
@@ -460,6 +474,7 @@ export type Database = {
       update_nickname: { Args: { p_nickname: string }; Returns: ProfileJson };
       equip_expression: { Args: { p_expression: ExpressionId }; Returns: ProfileJson };
       equip_tenue: { Args: { p_tenue: TenueId }; Returns: ProfileJson };
+      send_soiree_message: { Args: { p_soiree_id: UUID; p_kind: 'text' | 'sticker'; p_body: string }; Returns: number };
       level_for_xp: { Args: { p_xp: number }; Returns: number };
       is_soiree_member: { Args: { p_soiree_id: UUID }; Returns: boolean };
 
