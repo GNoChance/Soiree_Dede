@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import { Play, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { burst } from '@/components/ui/confetti'
@@ -12,6 +12,8 @@ import type { WheelSpin } from './hostTools'
 const SIZE = 300
 const R = SIZE / 2
 const SPIN_S = 5.5
+/** « Réduire les animations » : la roue tourne quand même (c'est tout le jeu), plus calmement. */
+const SPIN_CALM_S = 2.5
 
 function polar(angleDeg: number, r: number) {
   const a = ((angleDeg - 90) * Math.PI) / 180
@@ -32,7 +34,8 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: {
   const seg = 360 / Math.max(n, 1)
   // Le centre de la part gagnante finit sous le repère (en haut), avec un léger décalage dans la part.
   const jitter = (((spin.id * 37) % 100) / 100 - 0.5) * seg * 0.6
-  const target = 360 * 6 - (idx + 0.5) * seg - jitter
+  const target = 360 * (reduce ? 2 : 6) - (idx + 0.5) * seg - jitter
+  const spinS = reduce ? SPIN_CALM_S : SPIN_S
 
   const finished = useRef(false)
   const finishRef = useRef<() => void>(() => {})
@@ -48,20 +51,22 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: {
     finishRef.current = finish
     setDone(false)
     // Filet : si l'animation ne notifie pas la fin (onglet masqué…), on affiche quand même le résultat.
-    const t = window.setTimeout(finish, (reduce ? 0.3 : SPIN_S) * 1000 + 600)
+    const t = window.setTimeout(finish, spinS * 1000 + 600)
     // tic-tac pendant le tour
-    const ticks = reduce ? [] : [0.4, 0.9, 1.5, 2.2, 3.0, 3.9, 4.8].map((s) => window.setTimeout(() => fx.tick(), s * 1000))
+    const ticks = [0.4, 0.9, 1.5, 2.2, 3.0, 3.9, 4.8].map((s) => window.setTimeout(() => fx.tick(), (s / SPIN_S) * spinS * 1000))
     return () => {
       clearTimeout(t)
       ticks.forEach(clearTimeout)
     }
-  }, [spin.id, reduce])
+  }, [spin.id, spinS])
   if (!winner) return null
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#07050f]/75 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Roue des jeux">
       <div className="flex max-h-[96dvh] w-full max-w-sm flex-col items-center gap-3 overflow-y-auto py-2">
         <h2 className="font-display text-3xl font-extrabold text-white drop-shadow-[3px_3px_0_var(--ink)]">🎡 La roue des jeux</h2>
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
+          {/* reducedMotion="never" : sinon le MotionConfig racine ("user") supprime la rotation et la roue saute au résultat. */}
+          <MotionConfig reducedMotion="never">
           <motion.svg
             key={spin.id}
             viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -69,8 +74,8 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: {
             height={SIZE}
             className="overflow-visible drop-shadow-[4px_4px_0_var(--ink)]"
             initial={{ rotate: 0 }}
-            animate={{ rotate: reduce ? target % 360 : target }}
-            transition={reduce ? { duration: 0.2 } : { duration: SPIN_S, ease: [0.12, 0.75, 0.15, 1] }}
+            animate={{ rotate: target }}
+            transition={{ duration: spinS, ease: [0.12, 0.75, 0.15, 1] }}
             onAnimationComplete={() => finishRef.current()}
           >
             <circle cx={R} cy={R} r={R - 2} fill="var(--ink)" />
@@ -91,6 +96,7 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose }: {
             })}
             <circle cx={R} cy={R} r={22} fill="var(--surface)" stroke="var(--ink)" strokeWidth={4} />
           </motion.svg>
+          </MotionConfig>
           {/* repère fixe */}
           <svg aria-hidden viewBox="0 0 40 40" width={40} height={40} className="absolute -top-3 left-1/2 -translate-x-1/2 drop-shadow-[2px_2px_0_var(--ink)]">
             <path d="M4 4 H36 L20 36 Z" fill="#EF476F" stroke="var(--ink)" strokeWidth={3.5} strokeLinejoin="round" />
