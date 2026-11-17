@@ -7,6 +7,7 @@ import { BottomSheet } from '@/components/ui/Modal'
 import { burst, victoryConfetti } from '@/components/ui/confetti'
 import { fx, playSound, vibrate } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
+import { forceAppUpdate } from '@/lib/forceUpdate'
 import { ConfirmModal } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { useCountdown } from '@/features/soiree/useServerClock'
@@ -17,7 +18,7 @@ import { bwActions, type BowlingState } from './types'
 import type { BowlingScene, RollOutcome } from './scene/BowlingScene'
 
 type Get = (id: string) => PlayerInfo
-type Flow = 'loading' | 'aim' | 'rolling' | 'result' | 'replay' | 'error' | 'unsupported'
+type Flow = 'loading' | 'aim' | 'rolling' | 'result' | 'replay' | 'error' | 'unsupported' | 'outdated'
 
 interface Banner {
   id: number
@@ -206,6 +207,7 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
   const host = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<BowlingScene | null>(null)
   const [flow, setFlow] = useState<Flow>('loading')
+  const [updating, setUpdating] = useState(false)
   const [banner, setBanner] = useState<Banner | null>(null)
   const [pendingRoll, setPendingRoll] = useState<Pending | null>(null)
   const [nudge, setNudge] = useState(0)
@@ -336,8 +338,10 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
         setFlow('aim')
       })
       .catch((e) => {
+        // Fichier de la scène introuvable : l'appli installée est une ancienne version
+        // (son fichier 3D a été remplacé par une mise en ligne). Ce n'est PAS un souci de 3D.
         console.warn('[bowling] chargement de la scène impossible', e)
-        if (alive) setFlow('unsupported')
+        if (alive) setFlow('outdated')
       })
     return () => {
       alive = false
@@ -388,11 +392,27 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
             <span className="font-display font-extrabold">Préparation de la piste…</span>
           </div>
         )}
+        {flow === 'outdated' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <span className="text-5xl">🔄</span>
+            <span className="font-display text-xl font-extrabold">L’appli doit être mise à jour.</span>
+            <span className="text-sm text-muted">Une nouvelle version est sortie : mets à jour pour retrouver la piste (ta partie continue).</span>
+            <Button
+              disabled={updating}
+              onClick={() => {
+                setUpdating(true)
+                void forceAppUpdate()
+              }}
+            >
+              {updating ? 'Mise à jour…' : 'Mettre à jour'}
+            </Button>
+          </div>
+        )}
         {flow === 'unsupported' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
             <span className="text-5xl">😵</span>
             <span className="font-display text-xl font-extrabold">La 3D ne démarre pas sur cet appareil.</span>
-            <span className="text-sm text-muted">Recharge la page ; sinon l’hôte peut terminer la partie (tes lancers compteront 0).</span>
+            <span className="text-sm text-muted">Ferme les autres applis et rouvre celle-ci ; sinon l’hôte peut terminer la partie (tes lancers compteront 0).</span>
           </div>
         )}
 
