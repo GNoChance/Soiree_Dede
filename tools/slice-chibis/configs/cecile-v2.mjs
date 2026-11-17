@@ -4,7 +4,6 @@ const F = (name, dir = name) => ({ name, file: `cecile-${name}.png`, n: 12, dir,
 export default {
   slug: 'cecile',
   src: 'assets-source/costumes/cecile-v2',
-  sheets: ['bowler', 'strategist', 'tictactoe', 'tycoon', 'star', 'cinema', 'croupier', 'spy', 'teacher', 'painter', 'werewolf', 'pyro', 'philosopher'].map((n) => (n === 'admiral' ? { ...F(n), white: false, tol: 3, open: 2 } : F(n))),
-  // admiral : haut de casquette sans contour, fusionne avec le liseré blanc -> à régénérer.
+  sheets: ['admiral', 'archer', 'actor', 'coach', 'bowler', 'strategist', 'tictactoe', 'tycoon', 'star', 'cinema', 'croupier', 'spy', 'teacher', 'painter', 'werewolf', 'pyro', 'philosopher'].map((n) => F(n)),
   portraits: [],
 };

@@ -29,6 +29,8 @@ export const TENUE_ART: readonly string[] = [
   'cecile/star',
   'cecile/spy',
   'cecile/teacher',
+  'cecile/archer',
+  'cecile/admiral',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
