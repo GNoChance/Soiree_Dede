@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Game, type Driver, type Hud, type RaceResult } from './engine/Game'
+import { ITEM_IDS, ITEMS, type UsePayload } from './engine/items'
 import type { TrackDef } from './tracks'
 
 interface Props {
@@ -17,6 +18,8 @@ interface Props {
   /** Affiche le classement local à mon arrivée (essai solo). En multi, c'est le serveur qui classe. */
   showResults?: boolean
   onLap?: (id: string, completed: number) => void
+  onUse?: (id: string, p: UsePayload) => void
+  onHit?: (id: string, hazard: number) => void
   onFinish?: (results: RaceResult[]) => void
   /** Moteur créé (ou détruit : null), pour le réseau. */
   onReady?: (game: Game | null) => void
@@ -44,6 +47,8 @@ export default function KartRace(p: Props) {
       track, laps, drivers, meId, localBots, goAt, now, autopilot,
       onHud: setHud,
       onLap: (id, n) => cb.current.onLap?.(id, n),
+      onUse: (id, u) => cb.current.onUse?.(id, u),
+      onHit: (id, h) => cb.current.onHit?.(id, h),
     })
     game.current = g
     done.current = false
@@ -68,6 +73,16 @@ export default function KartRace(p: Props) {
     e.preventDefault()
     game.current?.setDrift(on)
   }
+
+  // roulette : défile les emojis pendant le tirage
+  const [spinIdx, setSpinIdx] = useState(0)
+  const rolling = Boolean(hud?.rolling)
+  useEffect(() => {
+    if (!rolling) return
+    const id = setInterval(() => setSpinIdx((i) => i + 1), 90)
+    return () => clearInterval(id)
+  }, [rolling])
+  const slot = rolling ? ITEMS[ITEM_IDS[spinIdx % ITEM_IDS.length]].emoji : hud?.item ? ITEMS[hud.item].emoji : ''
 
   return (
     <div className="fixed inset-0 z-40 select-none overflow-hidden bg-black" style={{ touchAction: 'none' }}>
@@ -100,6 +115,41 @@ export default function KartRace(p: Props) {
             <div className="pointer-events-none absolute inset-x-0 top-1/3 text-center font-display text-4xl font-extrabold text-tomato [text-shadow:3px_3px_0_#1B1B2F]">
               ↩ Mauvais sens !
             </div>
+          )}
+
+          {hud.fx.confetti && (
+            <div
+              className="pointer-events-none absolute inset-0 animate-pulse"
+              style={{
+                background:
+                  'radial-gradient(circle at 20% 30%, #FF5A5F 0 5%, transparent 6%), radial-gradient(circle at 70% 25%, #FFD23F 0 7%, transparent 8%), radial-gradient(circle at 45% 55%, #4CC9F0 0 9%, transparent 10%), radial-gradient(circle at 80% 65%, #7AE582 0 6%, transparent 7%), radial-gradient(circle at 25% 75%, #B388FF 0 8%, transparent 9%), radial-gradient(circle at 55% 85%, #FF8C42 0 6%, transparent 7%), radial-gradient(circle at 60% 40%, #FF5A5F 0 6%, transparent 7%), radial-gradient(circle at 35% 45%, #FFD23F 0 5%, transparent 6%)',
+              }}
+            />
+          )}
+          {(hud.fx.reverse || hud.fx.slow || hud.fx.spin || hud.fx.star || hud.fx.bubble) && (
+            <div className="pointer-events-none absolute inset-x-0 top-20 flex flex-col items-center gap-1 font-display text-2xl font-extrabold text-white [text-shadow:3px_3px_0_#1B1B2F]">
+              {hud.fx.spin && <span>💫 Aïe !</span>}
+              {hud.fx.reverse && <span>🔄 Commandes inversées !</span>}
+              {hud.fx.slow && <span>☁️ Sous le gros nuage…</span>}
+              {hud.fx.star && <span>🌈 Intouchable !</span>}
+              {hud.fx.bubble && <span className="text-lg">🛡️ Bulle active</span>}
+            </div>
+          )}
+
+          {meId && hud.phase !== 'finished' && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.preventDefault()
+                game.current?.useItem()
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              aria-label={hud.item ? `Utiliser : ${ITEMS[hud.item].label}` : 'Pas d’objet'}
+              className={`absolute bottom-6 left-4 grid size-24 place-items-center rounded-card border-[4px] border-ink text-5xl shadow-sticker ${slot ? 'bg-sun' : 'bg-surface/70'}`}
+              style={{ touchAction: 'none' }}
+            >
+              {slot || <span className="font-display text-sm font-extrabold text-ink/60">OBJET</span>}
+            </button>
           )}
 
           {meId && hud.phase !== 'finished' && (

@@ -3,6 +3,7 @@ import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps } from '../types'
 import { buildDrivers } from './drivers'
 import type { Game, KartSnap } from './engine/Game'
+import type { UsePayload } from './engine/items'
 import KartRace from './KartRace'
 import { useKartNet } from './net'
 import { Standings } from './Standings'
@@ -37,17 +38,30 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
     () => (s.phase === 'racing' ? game.current?.snapshots() ?? [] : []),
     (snaps: KartSnap[]) => snaps.forEach((k) => game.current?.applyRemote(k)),
   )
+  // objets : pièges/projectiles et effets du state transmis au moteur
+  const hazards = s.hazards
+  const fx = s.fx
+  const items = useRef({ hazards, fx })
+  items.current = { hazards, fx }
+  useEffect(() => {
+    game.current?.syncItems(hazards ?? [], fx ?? [])
+  }, [hazards, fx])
   const onReady = useCallback((g: Game | null) => {
     game.current = g
+    g?.syncItems(items.current.hazards ?? [], items.current.fx ?? [])
   }, [])
 
-  const onLap = useCallback(
-    (id: string, completed: number) => {
-      if (id === meId) void act(dkActions.lap(completed))
-      else if (isHost) void act(dkActions.lap(completed, id))
+  // actions d'un kart : le mien, ou un bot (seul l'hôte en a)
+  const send = useCallback(
+    (id: string, a: Record<string, unknown> & { type: string }) => {
+      if (id === meId) void act(a)
+      else if (isHost) void act({ ...a, bot: id })
     },
     [act, isHost, meId],
   )
+  const onLap = useCallback((id: string, completed: number) => send(id, dkActions.lap(completed)), [send])
+  const onUse = useCallback((id: string, u: UsePayload) => send(id, dkActions.use(u)), [send])
+  const onHit = useCallback((id: string, hazard: number) => send(id, dkActions.hit(hazard)), [send])
 
   // échéances (fin de course, course suivante) : n'importe quel téléphone envoie `tick`
   const left = useCountdown(s.deadline)
@@ -65,7 +79,7 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
       type="button"
       onClick={() => (confirmEnd ? void act(dkActions.endGame()) : setConfirmEnd(true))}
       onBlur={() => setConfirmEnd(false)}
-      className="absolute bottom-6 left-4 z-10 rounded-chip border-[3px] border-ink bg-surface px-3 py-2 text-sm font-bold text-text shadow-sticker-sm"
+      className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-chip border-[3px] border-ink bg-surface px-2 py-1 text-xs font-bold text-text shadow-sticker-sm"
     >
       {confirmEnd ? 'Sûr ? Arrêter' : '⏹ Arrêter'}
     </button>
@@ -112,6 +126,8 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
       now={serverNow}
       showResults={false}
       onLap={onLap}
+      onUse={onUse}
+      onHit={onHit}
       onReady={onReady}
     >
       {myArrival >= 0 && (

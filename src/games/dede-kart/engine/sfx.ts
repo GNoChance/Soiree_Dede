@@ -64,6 +64,21 @@ export class Sfx {
   lap() {
     this.tone(660, 990, 0.25, 'triangle')
   }
+  box() {
+    this.tone(520, 1040, 0.15, 'square', 0.05)
+  }
+  pick() {
+    this.tone(784, 1568, 0.2, 'triangle')
+  }
+  launch() {
+    this.tone(400, 160, 0.25, 'sawtooth', 0.06)
+  }
+  hit() {
+    this.tone(700, 90, 0.6, 'sawtooth', 0.08)
+  }
+  pop() {
+    this.tone(1200, 300, 0.12, 'triangle', 0.08)
+  }
 
   stop() {
     void this.ctx?.close()

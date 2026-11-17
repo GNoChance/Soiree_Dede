@@ -2,6 +2,8 @@
  * Types de Dédé Kart (contrat : supabase/games/dede-kart.sql).
  * Phases : racing (go_at = feu vert) -> results (15 s) -> racing … -> finished.
  */
+import type { Fx, Hazard, UsePayload } from './engine/items'
+
 export type DkPhase = 'racing' | 'results' | 'finished' | 'aborted'
 
 export interface DkPlace {
@@ -36,6 +38,12 @@ export interface DkState {
   arrival: string[]
   points: Record<string, number>
   standings: DkStanding[]
+  /** Boules et flaques de glue en jeu. */
+  hazards: Hazard[]
+  /** Effets en cours (nuage, confettis, demi-tour). */
+  fx: Fx[]
+  /** Touches réussies par lanceur (cumul de la coupe). */
+  hits: Record<string, number>
   forced?: boolean
   results?: Array<{ profile_id: string; points: number; won: boolean; placement: number }> | null
 }
@@ -48,7 +56,9 @@ export interface DkOptions {
 }
 
 export const dkActions = {
-  lap: (lap: number, bot?: string) => (bot ? { type: 'lap', lap, bot } : { type: 'lap', lap }),
+  lap: (lap: number) => ({ type: 'lap', lap }),
+  use: (u: UsePayload) => ({ type: 'use', ...u }),
+  hit: (hazard: number) => ({ type: 'hit', hazard }),
   tick: () => ({ type: 'tick' }),
   next: () => ({ type: 'next' }),
   endGame: () => ({ type: 'end_game' }),

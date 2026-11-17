@@ -43,7 +43,50 @@ begin
     'laps_done', '{}'::jsonb,
     'lap_at', '{}'::jsonb,
     'finish', '{}'::jsonb,
-    'arrival', '[]'::jsonb);
+    'arrival', '[]'::jsonb,
+    'hazards', '[]'::jsonb,
+    'fx', '[]'::jsonb);
+end $$;
+
+-- Auteur d'une action : le joueur, ou un bot (champ "bot", réservé à l'hôte).
+create or replace function public._dk_actor(p_state jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns text language plpgsql stable
+set search_path = public, extensions
+as $$
+begin
+  if p_action ? 'bot' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if not ((p_state->'bots') ? (p_action->>'bot')) then raise exception 'invalid_action'; end if;
+    return p_action->>'bot';
+  end if;
+  if not ((p_state->'players') ? p_actor::text) then raise exception 'not_a_player'; end if;
+  return p_actor::text;
+end $$;
+
+-- Retire boules (> 6 s), flaques (> 30 s) et effets expirés.
+create or replace function public._dk_prune(p_state jsonb)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  select p_state || jsonb_build_object(
+    'hazards', coalesce((select jsonb_agg(h) from jsonb_array_elements(p_state->'hazards') h
+                          where (h->>'at')::timestamptz > now() - case when h->>'type' = 'ball'
+                                                                       then interval '6 seconds' else interval '30 seconds' end),
+                        '[]'::jsonb),
+    'fx', coalesce((select jsonb_agg(f) from jsonb_array_elements(p_state->'fx') f
+                     where (f->>'until')::timestamptz > now()), '[]'::jsonb))
+$$;
+
+-- Coordonnée envoyée par le client : nombre raisonnable, sinon erreur.
+create or replace function public._dk_num(p_v jsonb)
+returns numeric language plpgsql immutable
+set search_path = public, extensions
+as $$
+begin
+  if p_v is null or jsonb_typeof(p_v) <> 'number' or abs(p_v::text::numeric) > 5000 then
+    raise exception 'invalid_action';
+  end if;
+  return round(p_v::text::numeric, 2);
 end $$;
 
 -- Fin de la coupe : points finaux = total / nombre de courses (arrondi), classement des joueurs.
@@ -149,6 +192,8 @@ begin
     'total_rounds', v_races,
     'points', '{}'::jsonb,
     'standings', '[]'::jsonb,
+    'hits', '{}'::jsonb,
+    'hz_seq', 0,
     'forced', false,
     'winners', null,
     'results', null);
@@ -168,6 +213,10 @@ declare
   v_lap   integer;
   v_done  integer;
   v_prev  timestamptz;
+  v_item  text;
+  v_seq   integer;
+  v_target text;
+  v_owner text;
   v_late  boolean := p_state->>'deadline' is not null and now() >= (p_state->>'deadline')::timestamptz;
 begin
   -- ---------------------------------------------------------------- lap
@@ -176,14 +225,7 @@ begin
     if v_phase <> 'racing' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
     if v_late then return public._dk_end_race(p_state, p_server); end if;
     if now() < (p_state->>'go_at')::timestamptz then raise exception 'too_early'; end if;
-    if p_action ? 'bot' then
-      if not p_is_host then raise exception 'not_host'; end if;
-      v_id := p_action->>'bot';
-      if not ((p_state->'bots') ? v_id) then raise exception 'invalid_action'; end if;
-    else
-      v_id := p_actor::text;
-      if not ((p_state->'players') ? v_id) then raise exception 'not_a_player'; end if;
-    end if;
+    v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
     if coalesce(p_action->>'lap', '') !~ '^\d{1,2}$' then raise exception 'invalid_action'; end if;
     v_lap := (p_action->>'lap')::integer;
     v_done := coalesce((p_state->'laps_done'->>v_id)::integer, 0);
@@ -215,6 +257,56 @@ begin
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
+  -- ---------------------------------------------------------------- use (objet qui touche les autres)
+  -- Le tirage se fait sur le téléphone (jeu entre amis) : le serveur pose le piège /
+  -- le projectile, ou les effets sur les cibles, pour que tout le monde voie la même chose.
+  elsif v_type = 'use' then
+    if v_phase <> 'racing' or now() < (p_state->>'go_at')::timestamptz then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
+    v_item := p_action->>'item';
+    if v_item is null or v_item not in ('ball', 'glue', 'cloud', 'confetti', 'reverse') then raise exception 'invalid_action'; end if;
+    if (p_state->'finish') ? v_id then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    p_state := public._dk_prune(p_state);
+    v_seq := coalesce((p_state->>'hz_seq')::integer, 0);
+    if v_item in ('ball', 'glue') then
+      v_seq := v_seq + 1;
+      p_state := p_state || jsonb_build_object('hazards', p_state->'hazards' || jsonb_build_array(jsonb_build_object(
+        'id', v_seq, 'type', v_item, 'owner', v_id,
+        'x', public._dk_num(p_action->'x'), 'z', public._dk_num(p_action->'z'), 'h', public._dk_num(p_action->'h'),
+        'at', now())));
+    else
+      if jsonb_typeof(p_action->'targets') <> 'array' then raise exception 'invalid_action'; end if;
+      for v_target in
+        select distinct t from jsonb_array_elements_text(p_action->'targets') t
+         where public._dk_racers(p_state) ? t and t <> v_id limit 11
+      loop
+        v_seq := v_seq + 1;
+        p_state := p_state || jsonb_build_object('fx', p_state->'fx' || jsonb_build_array(jsonb_build_object(
+          'id', v_seq, 'type', v_item, 'target', v_target, 'by', v_id, 'until', now() + interval '3 seconds')));
+      end loop;
+    end if;
+    return jsonb_build_object('state', p_state || jsonb_build_object('hz_seq', v_seq), 'server', p_server);
+
+  -- ---------------------------------------------------------------- hit (un kart a percuté une boule / une glue)
+  elsif v_type = 'hit' then
+    if v_phase <> 'racing' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
+    if coalesce(p_action->>'hazard', '') !~ '^\d{1,6}$' then raise exception 'invalid_action'; end if;
+    select h->>'owner' into v_owner from jsonb_array_elements(p_state->'hazards') h
+     where (h->>'id')::integer = (p_action->>'hazard')::integer;
+    -- déjà retiré (deux karts dans la même flaque) : ignoré
+    if v_owner is null then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    p_state := p_state || jsonb_build_object(
+      'hazards', coalesce((select jsonb_agg(h) from jsonb_array_elements(p_state->'hazards') h
+                            where (h->>'id')::integer <> (p_action->>'hazard')::integer), '[]'::jsonb));
+    if v_owner <> v_id then
+      p_state := p_state || jsonb_build_object('hits', coalesce(p_state->'hits', '{}'::jsonb)
+                   || jsonb_build_object(v_owner, coalesce((p_state->'hits'->>v_owner)::integer, 0) + 1));
+    end if;
+    return jsonb_build_object('state', public._dk_prune(p_state), 'server', p_server);
+
   -- ---------------------------------------------------------------- tick
   elsif v_type = 'tick' then
     if v_late and v_phase = 'racing' then return public._dk_end_race(p_state, p_server); end if;
@@ -242,6 +334,9 @@ end $$;
 
 revoke all on function public._dk_min_lap_ms(integer) from public, anon, authenticated;
 revoke all on function public._dk_racers(jsonb) from public, anon, authenticated;
+revoke all on function public._dk_actor(jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+revoke all on function public._dk_prune(jsonb) from public, anon, authenticated;
+revoke all on function public._dk_num(jsonb) from public, anon, authenticated;
 revoke all on function public._dk_new_race(jsonb, integer, integer) from public, anon, authenticated;
 revoke all on function public._dk_finish(jsonb, jsonb, boolean) from public, anon, authenticated;
 revoke all on function public._dk_end_race(jsonb, jsonb) from public, anon, authenticated;
