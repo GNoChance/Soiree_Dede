@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router'
 import { Crown } from 'lucide-react'
 import { getCharacter } from '@/data/characters'
 import { Avatar } from '@/components/ui/Avatar'
@@ -208,10 +209,16 @@ function Podium({ rows, me }: { rows: Row[]; me?: UUID }) {
 }
 
 function RowCard({ row, me, game }: { row: Row; me: boolean; game: boolean }) {
+  const navigate = useNavigate()
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Profil de ${row.nickname}`}
+      onClick={() => navigate(`/profil/${row.profile_id}`)}
+      onKeyDown={(e) => e.key === 'Enter' && navigate(`/profil/${row.profile_id}`)}
       className={cn(
-        'sticker flex items-center gap-3 rounded-card p-3',
+        'sticker flex cursor-pointer items-center gap-3 rounded-card p-3',
         me ? 'bg-sun text-[#1f1b2e]' : 'bg-surface text-text',
       )}
     >

@@ -8,6 +8,8 @@ import { InventoryPage } from '@/pages/InventoryPage'
 import { LeaderboardPage } from '@/pages/LeaderboardPage'
 import { SoireePage } from '@/pages/SoireePage'
 import { MatchPage } from '@/pages/MatchPage'
+import { HistoryDetailPage, HistoryPage } from '@/features/stats/HistoryPages'
+import { ProfilePage } from '@/features/stats/ProfilePage'
 import { RouteError } from '@/pages/RouteError'
 
 const router = createBrowserRouter([
@@ -26,6 +28,9 @@ const router = createBrowserRouter([
               { path: '/inventaire', element: <InventoryPage /> },
               { path: '/classement', element: <LeaderboardPage /> },
               { path: '/amis', element: <FriendsPage /> },
+              { path: '/historique', element: <HistoryPage /> },
+              { path: '/historique/:id', element: <HistoryDetailPage /> },
+              { path: '/profil/:id', element: <ProfilePage /> },
               { path: '/parametres', element: <SettingsPage /> },
             ],
           },

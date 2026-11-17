@@ -82,6 +82,15 @@ create table if not exists public.soiree_players (
 );
 create index if not exists soiree_players_profile_idx on public.soiree_players(profile_id);
 
+-- Joueurs exclus d'une soirée par l'hôte : ils ne peuvent plus la rejoindre par code
+-- (soiree_banned) tant que l'hôte ne les a pas ré-invités (invite_to_soiree).
+create table if not exists public.soiree_bans (
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  banned_at  timestamptz not null default now(),
+  primary key (soiree_id, profile_id)
+);
+
 create table if not exists public.matches (
   id          uuid primary key default gen_random_uuid(),
   soiree_id   uuid not null references public.soirees(id) on delete cascade,
@@ -864,6 +873,9 @@ begin
 
   if exists (select 1 from public.soiree_players where soiree_id = v_sid and profile_id = v_me) then
     return public._soiree_json(v_sid);
+  end if;
+  if exists (select 1 from public.soiree_bans where soiree_id = v_sid and profile_id = v_me) then
+    raise exception 'soiree_banned';
   end if;
   if public._open_soirees_count(v_me) >= public._soiree_max_open() then
     raise exception 'too_many_soirees';
@@ -1727,6 +1739,7 @@ alter table public.login_attempts      enable row level security;
 alter table public.friendships         enable row level security;
 alter table public.soirees             enable row level security;
 alter table public.soiree_players      enable row level security;
+alter table public.soiree_bans         enable row level security;
 alter table public.matches             enable row level security;
 alter table public.match_players       enable row level security;
 alter table public.match_secrets       enable row level security;
@@ -1759,6 +1772,12 @@ drop policy if exists matches_select on public.matches;
 create policy matches_select on public.matches for select to authenticated
   using (public.is_soiree_member(soiree_id));
 
+-- Liste des exclus : visible par l'hôte seulement.
+drop policy if exists soiree_bans_select on public.soiree_bans;
+create policy soiree_bans_select on public.soiree_bans for select to authenticated
+  using (exists (select 1 from public.soirees s
+                  where s.id = soiree_id and s.host_id = (select public.current_profile_id())));
+
 drop policy if exists match_players_select on public.match_players;
 create policy match_players_select on public.match_players for select to authenticated using (true);
 
@@ -1779,14 +1798,14 @@ create policy player_stats_select on public.player_stats for select to authentic
 
 revoke all on table
   public.profiles, public.profile_credentials, public.device_sessions, public.login_attempts,
-  public.friendships, public.soirees, public.soiree_players, public.matches, public.match_players,
+  public.friendships, public.soirees, public.soiree_players, public.soiree_bans, public.matches, public.match_players,
   public.match_secrets, public.match_server_state, public.unlocks, public.player_stats,
   public.leaderboard_general, public.leaderboard_by_game
 from anon, authenticated;
 
 grant select on table
   public.profiles, public.device_sessions, public.friendships, public.soirees, public.soiree_players,
-  public.matches, public.match_players, public.match_secrets, public.unlocks, public.player_stats,
+  public.soiree_bans, public.matches, public.match_players, public.match_secrets, public.unlocks, public.player_stats,
   public.leaderboard_general, public.leaderboard_by_game
 to authenticated;
 

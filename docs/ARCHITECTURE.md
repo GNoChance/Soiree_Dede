@@ -280,3 +280,12 @@ Un fil par soirée, visible au salon ET pendant les jeux : bulle flottante (`Soi
 - Table `soiree_messages(id, soiree_id, profile_id, kind, body, tenue, created_at)` : `kind = text` (1 à 200 caractères) ou `sticker` (`body` = id d'expression, `tenue` = tenue de l'auteur à l'envoi). Lecture : membres de la soirée (RLS `is_soiree_member`) + Realtime `postgres_changes` INSERT.
 - Écriture : RPC `send_soiree_message(p_soiree_id, p_kind, p_body)` uniquement. Erreurs : `not_in_soiree`, `soiree_ended`, `invalid_message`, `chat_too_fast` (6 messages / 10 s). 200 derniers messages gardés par soirée ; purge complète quand la soirée passe à `ended` (trigger `soirees_chat_purge`).
 - Front : `useSoireeChat` (100 derniers messages + temps réel), non-lus mémorisés par soirée dans `localStorage`. Stickers proposés = palette de la tenue équipée + stickers bonus. Les jeux qui écoutent le clavier doivent ignorer les champs de saisie (cf. `Game.onKey` de Dédé Kart).
+
+## Stats : classement de soirée, historique, profil (`supabase/features/stats.sql`, `src/features/stats/`)
+Tout est dérivé de `soirees` / `soiree_players` / `matches` / `match_players` (pas de table). RPC `security definer`, jsonb prêt à afficher, `authenticated` seulement.
+- Barème de soirée (`_soiree_points`) : gagnant 3 pts ; perdant d'un duel (2 joueurs) 1 ; 2e place 2 ; 3e place 1 ; non-gagnant placement 1 (égalité) 1 ; sinon 0. Classement : points, puis victoires, puis moins de parties ; ex-aequo = même rang.
+- `soiree_standings(p_soiree_id)` → `{soiree_id,status,games_played,standings[{profile_id,slug,nickname,equipped_tenue,points,wins,games,rank}],winner_ids}` (membres ou anciens joueurs ; `not_in_soiree`, `soiree_not_found`).
+- `my_soirees_history()` → soirées terminées où j'étais (50 max, récentes d'abord) : `{id,host,started_at,ended_at,duration_min,games_played,players[],winner|null}`.
+- `soiree_history_detail(p_soiree_id)` → `{…,matches[{id,game_id,finished_at,players,winners[]}],standings,winner_ids}`.
+- `profile_stats(p_profile_id)` → `{profile,games_played,wins,win_rate,soirees,favorite_game,best_game,rival,per_game[]}` (jeu préféré = plus joué ; meilleur jeu = meilleur taux avec >= 3 parties, sinon plus de victoires ; rival = adversaire qui a gagné le plus de parties où je n'ai pas gagné, min 2).
+- Front : encart `SoireeStandingsCard` au salon (Realtime : UPDATE `matches` → finished), `SoireePodium` à la fin de soirée, pages `/historique`, `/historique/:id`, `/profil/:id` (accès : hub, classement).

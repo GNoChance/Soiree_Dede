@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, Users } from 'lucide-react'
+import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { ChibiImage } from '@/components/ui/ChibiImage'
@@ -19,8 +19,11 @@ import type { GameId, GameOptions, NewUnlocks, SoireeEndReason } from '@/types/d
 import { leaveSoiree, refetchActiveSoirees, useActiveSoirees, useCurrentMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { CheckableToken, ConfirmModal, LaunchCountdown, PlayerToken, UnlockReveal } from '@/features/soiree/components'
+import { GameWheel } from '@/features/soiree/GameWheel'
+import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, type WheelSpin } from '@/features/soiree/hostTools'
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
+import { SoireePodium, SoireeStandingsCard } from '@/features/stats/SoireeStandings'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -32,9 +35,19 @@ export function SoireePage() {
   const { byId } = usePlayers()
   const [launching, setLaunching] = useState<{ id: string; game: string } | null>(null)
   const [endUnlocks, setEndUnlocks] = useState<NewUnlocks | null>(null)
+  /** Podium de fin de soirée : vu (fin reçue en temps réel) / à montrer avant la suite (fin déclenchée par moi). */
+  const [podiumSeen, setPodiumSeen] = useState(false)
+  const [hostPodium, setHostPodium] = useState<{ next: NewUnlocks | null } | null>(null)
   /** Soirée terminée pendant que je suis dans le salon (temps réel) : raison de fin. */
   const [ended, setEnded] = useState<{ reason: SoireeEndReason | null } | null>(null)
   const endingRef = useRef(false)
+  /** Vrai dès que j'ai vu mon nom dans le salon : s'il disparaît ensuite, j'ai été exclu·e. */
+  const wasMember = useRef(false)
+  /** Roue des jeux : dernier tirage reçu (tous les téléphones) + demande de lancement (hôte). */
+  const [wheel, setWheel] = useState<WheelSpin | null>(null)
+  const lastSpinId = useRef(0)
+  const [launchReq, setLaunchReq] = useState<{ id: string; n: number } | null>(null)
+  const [kickTarget, setKickTarget] = useState<string | null>(null)
   const initialMatchId = useRef<string | null | undefined>(undefined)
   /** Hauteur de la barre de lancement fixée de l'hôte (0 = pas de barre). */
   const [barH, setBarH] = useState(0)
@@ -45,6 +58,12 @@ export function SoireePage() {
   const isHost = soiree?.host_id === meId
   const playerIds = useMemo(() => data?.playerIds ?? [], [data])
   /** Fin auto prévue (my_active_soirees) ; null pendant une partie. */
+  useWheelSpins(id ?? '', (sp) => {
+    if (sp.id <= lastSpinId.current) return
+    lastSpinId.current = sp.id
+    setWheel(sp)
+  })
+  const { bannedIds, refetchBans } = useBannedPlayers(id ?? '', Boolean(id) && isHost)
   const idleDeadline = soirees.find((s) => s.id === id)?.idle_deadline ?? null
 
   // La partie en cours de CETTE soirée change (démarrage, fin, annulation) : l'échéance
@@ -71,10 +90,13 @@ export function SoireePage() {
       setLaunching(null)
       setEnded((e) => e ?? { reason: soiree.end_reason ?? null })
     } else if (notFound) {
-      toast.error('Tu ne fais pas (ou plus) partie de cette soirée.')
+      toast.error(wasMember.current ? 'Tu as été retiré de la soirée.' : 'Tu ne fais pas (ou plus) partie de cette soirée.')
       navigate('/', { replace: true })
     } else if (data && meId && !playerIds.includes(meId) && !isHost) {
+      if (wasMember.current) toast.error('Tu as été retiré de la soirée.')
       navigate('/', { replace: true })
+    } else if (data && meId && playerIds.includes(meId)) {
+      wasMember.current = true
     }
   }, [soiree?.status, soiree?.end_reason, notFound, data, playerIds, meId, isHost, navigate])
 
@@ -124,7 +146,25 @@ export function SoireePage() {
 
       <CodeCard code={soiree.code} />
 
-      <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} />
+      <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} onKick={isHost ? setKickTarget : undefined} />
+
+      <SoireeStandingsCard soireeId={soiree.id} />
+
+      {isHost && bannedIds.length > 0 && (
+        <BannedList
+          ids={bannedIds}
+          byId={byId}
+          onInvite={async (pid) => {
+            const { error } = await invitePlayer(soiree.id, pid)
+            if (error) toastError(error)
+            else {
+              fx.success()
+              toast.success(`${playerOrPlaceholder(byId, pid).nickname} est ré-invité·e !`)
+            }
+            void refetchBans()
+          }}
+        />
+      )}
 
       {match && match.status === 'playing' && !launching && (
         <Button size="lg" fullWidth onClick={() => navigate(`/partie/${match.id}`)} icon={<Play className="size-6" />}>
@@ -139,6 +179,13 @@ export function SoireePage() {
           byId={byId}
           meId={meId}
           busy={Boolean(match) || Boolean(launching)}
+          launchReq={launchReq}
+          onSpin={async (ids) => {
+            const { spin, error } = await spinWheel(soiree.id, ids)
+            if (error || !spin) return toastError(error)
+            lastSpinId.current = Math.max(lastSpinId.current, spin.id)
+            setWheel(spin)
+          }}
           idleDeadline={match || launching ? null : idleDeadline}
           onBarHeight={setBarH}
           onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })}
@@ -153,8 +200,7 @@ export function SoireePage() {
         onEnded={(u) => {
           endingRef.current = true
           setEnded(null) // l'évènement temps réel a pu arriver avant la réponse
-          if (Object.values(u).some((l) => l.length)) setEndUnlocks(u)
-          else navigate('/', { replace: true })
+          setHostPodium({ next: Object.values(u).some((l) => l.length) ? u : null })
         }}
         onLeft={() => {
           endingRef.current = true
@@ -171,8 +217,52 @@ export function SoireePage() {
           onDone={() => navigate(`/partie/${launching.id}`)}
         />
       )}
+      {wheel && !launching && !ended && (
+        <GameWheel
+          spin={wheel}
+          isHost={isHost}
+          busy={Boolean(match)}
+          onClose={() => setWheel(null)}
+          onLaunch={(gid) => {
+            setWheel(null)
+            setLaunchReq({ id: gid, n: Date.now() })
+          }}
+          onRespin={async () => {
+            const { spin, error } = await spinWheel(soiree.id, wheel.game_ids)
+            if (error || !spin) return toastError(error)
+            lastSpinId.current = Math.max(lastSpinId.current, spin.id)
+            setWheel(spin)
+          }}
+        />
+      )}
+      <KickModal
+        target={kickTarget ? playerOrPlaceholder(byId, kickTarget) : null}
+        onClose={() => setKickTarget(null)}
+        onConfirm={async () => {
+          if (!kickTarget) return
+          const { error } = await kickPlayer(soiree.id, kickTarget)
+          setKickTarget(null)
+          if (error) {
+            if (errorCode(error) === 'match_in_progress') toast.error('Impossible d’exclure quelqu’un pendant une partie.')
+            else toastError(error)
+          } else fx.whoosh()
+          void refetchBans()
+        }}
+      />
       {endUnlocks && <UnlockReveal unlocks={endUnlocks} meId={meId} players={byId} onClose={() => navigate('/', { replace: true })} />}
-      {ended && (
+      {hostPodium && (
+        <SoireePodium
+          soireeId={soiree.id}
+          onDone={() => {
+            const next = hostPodium.next
+            setHostPodium(null)
+            if (next) setEndUnlocks(next)
+            else navigate('/', { replace: true })
+          }}
+        />
+      )}
+      {ended && !podiumSeen && !hostPodium && <SoireePodium soireeId={soiree.id} onDone={() => setPodiumSeen(true)} />}
+      {ended && podiumSeen && (
         <SoireeEndedOverlay
           reason={ended.reason}
           host={isHost ? 'toi' : playerOrPlaceholder(byId, soiree.host_id).nickname}
@@ -234,7 +324,7 @@ function CodeCard({ code }: { code: string }) {
   )
 }
 
-function PlayersGrid({ ids, hostId, meId, byId }: { ids: string[]; hostId: string; meId: string; byId: ReturnType<typeof usePlayers>['byId'] }) {
+function PlayersGrid({ ids, hostId, meId, byId, onKick }: { ids: string[]; hostId: string; meId: string; byId: ReturnType<typeof usePlayers>['byId']; onKick?: (id: string) => void }) {
   return (
     <div className="grid grid-cols-3 gap-y-5 pt-3">
       <AnimatePresence>
@@ -248,14 +338,86 @@ function PlayersGrid({ ids, hostId, meId, byId }: { ids: string[]; hostId: strin
               animate={{ scale: 1, rotate: 0 }}
               exit={{ scale: 0, rotate: 30, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 380, damping: 14 }}
-              className="flex justify-center"
+              className="relative flex justify-center"
             >
               <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
+              {onKick && id !== meId && (
+                <button
+                  type="button"
+                  aria-label={`Exclure ${p.nickname}`}
+                  onClick={() => {
+                    fx.pop()
+                    onKick(id)
+                  }}
+                  className="absolute top-0 right-2 flex size-7 items-center justify-center rounded-full border-2 border-ink bg-surface text-text opacity-80 shadow-sticker-sm"
+                >
+                  <X className="size-4" strokeWidth={3} />
+                </button>
+              )}
             </motion.div>
           )
         })}
       </AnimatePresence>
     </div>
+  )
+}
+
+function BannedList({ ids, byId, onInvite }: { ids: string[]; byId: ReturnType<typeof usePlayers>['byId']; onInvite: (id: string) => Promise<void> }) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  return (
+    <Card className="flex flex-col gap-2">
+      <p className="font-display text-lg font-extrabold">Retirés de la soirée</p>
+      {ids.map((pid) => {
+        const p = playerOrPlaceholder(byId, pid)
+        return (
+          <div key={pid} className="flex items-center gap-2">
+            <ChibiImage slug={p.slug} expression="sad" tenue={p.equippedTenue} size={40} />
+            <span className="min-w-0 flex-1 truncate font-display font-extrabold">{p.nickname}</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={busyId === pid}
+              icon={<UserPlus className="size-4" />}
+              onClick={async () => {
+                setBusyId(pid)
+                await onInvite(pid)
+                setBusyId(null)
+              }}
+            >
+              Ré-inviter
+            </Button>
+          </div>
+        )
+      })}
+    </Card>
+  )
+}
+
+function KickModal({ target, onClose, onConfirm }: { target: ReturnType<typeof playerOrPlaceholder> | null; onClose: () => void; onConfirm: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  // on garde le dernier joueur affiché pendant l'animation de fermeture
+  const last = useRef(target)
+  if (target) last.current = target
+  const p = target ?? last.current
+  return (
+    <ConfirmModal
+      open={Boolean(target)}
+      onClose={onClose}
+      loading={busy}
+      danger
+      title={`Exclure ${p?.nickname ?? ''} ?`}
+      confirmLabel="Exclure"
+      onConfirm={async () => {
+        setBusy(true)
+        await onConfirm()
+        setBusy(false)
+      }}
+    >
+      <div className="flex items-center gap-3">
+        {p && <ChibiImage slug={p.slug} expression="sad" tenue={p.equippedTenue} size={72} />}
+        <p>{p?.nickname} sera retiré·e du salon et ne pourra revenir que si tu le ou la ré-invites.</p>
+      </div>
+    </ConfirmModal>
   )
 }
 
@@ -280,7 +442,7 @@ function WaitingCard({ hostName, meSlug }: { hostName: string; meSlug?: string }
 
 const LAST_GAME_KEY = 'dede:last-game'
 
-function HostPanel({ soireeId, playerIds, byId, meId, busy, idleDeadline, onBarHeight, onStarted }: { soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; idleDeadline: string | null; onBarHeight: (h: number) => void; onStarted: (matchId: string, game: string) => void }) {
+function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, idleDeadline, onBarHeight, onStarted }: { launchReq: { id: string; n: number } | null; onSpin: (gameIds: string[]) => Promise<void>; soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; idleDeadline: string | null; onBarHeight: (h: number) => void; onStarted: (matchId: string, game: string) => void }) {
   // Hauteur réelle de la barre fixée (police agrandie, compte à rebours, message d'erreur…).
   const barRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -351,10 +513,52 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, idleDeadline, onBarH
     }
   }
 
+  // « Lancer ce jeu » depuis la roue : on sélectionne le jeu puis on démarre au rendu suivant.
+  const [pendingStart, setPendingStart] = useState<string | null>(null)
+  const startRef = useRef(start)
+  useEffect(() => {
+    startRef.current = start
+  })
+  useEffect(() => {
+    if (!launchReq) return
+    setGameId(launchReq.id)
+    setPendingStart(launchReq.id)
+  }, [launchReq])
+  useEffect(() => {
+    if (!pendingStart || gameId !== pendingStart) return
+    setPendingStart(null)
+    if (busy || tooFew || tooMany) {
+      toast.error(tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : tooMany ? `${game.maxPlayers} joueurs maximum.` : 'Une partie est déjà en cours !')
+      return
+    }
+    void startRef.current()
+  }, [pendingStart, gameId, busy, tooFew, tooMany, game])
+
+  const [spinning, setSpinning] = useState(false)
+  const spin = async () => {
+    const ids = GAMES.filter((g) => playing.length >= g.minPlayers && playing.length <= g.maxPlayers).map((g) => g.id)
+    if (ids.length < 2) {
+      toast.error('Pas assez de jeux pour ce nombre de joueurs.')
+      return
+    }
+    fx.whoosh()
+    setSpinning(true)
+    try {
+      await onSpin(ids)
+    } finally {
+      setSpinning(false)
+    }
+  }
+
   const Options = game.Options
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-2xl">On joue à quoi ?</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-2xl">On joue à quoi ?</h2>
+        <Button size="sm" variant="secondary" loading={spinning} disabled={busy} onClick={() => void spin()}>
+          🎡 Roue
+        </Button>
+      </div>
       {/* Carrousel horizontal compact : la page reste courte même avec beaucoup de jeux. */}
       <div className="-mx-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="flex w-max gap-2.5">

@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
-import { Trophy } from 'lucide-react'
+import { History, Trophy } from 'lucide-react'
+import { useNavigate } from 'react-router'
 import { GAMES } from '@/games/registry'
 import { SoireeLauncher } from '@/features/soiree/SoireeLauncher'
 import { Badge } from '@/components/ui/Badge'
@@ -13,6 +14,7 @@ import { toast } from '@/store/toast'
 import { xpProgress } from '@/lib/xp'
 
 export function HubPage() {
+  const navigate = useNavigate()
   const profile = useSession((s) => s.profile)
   const stats = useSession((s) => s.stats)
   const level = profile ? xpProgress(profile.xp).level : 1
@@ -23,9 +25,9 @@ export function HubPage() {
         <StaggerItem>
           <Card className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
-              <motion.div key={profile.equipped_expression} initial={{ scale: 0.6, rotate: -10 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}>
+              <motion.button type="button" aria-label="Voir mon profil" onClick={() => navigate(`/profil/${profile.id}`)} key={profile.equipped_expression} initial={{ scale: 0.6, rotate: -10 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}>
                 <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} size={72} />
-              </motion.div>
+              </motion.button>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-muted">Salut,</p>
                 <h1 className="truncate text-3xl">{profile.nickname} !</h1>
@@ -44,6 +46,13 @@ export function HubPage() {
       )}
       <StaggerItem>
         <SoireeLauncher />
+      </StaggerItem>
+      <StaggerItem>
+        <Card onClick={() => navigate('/historique')} className="flex items-center gap-3">
+          <History className="size-7 text-grape" />
+          <span className="flex-1 text-xl font-extrabold">Mes soirées passées</span>
+          <span className="text-sm font-bold text-muted">Voir</span>
+        </Card>
       </StaggerItem>
       <StaggerItem>
         <h2 className="text-2xl">Les jeux</h2>
