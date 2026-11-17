@@ -224,3 +224,52 @@ Jeu de plateau d'achat / location dans les villes des amis (2–9 joueurs, tour 
 - **Affichage commun** : `last_event` (dernier lancer : case atteinte → anecdote, loyer, taxe, carte, achat, violon), `events` (évènements de la dernière action, à animer), `log` (40 derniers).
 - **Cagnotte / loyers du tour** (affichage seul) : `tax_pot` = total payé sur les cases taxe 4/38 depuis le début (billets au centre ; jamais redistribué, hors fortune, cartes exclues) ; `round_rents = {round, payments: [{no, payer, owner, cell, amount}]}` = loyers du tour de table en cours (cartes « la plus proche » incluses, `no` = event_no du log `rent`, 60 max), vidé dans `_tdp_next_turn` au changement de `round`. States antérieurs sans ces champs : coalesce côté SQL, `?? 0` / `?.` côté front.
 - Tests : dés imposés via `match_server_state.data.forced_dice` (file `[[a,b],…]`, jamais exposée aux clients). Tenue `magnat` 🎩 (10 victoires).
+
+## Jeu `dede-kart` — « Dédé Kart » 🏎️ (jeu n°20)
+Course de karts 3D arcade, **3 à 12 joueurs, tous en même temps**, chacun sur son téléphone. Jeu **original** (aucun nom, objet, circuit ou visuel d'un jeu existant). Même principe que `bowling` : le client simule sa conduite, le serveur valide et calcule le classement.
+
+### Décisions (validées par l'utilisateur)
+- Vraie 3D `three` (déjà utilisé par le bowling), sans moteur physique lourd (physique arcade maison). Pas de R3F.
+- Contrôles : glisser/toucher gauche-droite pour tourner, accélération automatique, bouton Drift, bouton Objet. Clavier sur ordinateur (flèches/ZQSD, Espace, Entrée).
+- **Coupe de 3 circuits**, points par place à chaque course ; option « 1 seule course ».
+- Bonus avec **rattrapage** : le tirage dépend de ta place (les derniers reçoivent les gros bonus).
+- **Bots** : nombre choisi par l'hôte (option `bots`, total ≤ 12). Les bots tournent côté client de l'hôte, sur la spline du circuit.
+- **Stats identiques** pour tous. Chaque perso a son kart (sprite chibi de sa tenue équipée dans un kart de sa couleur) et son klaxon ; rien qui change la vitesse.
+
+### Options (hôte)
+`{ "cup": true|false, "laps": 2|3, "bots": 0..11 }` (défaut : coupe, 3 tours, 0 bot).
+
+### Circuits (`src/games/dede-kart/tracks.ts`, géométrie côté client ; le serveur ne connaît que `checkpoints` et `min_cp_ms`)
+1. **Circuit du Salon** : boucle facile, tapis (hors-piste lent), 2 dalles turbo.
+2. **Plage Tongs-Palace** : sable, parasols, un saut sur la jetée.
+3. **Montagne Raclette** : virages serrés, neige, rampe, raccourci risqué.
+
+### Course
+Phases : `countdown` (3-2-1, `deadline` = feu vert) → `racing` → `results` (classement de la course + points) → course suivante ou `finished`. Course terminée quand tous ont fini, ou 30 s après l'arrivée du 1er (les autres classés à leur progression), ou l'hôte la coupe.
+- Progression : le client envoie `{"type":"cp","lap":l,"cp":i}` à chaque checkpoint ; le serveur vérifie l'ordre et que le temps écoulé depuis le précédent ≥ `min_cp_ms` du circuit (anti-triche minimal, comme le bowling).
+- Arrivée : `{"type":"finish"}` après le dernier checkpoint du dernier tour ; l'ordre d'arrivée = ordre de réception serveur.
+- Positions : **broadcast** `match:<matchId>` (~10 Hz : x, z, cap, vitesse, drift, état), jamais en base. Les karts des autres sont interpolés.
+
+### Objets (nom provisoire → effet)
+| Objet | Effet |
+|---|---|
+| 🚀 Pétard turbo | boost de 2 s |
+| 🎳 Boule rebondissante | projectile, 3 rebonds, fait tournoyer qui touche |
+| 🍯 Flaque de glue | piège posé derrière toi, ralentit + fait tournoyer |
+| 🌈 Bouclier arc-en-ciel | invincible + vitesse max 5 s |
+| 🛡️ Bulle | absorbe 1 coup |
+| ☁️ Gros nuage | ralentit 3 s tous ceux qui sont devant toi (réservé aux places > 6) |
+| 🎊 Confettis | brouille l'écran du joueur devant toi 3 s |
+| 🔄 Demi-tour | inverse les commandes du 1er 3 s (réservé aux places > 3) |
+
+Boîtes `?` sur la piste, réapparition ~5 s **par joueur** (locale). Prise : `{"type":"box"}` → le serveur tire l'objet selon ta place actuelle (poids ci-dessous) et le range dans `items[profile]` (1 objet max). Usage : `{"type":"use","x":..,"z":..,"dir":..}` → le serveur consomme l'objet, ajoute l'effet/piège/projectile dans `state.hazards` (id, type, x, z, dir, `until`). Les clients simulent les projectiles/pièges (mêmes règles), la **victime** envoie `{"type":"hit","hazard":id}` ; le serveur valide (existe, pas expiré, pas déjà consommé, pas son propre objet sans rebond) et pose `fx[victime] = {type, until}`.
+Poids de tirage : 1er → Bulle/Boule/Glue ; milieu → tout équilibré ; derniers → Pétard, Bouclier arc-en-ciel, Gros nuage, Demi-tour.
+
+### Coupe
+Points par place (12 places) : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 (moins de joueurs : on prend le début de la liste). Total des courses ; égalité → meilleure place, puis dernière course. `finish_match` : `points` = total, `placement` = rang final, `won` = rang 1.
+
+### Contrat SQL — `supabase/games/dede-kart.sql`
+`game_dede_kart_start(p_players, p_options)` et `game_dede_kart_action(...)` (actions : `cp`, `finish`, `box`, `use`, `hit`, `tick`, `next`). Table interne `_dk_tracks(id, checkpoints, min_cp_ms)`. State public : `phase, race, races, track, laps, deadline, order[], progress{pid:{lap,cp}}, items{pid}, hazards[], fx{pid}, points{pid}, race_results[]`.
+
+### Étapes de réalisation
+1 cadrage (ce document) · 2 course solo (moteur 3D, kart, drift, circuit 1) · 3 multi (broadcast, karts des autres) · 4 objets + SQL · 5 3 circuits, coupe, résumé, karts par perso.
