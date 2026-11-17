@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ChevronDown, Flag } from 'lucide-react'
+import { useNavigate } from 'react-router'
+import { ChevronDown, Flag, Tv } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/features/soiree/components'
@@ -12,6 +13,8 @@ import { BetPanel } from './BetPanel'
 import { DuelResultBanner } from './DuelResult'
 import { DuelStage } from './DuelStage'
 import { DuelTransition } from './DuelTransition'
+import { DuelTv } from './DuelTv'
+import { useDuelTv } from './tv'
 import { SessionBoard } from './SessionBoard'
 import { pickSideColors } from './logic'
 import { useDuel, useDuelTicker } from './useDuel'
@@ -32,9 +35,15 @@ export interface DuelPlayProps<B, M> extends GamePlayProps {
  * Écran de jeu générique d'un jeu en duel : assemble DuelStage, Plateau,
  * BetPanel, DuelTransition, DuelResultBanner, SessionBoard, le minuteur
  * (ticks) et les boutons de l'hôte. Un jeu en duel n'a qu'à fournir `Board`.
+ * Sous DuelTvContext (route /soiree/:id/tele) : vue télé en lecture seule.
  */
-export function DuelPlay<B, M>({ state, secret, meId, isHost, players, act, pending, Board, sideColors, myTurnHint, setupHint }: DuelPlayProps<B, M>) {
+export function DuelPlay<B, M>(props: DuelPlayProps<B, M>) {
+  return useDuelTv() ? <DuelTv<B, M> {...props} /> : <DuelPlayScreen<B, M> {...props} />
+}
+
+function DuelPlayScreen<B, M>({ soireeId, state, secret, meId, isHost, players, act, pending, Board, sideColors, myTurnHint, setupHint }: DuelPlayProps<B, M>) {
   const reduce = useReducedMotion()
+  const navigate = useNavigate()
   const v = useDuel<B, M>(state, meId, players)
   const { s, duel, session, phase, get } = v
   const [confirmStop, setConfirmStop] = useState(false)
@@ -193,6 +202,12 @@ export function DuelPlay<B, M>({ state, secret, meId, isHost, players, act, pend
           )}
         </AnimatePresence>
       </div>
+
+      {(!v.isDuelist || isHost) && (
+        <Button variant="secondary" size="sm" icon={<Tv className="size-4" />} onClick={() => navigate(`/soiree/${soireeId}/tele`)}>
+          📺 Mode télé
+        </Button>
+      )}
 
       {isHost && (
         <Button variant="ghost" size="sm" icon={<Flag className="size-4" />} onClick={() => setConfirmStop(true)}>

@@ -1,15 +1,15 @@
 import type { ComponentType } from 'react'
 import { useParams } from 'react-router'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Shuffle } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useSoiree } from '@/features/soiree/hooks'
-import { playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
+import { pickExpression, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { GameOptionsProps } from '@/games/types'
-import { DUEL_MODES, normalizeDuelOptions } from './logic'
+import { DUEL_MODES, bracketShape, normalizeDuelOptions, roundName } from './logic'
 import type { DuelBoardOptionsProps, DuelOptionsValue } from './types'
 
 export interface DuelOptionsProps extends GameOptionsProps {
@@ -83,11 +83,7 @@ export function DuelOptions({ options, onChange, playerCount, playerIds, BoardOp
         })}
       </div>
       <p className="text-sm leading-snug text-muted">{info.help}</p>
-      {o.mode === 'tournament' && playerCount > 2 && (playerCount & (playerCount - 1)) !== 0 && (
-        <p className="text-xs text-muted">
-          {playerCount} joueurs : {nextPow2(playerCount) - playerCount} exempt{nextPow2(playerCount) - playerCount > 1 ? 's' : ''} tiré{nextPow2(playerCount) - playerCount > 1 ? 's' : ''} au sort passe{nextPow2(playerCount) - playerCount > 1 ? 'nt' : ''} directement au 2e tour.
-        </p>
-      )}
+      {o.mode === 'tournament' && <TournamentPreview playerCount={playerCount} ids={ids.length === playerCount ? ids : []} />}
 
       {o.mode === 'duel' && (
         <>
@@ -170,8 +166,47 @@ export function DuelOptions({ options, onChange, playerCount, playerIds, BoardOp
   )
 }
 
-function nextPow2(n: number) {
-  let s = 2
-  while (s < n) s *= 2
-  return s
+/** Présentation du tournoi des grosses têtes : têtes en jeu, tours, exempts. */
+function TournamentPreview({ playerCount, ids }: { playerCount: number; ids: string[] }) {
+  const reduce = useReducedMotion()
+  const { byId } = usePlayers()
+  const shape = bracketShape(Math.max(2, playerCount))
+  const rounds = Array.from({ length: shape.rounds }, (_, r) => roundName(r, shape.rounds))
+  return (
+    <div className="sticker flex flex-col items-center gap-2 bg-grape p-3 text-center text-white">
+      <span className="font-display text-xl leading-tight font-extrabold" style={{ textShadow: '2px 2px 0 #1f1b2e' }}>
+        🏆 Tournoi des grosses têtes
+      </span>
+      {ids.length > 0 && (
+        <div className="flex flex-wrap justify-center -space-x-2">
+          {ids.map((id, i) => {
+            const p = playerOrPlaceholder(byId, id)
+            return (
+              <motion.span
+                key={id}
+                initial={reduce ? false : { scale: 0, y: 10 }}
+                animate={reduce ? { scale: 1 } : { scale: 1, y: [0, -5, 0] }}
+                transition={reduce ? undefined : { y: { repeat: Infinity, duration: 1.3, delay: i * 0.12 }, scale: { type: 'spring', delay: i * 0.05 } }}
+              >
+                <Avatar slug={p.slug} expression={pickExpression(p, 'determine', 'colere', 'joie')} tenue={p.equippedTenue} size={40} />
+              </motion.span>
+            )
+          })}
+        </div>
+      )}
+      <p className="text-sm font-bold">
+        {playerCount < 2
+          ? 'Il faut au moins 2 joueurs.'
+          : shape.rounds === 1
+            ? 'À 2, on file directement en finale !'
+            : `${playerCount} grosses têtes, ${shape.rounds} tours : ${rounds.join(', ').toLowerCase()}.`}
+      </p>
+      {shape.byes > 0 && playerCount >= 2 && (
+        <p className="text-xs font-bold opacity-90">
+          😴 {shape.byes} exempt{shape.byes > 1 ? 's' : ''} tiré{shape.byes > 1 ? 's' : ''} au sort passe{shape.byes > 1 ? 'nt' : ''} directement au 2e tour.
+        </p>
+      )}
+      <p className="text-xs opacity-90">Les autres regardent et parient. Astuce : posez un téléphone ou une tablette en 📺 mode télé pour que tout le monde suive !</p>
+    </div>
+  )
 }

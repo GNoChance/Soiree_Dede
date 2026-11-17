@@ -5,6 +5,7 @@
  */
 import type {
   BracketMatch,
+  DuelBracket,
   DuelEndReason,
   DuelInfo,
   DuelMode,
@@ -25,9 +26,9 @@ export const DUEL_MODES: Array<{ value: DuelMode; emoji: string; label: string; 
   {
     value: 'tournament',
     emoji: '🏆',
-    label: 'Tournoi',
+    label: 'Tournoi des grosses têtes',
     short: 'Tournoi',
-    help: 'Tableau à élimination directe tiré au sort (exempts si besoin). Match nul : on rejoue une fois, puis tirage au sort. Le vainqueur de la finale est champion.',
+    help: 'Tableau à élimination directe tiré au sort, avec la tête de chacun dans les cases. Le perdant d’un match est éliminé ; match nul : revanche, puis tirage au sort. Le vainqueur de la finale est sacré grosse tête de la soirée !',
   },
   {
     value: 'duel',
@@ -184,6 +185,103 @@ export function endReasonLabel(r: DuelEndReason | null | undefined): string {
     default:
       return ''
   }
+}
+
+/** Taille du tableau (puissance de 2 ≥ n), exempts et nombre de tours. Miroir de _duel_bracket_new. */
+export function bracketShape(n: number): { size: number; byes: number; rounds: number } {
+  let size = 2
+  while (size < n) size *= 2
+  return { size, byes: Math.max(0, size - n), rounds: Math.round(Math.log2(size)) }
+}
+
+export interface PathStep {
+  round: number
+  /** Adversaire battu (null = exempt). */
+  opponent: string | null
+  bye: boolean
+  /** Qualifié au tirage au sort après deux nuls. */
+  random: boolean
+}
+
+/** Parcours d'un joueur dans le tableau : les tours qu'il a passés. */
+export function bracketPath(bracket: DuelBracket | null | undefined, id: string): PathStep[] {
+  if (!bracket) return []
+  const out: PathStep[] = []
+  bracket.rounds.forEach((round, r) => {
+    for (const m of round) {
+      if (m.winner !== id || (m.a !== id && m.b !== id)) continue
+      out.push({ round: r, opponent: m.status === 'bye' ? null : m.a === id ? m.b : m.a, bye: m.status === 'bye', random: m.random })
+    }
+  })
+  return out
+}
+
+/** Finaliste battu (tournoi terminé), ou null. */
+export function runnerUp(bracket: DuelBracket | null | undefined): string | null {
+  const f = bracket?.rounds[bracket.rounds.length - 1]?.[0]
+  if (!f || !f.winner || f.status === 'bye') return null
+  return f.winner === f.a ? f.b : f.a
+}
+
+/* ------------------------------------------------------ humeur des duellistes */
+
+/**
+ * Humeur d'un duelliste, déduite du state public (mode télé) ; `frac` = part
+ * du temps de jeu restante (0..1) :
+ *  - confident : annonce du duel ; set / ready : préparation ;
+ *  - think / panic : à son tour (panic sous 20 % du temps) ;
+ *  - proud : vient de jouer ; sleepy : l'adversaire traîne (< 35 % du temps) ;
+ *  - angry : l'adversaire rejoue (touché, rejoue…) ; oops : son dernier coup était automatique ;
+ *  - win / lose / draw : fin de manche ou de duel.
+ */
+export type FighterMood = 'confident' | 'set' | 'ready' | 'think' | 'panic' | 'proud' | 'sleepy' | 'angry' | 'oops' | 'waiting' | 'win' | 'lose' | 'draw'
+
+export function fighterMood(s: Pick<DuelState, 'phase' | 'duel'>, id: string, frac: number): FighterMood {
+  const d = s.duel
+  if (!d || (id !== d.a && id !== d.b)) return 'waiting'
+  switch (s.phase) {
+    case 'transition':
+      return 'confident'
+    case 'setup':
+      return d.ready.includes(id) ? 'ready' : 'set'
+    case 'result': {
+      const res = d.result
+      if (res) {
+        if (res.advanced) return res.advanced === id ? 'win' : 'lose'
+        return res.draw ? 'draw' : res.winner === id ? 'win' : 'lose'
+      }
+      if (d.outcome === 'draw') return 'draw'
+      return d.winner === id ? 'win' : d.winner ? 'lose' : 'waiting'
+    }
+    case 'playing': {
+      const lm = d.last_move
+      if (d.turn === id) return frac < 0.2 ? 'panic' : 'think'
+      if (lm && lm.by === id && lm.auto) return 'oops'
+      if (lm && lm.by !== id && lm.by === d.turn && d.moves > 0) return 'angry'
+      if (frac < 0.35) return 'sleepy'
+      if (lm && lm.by === id) return 'proud'
+      return 'waiting'
+    }
+    default:
+      return 'waiting'
+  }
+}
+
+/** Expressions voulues (ordre de préférence, palette de base d'abord) et bulle de chaque humeur. */
+export const FIGHTER_MOODS: Record<FighterMood, { expr: string[]; bubble: string | null; label: string | null }> = {
+  confident: { expr: ['determine', 'cool', 'clin_oeil', 'joie'], bubble: '💪', label: null },
+  set: { expr: ['reflexion', 'clin_oeil'], bubble: '🤫', label: 'se prépare' },
+  ready: { expr: ['pouces', 'determine', 'joie'], bubble: '👍', label: 'c’est prêt' },
+  think: { expr: ['reflexion', 'determine', 'clin_oeil'], bubble: '🤔', label: 'réfléchit' },
+  panic: { expr: ['surprise', 'timide', 'colere'], bubble: '😱', label: 'vite !' },
+  proud: { expr: ['clin_oeil', 'cool', 'pouces', 'joie'], bubble: '😏', label: null },
+  sleepy: { expr: ['dodo', 'boude', 'reflexion'], bubble: '💤', label: null },
+  angry: { expr: ['colere', 'boude'], bubble: '😤', label: 'grr…' },
+  oops: { expr: ['timide', 'boude', 'surprise'], bubble: '🙈', label: 'trop lent !' },
+  waiting: { expr: ['joie'], bubble: null, label: null },
+  win: { expr: ['pouces', 'cool', 'joie'], bubble: '🎉', label: 'gagné !' },
+  lose: { expr: ['pleurs', 'boude', 'colere'], bubble: '😭', label: null },
+  draw: { expr: ['surprise', 'timide', 'clin_oeil'], bubble: '😮', label: 'nul !' },
 }
 
 /** Le tableau du tournoi : match du duel courant (ou null). */
