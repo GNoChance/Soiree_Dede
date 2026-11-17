@@ -40,6 +40,8 @@ export default defineConfig({
         // Les vidéos « Comment on joue ? » (public/tutos/*.mp4) ne sont volontairement NI pré-téléchargées
         // (pas de mp4 dans globPatterns) NI mises en cache par le service worker : lecture en streaming
         // réseau, avec les requêtes « Range » gérées nativement par le navigateur.
+        // Notifications push (rappel du défi du jour) : public/push-sw.js, chargé par le SW généré.
+        importScripts: ['push-sw.js'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/tutos\//],
         cleanupOutdatedCaches: true,

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
 import { CHARACTERS } from '@/data/characters'
 import { AdminSoirees } from '@/features/admin/AdminSoirees'
+import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -127,6 +128,9 @@ export function SettingsPage() {
             <Toggle checked={haptics} onChange={setHaptics} label="Vibrations" />
           </div>
         </Card>
+      </StaggerItem>
+      <StaggerItem>
+        <PushReminderCard />
       </StaggerItem>
       {profile?.is_admin && (
         <StaggerItem>

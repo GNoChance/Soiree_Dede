@@ -8,6 +8,7 @@ import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { victoryConfetti, burst } from '@/components/ui/confetti'
 import { refreshProfile } from '@/lib/auth'
 import { toastError } from '@/features/soiree/errors'
+import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { DailyBoardView } from './DailyBoard'
 import { DailyPlay, type RoundAnswer } from './DailyPlay'
 import { buildChallenge, type DailyRound } from './challenge'
@@ -96,6 +97,8 @@ export function DailyPage() {
           {today.data && today.data.streak > 0 && <p className="font-extrabold text-[#1f1b2e]">🔥 {today.data.streak} jour{today.data.streak > 1 ? 's' : ''} d’affilée</p>}
         </Card>
       )}
+
+      <PushReminderCard promo />
 
       <h2 className="text-2xl">Classements</h2>
       <DailyBoardView version={version} />

@@ -140,6 +140,12 @@ const MESSAGES: Record<string, string> = {
   daily_not_started: 'Le défi n’a pas été démarré.',
   daily_already_done: 'Défi déjà terminé aujourd’hui.',
   invalid_answers: 'Réponses invalides.',
+  // Rappels push (src/features/push)
+  invalid_subscription: 'Ce téléphone n’a pas pu s’abonner aux rappels. Réessaie.',
+  push_denied: 'Les notifications sont bloquées pour l’app.',
+  push_dismissed: 'Il faut toucher « Autoriser » pour recevoir le rappel.',
+  push_no_sw: 'L’app n’est pas encore prête : recharge-la puis réessaie.',
+  push_failed: 'Impossible d’activer les rappels sur cet appareil. Réessaie plus tard.',
 }
 
 function raw(err: unknown): string {

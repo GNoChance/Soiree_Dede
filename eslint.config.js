@@ -15,4 +15,6 @@ export default tseslint.config(
       'react-hooks/exhaustive-deps': 'warn',
     },
   },
+  // Fonctions serverless Vercel (Node)
+  { files: ['api/**/*.ts'], languageOptions: { globals: globals.node } },
 )

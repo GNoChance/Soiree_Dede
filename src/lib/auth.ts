@@ -1,6 +1,7 @@
 import { useSession } from '@/store/session'
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 import { isNetworkError } from '@/lib/rpcError'
+import { disablePushOnLogout } from '@/features/push/push'
 import { levelForXp, type ExpressionId, type LoginResult, type PlayerStatsRow, type ProfileRow } from '@/types/db'
 
 /** Garantit une session anonyme Supabase (réutilise l'existante). */
@@ -85,6 +86,7 @@ export async function loginWithPin(slug: string, pin: string): Promise<LoginResu
 }
 
 export async function logout() {
+  await disablePushOnLogout()
   try {
     await supabase.rpc('logout_device')
   } catch (e) {

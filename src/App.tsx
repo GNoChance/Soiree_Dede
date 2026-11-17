@@ -13,6 +13,7 @@ import { HistoryDetailPage, HistoryPage } from '@/features/stats/HistoryPages'
 import { ProfilePage } from '@/features/stats/ProfilePage'
 import { DailyPage } from '@/features/daily/DailyPage'
 import { RouteError } from '@/pages/RouteError'
+import { onPushOpen } from '@/features/push/push'
 
 const router = createBrowserRouter([
   {
@@ -52,6 +53,9 @@ const router = createBrowserRouter([
     ],
   },
 ])
+
+// Clic sur un rappel push avec l'app déjà ouverte : navigation interne (sans rechargement).
+onPushOpen((path) => void router.navigate(path))
 
 export default function App() {
   return <RouterProvider router={router} />
