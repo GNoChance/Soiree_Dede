@@ -166,7 +166,12 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
 
   return (
     <div className="flex flex-col gap-3 pb-4">
-      <PlayerRail s={s} seats={seats} get={get} meId={meId} left={left} total={total} canDenounce={isPlayer} onDenounce={(id) => void send(pdbActions.denounce(id))} busy={busy} />
+      {/* 2 à 4 joueurs : les adversaires en face (dos de cartes en éventail) ; au-delà : pastilles + nombre de cartes */}
+      {s.players.length <= 4 ? (
+        <Opponents s={s} seats={seats} get={get} meId={meId} left={left} total={total} canDenounce={isPlayer} onDenounce={(id) => void send(pdbActions.denounce(id))} busy={busy} />
+      ) : (
+        <PlayerRail s={s} seats={seats} get={get} meId={meId} left={left} total={total} canDenounce={isPlayer} onDenounce={(id) => void send(pdbActions.denounce(id))} busy={busy} />
+      )}
 
       <Table s={s} get={get} meId={meId} flyFrom={flyFrom} canDraw={myTurn && s.turn_phase === 'play' && !busy} shakeDraw={myTurn && s.turn_phase === 'play' && !anyPlayable} onDraw={() => void draw()} />
 
@@ -219,7 +224,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
 
       {isPlayer && !meOut && (
         <>
-          <MyHand hand={hand} canPlay={canPlay} myTurn={myTurn} drawnId={drawnId} ghost={ghost} onPlay={(c) => void play(c)} />
+          <MyHand hand={hand} canPlay={canPlay} myTurn={myTurn} drawnId={drawnId} ghost={ghost} onPlay={(c) => void play(c)} me={get(meId)} />
           {myTurn && (
             <div className="flex gap-2">
               {s.turn_phase === 'drawn' ? (
@@ -503,29 +508,61 @@ function TurnBanner({ s, get, meId, left, total }: { s: PdbState; get: Get; meId
 /* Ma main : éventail scrollable, cartes jouables surélevées, taper / glisser    */
 /* -------------------------------------------------------------------------- */
 
-function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay }: { hand: PdbCard[]; canPlay: (c: PdbCard) => boolean; myTurn: boolean; drawnId: string | null; ghost: string | null; onPlay: (c: PdbCard) => void }) {
+/** Largeur disponible d'un élément (suivie au redimensionnement). */
+function useWidth<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  const [w, setW] = useState(340)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => setW(el.clientWidth || 340)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w] as const
+}
+
+/** Taille des cartes et écart entre elles pour que TOUTE la main tienne dans la largeur. */
+function fitHand(n: number, avail: number) {
+  let w = n <= 5 ? 88 : n <= 8 ? 80 : 72
+  if (n <= 1) return { w, step: 0 }
+  while (w > 52 && (avail - w) / (n - 1) < w * 0.45) w -= 4
+  return { w, step: Math.min(w * 0.85, (avail - w) / (n - 1)) }
+}
+
+function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay, me }: { hand: PdbCard[]; canPlay: (c: PdbCard) => boolean; myTurn: boolean; drawnId: string | null; ghost: string | null; onPlay: (c: PdbCard) => void; me: PlayerInfo }) {
   const reduce = useReducedMotion()
+  const [ref, width] = useWidth<HTMLDivElement>()
   const n = hand.length
-  const w = n > 14 ? 64 : 76
-  const overlap = n > 10 ? -Math.round(w * 0.45) : n > 6 ? -Math.round(w * 0.3) : -Math.round(w * 0.12)
+  const { w, step } = fitHand(n, width - 16)
+  // beaucoup de cartes : les bandes visibles sont fines → 1er toucher = lever la carte, 2e = la jouer
+  const pickMode = n > 1 && step < 30
+  const [picked, setPicked] = useState<string | null>(null)
+  useEffect(() => setPicked(null), [myTurn, n])
   const mid = (n - 1) / 2
-  const spread = Math.min(5, 34 / Math.max(1, n))
+  const spread = Math.min(4, 22 / Math.max(1, n))
   const draggingRef = useRef(false)
 
   return (
-    <div className="sticker relative -mx-1 bg-sunk">
-      <div className="flex items-center justify-between px-3 pt-2">
-        <span className="font-display font-extrabold">Ma main · {n} carte{n > 1 ? 's' : ''}</span>
-        {myTurn && <span className="text-xs font-bold text-muted">Tape ou glisse vers le haut ↑</span>}
+    <div className="relative">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="flex shrink-0 items-center gap-2 font-display font-extrabold whitespace-nowrap">
+          <Avatar slug={me.slug} expression={myTurn ? mood(me, 'happy') : me.equipped} size={34} />
+          Ma main · {n}
+        </span>
+        {myTurn && <span className="text-right text-xs leading-tight font-bold text-muted">{pickMode ? 'Touche, puis retouche pour jouer' : 'Tape ou glisse vers le haut ↑'}</span>}
       </div>
-      <div className="overflow-x-auto px-4 pt-7 pb-4 [scrollbar-width:thin]">
+      <div ref={ref} className="pt-10 pb-2">
         <div className="mx-auto flex w-max items-end">
           <AnimatePresence initial={false}>
             {hand.map((c, i) => {
               const ok = canPlay(c)
               const rot = reduce ? 0 : (i - mid) * spread
-              const drop = reduce ? 0 : Math.abs(i - mid) * spread * 0.9
+              const drop = reduce ? 0 : Math.abs(i - mid) * spread * 0.7
               const isDrawn = drawnId === c.id
+              const up = picked === c.id
               return (
                 <motion.button
                   key={c.id}
@@ -533,15 +570,15 @@ function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay }: { hand: PdbCa
                   layout={!reduce}
                   initial={{ y: -120, opacity: 0, rotate: -30 }}
                   animate={{
-                    y: ghost === c.id ? -180 : ok ? -18 + drop : drop,
+                    y: ghost === c.id ? -180 : up ? -40 : ok ? -18 + drop : drop,
                     opacity: ghost === c.id ? 0 : 1,
-                    rotate: rot,
-                    scale: ok && !reduce ? [1, 1.05, 1] : 1,
+                    rotate: up ? 0 : rot,
+                    scale: up ? 1.12 : ok && !reduce && !pickMode ? [1, 1.05, 1] : 1,
                   }}
                   exit={{ y: -200, opacity: 0, scale: 0.6, transition: { duration: 0.25 } }}
                   transition={{
                     default: { type: 'spring', stiffness: 380, damping: 26 },
-                    scale: ok && !reduce ? { repeat: Infinity, duration: 1.3, ease: 'easeInOut' } : { duration: 0.2 },
+                    scale: ok && !reduce && !pickMode && !up ? { repeat: Infinity, duration: 1.3, ease: 'easeInOut' } : { duration: 0.2 },
                   }}
                   whileTap={ok ? { scale: 0.95 } : { x: [0, -5, 5, 0] }}
                   drag={ok ? 'y' : false}
@@ -558,11 +595,13 @@ function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay }: { hand: PdbCa
                     if (info.offset.y < -70) onPlay(c)
                   }}
                   onClick={() => {
-                    if (!draggingRef.current) onPlay(c)
+                    if (draggingRef.current) return
+                    if (ok && pickMode && picked !== c.id) return setPicked(c.id)
+                    onPlay(c)
                   }}
                   aria-disabled={!ok}
-                  className="relative shrink-0 origin-bottom touch-pan-x"
-                  style={{ marginLeft: i === 0 ? 0 : overlap, zIndex: i }}
+                  className={cn('relative shrink-0 origin-bottom', ok && 'touch-pan-x')}
+                  style={{ marginLeft: i === 0 ? 0 : step - w, zIndex: up ? 100 : i }}
                 >
                   <PdbCardView card={c} w={w} glow={ok} dim={myTurn && !ok} />
                   {isDrawn && <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border-2 border-ink bg-sun px-1.5 text-[10px] font-extrabold whitespace-nowrap text-[#1f1b2e]">Piochée !</span>}
@@ -574,6 +613,96 @@ function MyHand({ hand, canPlay, myTurn, drawnId, ghost, onPlay }: { hand: PdbCa
         </div>
       </div>
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Adversaires en face (2 à 4 joueurs) : dos de leurs cartes en éventail         */
+/* -------------------------------------------------------------------------- */
+
+function Opponents({ s, seats, get, meId, left, total, canDenounce, onDenounce, busy }: { s: PdbState; seats: string[]; get: Get; meId: string; left: number; total: number; canDenounce: boolean; onDenounce: (id: string) => void; busy: boolean }) {
+  const opps = seats.filter((id) => id !== meId)
+  const [ref, width] = useWidth<HTMLDivElement>()
+  const cols = Math.max(1, opps.length)
+  const colW = width / cols - 6
+  const cw = cols === 1 ? 54 : cols === 2 ? 46 : cols === 3 ? 38 : 32
+  const maxShow = cols === 1 ? 14 : cols === 2 ? 11 : cols === 3 ? 8 : 6
+  return (
+    <div ref={ref} className="flex items-start justify-around gap-1 pt-1">
+      {opps.map((id, i) => (
+        <OpponentSeat key={id} s={s} id={id} index={i} get={get} left={left} total={total} cw={cw} fanW={colW} maxShow={maxShow} canDenounce={canDenounce} onDenounce={onDenounce} busy={busy} />
+      ))}
+    </div>
+  )
+}
+
+function OpponentSeat({ s, id, index, get, left, total, cw, fanW, maxShow, canDenounce, onDenounce, busy }: { s: PdbState; id: string; index: number; get: Get; left: number; total: number; cw: number; fanW: number; maxShow: number; canDenounce: boolean; onDenounce: (id: string) => void; busy: boolean }) {
+  const reduce = useReducedMotion()
+  const p = get(id)
+  const active = s.turn === id && s.phase === 'playing'
+  const out = s.out.includes(id)
+  const n = s.counts[id] ?? 0
+  const lc = s.last_card?.[id]
+  const expr = out ? mood(p, 'proud') : active ? mood(p, 'think') : n === 1 ? mood(p, 'sly') : n >= 12 ? mood(p, 'sad') : p.equipped
+  const k = out ? 0 : Math.min(n, maxShow)
+  const step = k <= 1 ? 0 : Math.min(cw * 0.6, (fanW - cw) / (k - 1))
+  const mid = (k - 1) / 2
+  const spread = Math.min(5, 24 / Math.max(1, k))
+  return (
+    <motion.div
+      initial={{ y: -30, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: index * 0.06 }}
+      className={cn('flex min-w-0 flex-1 flex-col items-center gap-0.5', out && 'opacity-70')}
+    >
+      <div className="relative flex size-14 items-center justify-center">
+        {active && <TurnRing frac={left / total} size={56} />}
+        <motion.div animate={active && !reduce ? { y: [0, -4, 0] } : { y: 0 }} transition={{ repeat: active ? Infinity : 0, duration: 0.9 }}>
+          <Avatar slug={p.slug} expression={expr} size={42} className={cn(out && 'grayscale-[0.4]')} />
+        </motion.div>
+        {!out ? (
+          <motion.span
+            key={n}
+            initial={{ scale: 1.8 }}
+            animate={{ scale: 1 }}
+            className={cn('absolute -right-1 bottom-0 flex h-6 min-w-6 items-center justify-center rounded-md border-2 border-ink px-1 font-display text-sm font-extrabold', n === 1 ? 'bg-tomato text-white' : 'bg-surface')}
+          >
+            {n}
+          </motion.span>
+        ) : (
+          <span className="absolute -right-1 bottom-0 text-xl">{['🏆', '🥈', '🥉'][s.out.indexOf(id)] ?? '🎉'}</span>
+        )}
+        {lc && (
+          <span className={cn('absolute -top-1 -left-1 rounded-full border-2 border-ink px-1 text-[10px] leading-tight font-extrabold', lc === 'safe' ? 'bg-sun text-[#1f1b2e]' : 'bg-tomato text-white')}>{lc === 'safe' ? '1 !' : '1 ?'}</span>
+        )}
+      </div>
+      <span className={cn('max-w-full truncate text-xs font-extrabold', active && 'text-grape')}>{p.nickname}</span>
+      {/* dos de ses cartes : une qui part quand il joue, une qui arrive quand il pioche */}
+      {k > 0 && (
+        <div className="relative mt-1" style={{ width: cw + (k - 1) * step, height: Math.round(cw * 1.45) + 10 }}>
+          <AnimatePresence initial={false}>
+            {Array.from({ length: k }, (_, j) => (
+              <motion.div
+                key={j}
+                className="absolute top-0"
+                style={{ left: j * step, zIndex: j }}
+                initial={{ y: 70, opacity: 0, scale: 0.8 }}
+                animate={{ y: reduce ? 0 : (mid - Math.abs(j - mid)) * 1.6, opacity: 1, scale: 1, rotate: reduce ? 0 : -(j - mid) * spread }}
+                exit={{ y: 70, opacity: 0, scale: 0.7, transition: { duration: 0.25 } }}
+                transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+              >
+                <PdbCardView back w={cw} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+      {canDenounce && lc === 'open' && (
+        <button type="button" disabled={busy} onClick={() => onDenounce(id)} className="rounded-full border-2 border-ink bg-tomato px-1.5 text-[10px] font-extrabold text-white shadow-sticker-sm">
+          Dénoncer !
+        </button>
+      )}
+    </motion.div>
   )
 }
 
