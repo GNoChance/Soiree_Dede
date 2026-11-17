@@ -152,13 +152,40 @@ for (const s of CFG.sheets) {
   console.log(`  -> ${s.dir}: ${used.join(' ')}`);
 }
 
+// Portrait « sticker » sur fond noir : le noir relié au bord de l'image devient transparent (+2 px pour la frange).
+async function cutoutBlack(file) {
+  const { data, info } = await sharp(fs.readFileSync(file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: w, height: h } = info;
+  const dark = (i) => Math.max(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) < 48;
+  const out = new Uint8Array(w * h);
+  const stack = [];
+  const push = (i) => { if (!out[i] && dark(i)) { out[i] = 1; stack.push(i); } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (stack.length) {
+    const i = stack.pop(), x = i % w, y = (i - x) / w;
+    if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w);
+  }
+  let cur = out;
+  for (let k = 0; k < 2; k++) {
+    const nx = cur.slice();
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!cur[i] && ((x > 0 && cur[i - 1]) || (x < w - 1 && cur[i + 1]) || (y > 0 && cur[i - w]) || (y < h - 1 && cur[i + w]))) nx[i] = 1;
+    }
+    cur = nx;
+  }
+  for (let i = 0; i < w * h; i++) if (cur[i]) data[i * 4 + 3] = 0;
+  return sharp(data, { raw: { width: w, height: h, channels: 4 } });
+}
+
 for (const p of CFG.portraits ?? []) {
   if (only.length && !only.includes(p.dir) && !only.includes('portraits')) continue;
   const img = sharp(fs.readFileSync(path.join(ROOT, CFG.src, p.file)));
   const meta = await img.metadata();
   const [x0, y0, x1, y1] = p.crop ?? [0, 0, meta.width, meta.height];
   if (preview) continue;
-  const base = await sharp(fs.readFileSync(path.join(ROOT, CFG.src, p.file))).extract({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
+  const base = await (p.cutout ? await cutoutBlack(path.join(ROOT, CFG.src, p.file)) : sharp(fs.readFileSync(path.join(ROOT, CFG.src, p.file)))).extract({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
     .resize(PSIZE, PSIZE, { fit: 'inside', kernel: 'lanczos3' }).png().toBuffer();
   const dir = path.join(OUT, 'portraits');
   fs.mkdirSync(dir, { recursive: true });

@@ -157,7 +157,14 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star",
+      "teacher"
     ],
     "portraits": [
       "spy",
@@ -171,7 +178,14 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star",
+      "teacher"
     ]
   },
   "manon": {
