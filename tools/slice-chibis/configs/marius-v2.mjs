@@ -31,10 +31,15 @@ export default {
     F('bowler'),
     F('strategist'),
     F('cinema'),
+    // Pilote (nouveau style, fond blanc) : ordre standard avec amoureux / cool / champion (= gamer)
+    { name: 'racer', file: 'marius-racer.png', n: 12, dir: 'racer', white: true, map: E('joie colere pleurs boude reflexion dodo bisou clin_oeil surprise amoureux cool gamer') },
   ],
+  // Portraits : scènes carrées avec décor (pas de détourage) ou stickers sur fond noir (cutout)
   portraits: [
     { file: 'marius-bowler-portrait.png', dir: 'bowler' },
     { file: 'marius-strategist-portrait.png', dir: 'strategist' },
     { file: 'marius-tictactoe-portrait.png', dir: 'tictactoe' },
+    ...'admiral tycoon star cinema spy croupier teacher student painter'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n })),
+    ...'werewolf pyro pirate philosopher archer actor coach racer'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
   ],
 };

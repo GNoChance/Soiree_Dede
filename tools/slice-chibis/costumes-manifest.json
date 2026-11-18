@@ -278,12 +278,30 @@
       "coach",
       "bowler",
       "strategist",
-      "cinema"
+      "cinema",
+      "racer"
     ],
     "portraits": [
       "bowler",
       "strategist",
-      "tictactoe"
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "star",
+      "cinema",
+      "spy",
+      "croupier",
+      "teacher",
+      "student",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "archer",
+      "actor",
+      "coach",
+      "racer"
     ]
   },
   "mika": {
