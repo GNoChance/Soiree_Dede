@@ -530,7 +530,7 @@ function RolesPhase({ s, sec, isPlayer, isHost, get, act, pending }: { s: LgStat
           Bienvenue au village 🌒
         </motion.h2>
         <p className="text-center text-sm font-bold text-white/85">Découvre ton rôle en secret. Quand tout le monde est prêt, la nuit tombera…</p>
-        {isPlayer ? <RoleCard sec={sec} get={get} big /> : <p className="py-6 text-center font-bold text-white/80">Tu es le meneur : regarde ton grimoire ci-dessus 📖</p>}
+        {isPlayer ? <RoleCard sec={sec} get={get} big /> : <p className="py-6 text-center font-bold text-white/80">{isHost ? 'Tu es le meneur : regarde ton grimoire ci-dessus 📖' : 'Tu regardes : les rôles sont secrets 🤫'}</p>}
         <Countdown deadline={s.deadline} label="Nuit dans" className="text-xl text-white" />
         {isHost ? (
           <Button size="lg" fullWidth loading={pending} icon={<MoonIcon className="size-6" />} onClick={() => void act(lgActions.next())}>

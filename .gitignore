@@ -9,3 +9,4 @@ tools/slice-chibis/node_modules
 # Planches sources de l’ancien pipeline « mega » (gardées en local)
 assets-source/costumes/*-mega.png
 assets-source/costumes/*-portraits*.png
+tools/sql-tests/out/
