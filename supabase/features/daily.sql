@@ -7,6 +7,10 @@
 -- le score (jeu entre amis) mais garantit : 1 seule tentative (start_daily), 1 seule
 -- soumission, fenetre de 10 min entre start et submit, 6 manches, points de chaque
 -- manche bornes (_daily_round_max), XP plafonnee.
+-- Tolerance aux interruptions : chaque manche jouee est enregistree au fil de l'eau (save_daily_round).
+-- Une tentative interrompue (appli rechargee, reseau coupe...) n'est pas perdue : au bout de 10 min
+-- (_daily_close_expired, appelee par daily_today / daily_board / daily_week_board) ou tout de suite
+-- (finish_daily), elle est cloturee avec les manches deja jouees.
 -- Bareme (miroir de src/features/daily/scoring.ts) : manches 1-4 QCM max 100, manche 5
 -- estimation max 100, manche 6 bonus max 200 -> total max 700. XP = min(score/10, 50).
 -- =============================================================================
@@ -36,6 +40,33 @@ create or replace function public._daily_round_max(p_idx integer)
 returns integer language sql immutable
 as $$ select case when p_idx = 5 then 200 else 100 end $$;
 
+-- Score d'une liste de manches [{points, ms}] : chaque manche bornee par _daily_round_max.
+create or replace function public._daily_score(p_answers jsonb)
+returns integer language sql immutable
+as $$
+  select coalesce(sum(least(greatest(coalesce((e.v->>'points')::integer, 0), 0), public._daily_round_max((e.i - 1)::integer))), 0)::integer
+    from jsonb_array_elements(coalesce(p_answers, '[]'::jsonb)) with ordinality as e(v, i)
+   where e.i <= 6
+$$;
+
+-- Cloture les tentatives commencees depuis plus de 10 min et jamais soumises : score = manches
+-- deja enregistrees (0 si aucune), XP creditee une seule fois (le UPDATE ne voit que les non terminees).
+create or replace function public._daily_close_expired()
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare r record;
+begin
+  for r in
+    update public.daily_runs d
+       set finished_at = now(), score = public._daily_score(d.answers)
+     where d.finished_at is null and d.started_at < now() - interval '10 minutes'
+    returning d.profile_id, d.score
+  loop
+    update public.profiles set xp = xp + least(r.score / 10, 50) where id = r.profile_id;
+  end loop;
+end $$;
+
 -- Serie de jours consecutifs termines, finissant aujourd'hui ou hier.
 create or replace function public._daily_streak(p_profile uuid)
 returns integer language sql stable security definer
@@ -60,7 +91,7 @@ $$;
 
 -- Etat du joueur : {day, status: todo|running|done|missed, score, rank, players, streak, secs_left}
 create or replace function public.daily_today()
-returns jsonb language plpgsql stable security definer
+returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
@@ -70,6 +101,7 @@ declare
   v_status text := 'todo';
   v_rank integer; v_n integer;
 begin
+  perform public._daily_close_expired();
   select * into r from public.daily_runs where profile_id = v_me and day = v_day;
   if found then
     if r.finished_at is not null then v_status := 'done';
@@ -123,8 +155,14 @@ begin
     raise exception 'invalid_answers';
   end if;
   if now() > r.started_at + interval '10 minutes' then
-    update public.daily_runs set finished_at = now(), score = 0 where profile_id = v_me and day = v_day;
-    return jsonb_build_object('score', 0, 'xp', 0, 'expired', true);
+    -- trop tard : la tentative est cloturee avec les manches deja enregistrees
+    perform public._daily_close_expired();
+    select * into r from public.daily_runs where profile_id = v_me and day = v_day;
+    select 1 + count(*)::int into v_rank from public.daily_runs
+     where day = v_day and finished_at is not null and score > r.score;
+    select count(*)::int into v_n from public.daily_runs where day = v_day and finished_at is not null;
+    return jsonb_build_object('score', r.score, 'xp', least(r.score / 10, 50), 'expired', true,
+                              'rank', v_rank, 'players', v_n, 'streak', public._daily_streak(v_me));
   end if;
   for i in 0..5 loop
     begin
@@ -145,15 +183,73 @@ begin
                             'streak', public._daily_streak(v_me));
 end $$;
 
+-- Enregistre la manche p_idx (0..5) au fil de l'eau. Dans l'ordre, sans trou ; une manche deja
+-- enregistree est ignoree (nouvel essai apres une coupure reseau) ; points bornes par manche.
+-- Erreurs : daily_not_started, daily_already_done (terminee ou expiree), invalid_answers.
+create or replace function public.save_daily_round(p_idx integer, p_points integer, p_ms integer)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_day date := public._daily_day();
+  r     public.daily_runs%rowtype;
+  v_len integer;
+begin
+  perform public._daily_close_expired();
+  select * into r from public.daily_runs where profile_id = v_me and day = v_day for update;
+  if not found then raise exception 'daily_not_started'; end if;
+  if r.finished_at is not null then raise exception 'daily_already_done'; end if;
+  v_len := jsonb_array_length(r.answers);
+  if p_idx is null or p_idx < 0 or p_idx > 5 or p_idx > v_len or p_points is null then
+    raise exception 'invalid_answers';
+  end if;
+  if p_idx < v_len then return; end if;
+  update public.daily_runs
+     set answers = answers || jsonb_build_array(jsonb_build_object(
+           'points', least(greatest(p_points, 0), public._daily_round_max(p_idx)),
+           'ms', greatest(coalesce(p_ms, 0), 0)))
+   where profile_id = v_me and day = v_day;
+end $$;
+
+-- Termine la tentative du jour MAINTENANT avec les manches deja enregistrees (appli rechargee
+-- en cours de defi). Renvoie {score, xp, rank, players, streak, partial}.
+-- Erreurs : daily_not_started, daily_already_done.
+create or replace function public.finish_daily()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_day date := public._daily_day();
+  r     public.daily_runs%rowtype;
+  v_score integer; v_xp integer; v_rank integer; v_n integer;
+begin
+  perform public._daily_close_expired();
+  select * into r from public.daily_runs where profile_id = v_me and day = v_day for update;
+  if not found then raise exception 'daily_not_started'; end if;
+  if r.finished_at is not null then raise exception 'daily_already_done'; end if;
+  v_score := public._daily_score(r.answers);
+  v_xp := least(v_score / 10, 50);
+  update public.daily_runs set finished_at = now(), score = v_score where profile_id = v_me and day = v_day;
+  update public.profiles set xp = xp + v_xp where id = v_me;
+  select 1 + count(*)::int into v_rank from public.daily_runs
+   where day = v_day and finished_at is not null and score > v_score;
+  select count(*)::int into v_n from public.daily_runs where day = v_day and finished_at is not null;
+  return jsonb_build_object('score', v_score, 'xp', v_xp, 'rank', v_rank, 'players', v_n,
+                            'streak', public._daily_streak(v_me), 'partial', true);
+end $$;
+
 -- Classement d'un jour (defaut : aujourd'hui)
 -- -> {day, rows:[{profile_id, slug, nickname, equipped_tenue, score, rank, streak}]}
 create or replace function public.daily_board(p_day date default null)
-returns jsonb language plpgsql stable security definer
+returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare v_day date := coalesce(p_day, public._daily_day());
 begin
   perform public._require_profile();
+  perform public._daily_close_expired();
   return jsonb_build_object('day', v_day, 'rows', coalesce((
     select jsonb_agg(jsonb_build_object(
              'profile_id', x.profile_id, 'slug', p.slug, 'nickname', p.nickname,
@@ -167,12 +263,13 @@ end $$;
 -- Classement de la semaine en cours (lundi -> dimanche, somme des scores)
 -- -> {week_start, rows:[{..., score, days, rank, streak}]}
 create or replace function public.daily_week_board()
-returns jsonb language plpgsql stable security definer
+returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare v_start date := date_trunc('week', public._daily_day()::timestamp)::date;
 begin
   perform public._require_profile();
+  perform public._daily_close_expired();
   return jsonb_build_object('week_start', v_start, 'rows', coalesce((
     select jsonb_agg(jsonb_build_object(
              'profile_id', x.profile_id, 'slug', p.slug, 'nickname', p.nickname,
@@ -192,10 +289,16 @@ revoke all on function public._daily_streak(uuid) from public, anon, authenticat
 revoke all on function public.daily_today() from public, anon;
 revoke all on function public.start_daily() from public, anon;
 revoke all on function public.submit_daily(jsonb) from public, anon;
+revoke all on function public._daily_score(jsonb) from public, anon, authenticated;
+revoke all on function public._daily_close_expired() from public, anon, authenticated;
+revoke all on function public.save_daily_round(integer, integer, integer) from public, anon;
+revoke all on function public.finish_daily() from public, anon;
 revoke all on function public.daily_board(date) from public, anon;
 revoke all on function public.daily_week_board() from public, anon;
 grant execute on function public.daily_today() to authenticated;
 grant execute on function public.start_daily() to authenticated;
 grant execute on function public.submit_daily(jsonb) to authenticated;
+grant execute on function public.save_daily_round(integer, integer, integer) to authenticated;
+grant execute on function public.finish_daily() to authenticated;
 grant execute on function public.daily_board(date) to authenticated;
 grant execute on function public.daily_week_board() to authenticated;

@@ -48,6 +48,18 @@ export async function submitDaily(answers: Array<{ points: number; ms: number }>
   return data as DailySubmitResult
 }
 
+/** Enregistre une manche au fil de l'eau : une tentative interrompue compte alors avec les manches déjà jouées. */
+export async function saveDailyRound(idx: number, a: { points: number; ms: number }) {
+  const { error } = await rpc('save_daily_round', { p_idx: idx, p_points: Math.round(a.points), p_ms: Math.round(a.ms) })
+  if (error) throw error
+}
+/** Termine tout de suite une tentative interrompue avec les manches déjà enregistrées. */
+export async function finishDaily() {
+  const { data, error } = await rpc('finish_daily')
+  if (error) throw error
+  return data as DailySubmitResult
+}
+
 export function useDailyRpc<T>(fn: string, version = 0) {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)

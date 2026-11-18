@@ -167,7 +167,7 @@ function RoundView({ round, index, total, onDone }: RoundProps) {
 }
 
 /** Écran de jeu : enchaîne les manches, renvoie les réponses à la fin. */
-export function DailyPlay({ rounds, onFinish }: { rounds: DailyRound[]; onFinish: (answers: RoundAnswer[]) => void }) {
+export function DailyPlay({ rounds, onFinish, onRound }: { rounds: DailyRound[]; onFinish: (answers: RoundAnswer[]) => void; /** Appelé après chaque manche (enregistrement au fil de l'eau). */ onRound?: (idx: number, a: RoundAnswer) => void }) {
   const [idx, setIdx] = useState(0)
   const answers = useRef<RoundAnswer[]>([])
   const [total, setTotal] = useState(0)
@@ -182,6 +182,7 @@ export function DailyPlay({ rounds, onFinish }: { rounds: DailyRound[]; onFinish
           total={rounds.length}
           onDone={(a) => {
             answers.current = [...answers.current, a]
+            onRound?.(idx, a)
             setTotal((t) => t + a.points)
             if (idx + 1 >= rounds.length) onFinish(answers.current)
             else setIdx(idx + 1)

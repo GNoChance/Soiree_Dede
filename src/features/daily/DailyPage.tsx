@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router'
@@ -12,7 +12,7 @@ import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { DailyBoardView } from './DailyBoard'
 import { DailyPlay, type RoundAnswer } from './DailyPlay'
 import { buildChallenge, type DailyRound } from './challenge'
-import { startDaily, submitDaily, useDailyToday, type DailySubmitResult } from './api'
+import { finishDaily, saveDailyRound, startDaily, submitDaily, useDailyToday, type DailySubmitResult } from './api'
 import { TOTAL_MAX, dailyTitle, endMessage } from './scoring'
 
 type Phase = 'home' | 'loading' | 'play' | 'sending' | 'result'
@@ -25,6 +25,12 @@ export function DailyPage() {
   const [phase, setPhase] = useState<Phase>('home')
   const [rounds, setRounds] = useState<DailyRound[]>([])
   const [result, setResult] = useState<DailySubmitResult | null>(null)
+  // Enregistrement des manches : une file, pour garder l'ordre ; les échecs sont sans gravité
+  // (la fin de partie renvoie toutes les réponses, et une tentative coupée est cloturée par le serveur).
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve())
+  const onRound = (idx: number, a: { points: number; ms: number }) => {
+    saveChain.current = saveChain.current.then(() => saveDailyRound(idx, a)).catch(() => undefined)
+  }
 
   const start = async () => {
     if (!today.data) return
@@ -41,9 +47,26 @@ export function DailyPage() {
     }
   }
 
+  // Appli rechargée ou coupée en cours de défi : on termine avec les manches déjà enregistrées.
+  const resume = async () => {
+    setPhase('sending')
+    try {
+      const res = await finishDaily()
+      setResult(res)
+      setPhase('result')
+      void refreshProfile().catch(() => undefined)
+      setVersion((v) => v + 1)
+    } catch (e) {
+      toastError(e)
+      setPhase('home')
+      setVersion((v) => v + 1)
+    }
+  }
+
   const finish = async (answers: RoundAnswer[]) => {
     setPhase('sending')
     try {
+      await saveChain.current
       const res = await submitDaily(answers)
       setResult(res)
       setPhase('result')
@@ -66,7 +89,7 @@ export function DailyPage() {
   const status = today.data?.status
   const title = today.data ? dailyTitle(today.data.day) : 'Défi du jour'
 
-  if (phase === 'play') return <DailyPlay rounds={rounds} onFinish={(a) => void finish(a)} />
+  if (phase === 'play') return <DailyPlay rounds={rounds} onFinish={(a) => void finish(a)} onRound={onRound} />
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -91,7 +114,13 @@ export function DailyPage() {
               Déjà fait : {today.data?.score} pts, {today.data?.rank === 1 ? '1er' : `${today.data?.rank}e`} sur {today.data?.players} ! Reviens demain.
             </p>
           )}
-          {(status === 'running' || status === 'missed') && phase === 'home' && (
+          {status === 'running' && phase === 'home' && (
+            <>
+              <p className="font-bold text-[#1f1b2e]">Ton défi a été interrompu. Les manches déjà jouées sont gardées : tu peux le terminer maintenant pour voir ton score.</p>
+              <Button size="lg" fullWidth onClick={() => void resume()}>Terminer et voir mon score</Button>
+            </>
+          )}
+          {status === 'missed' && phase === 'home' && (
             <p className="font-bold text-[#1f1b2e]">Tu as déjà commencé le défi d’aujourd’hui (une seule tentative). Reviens demain !</p>
           )}
           {today.data && today.data.streak > 0 && <p className="font-extrabold text-[#1f1b2e]">🔥 {today.data.streak} jour{today.data.streak > 1 ? 's' : ''} d’affilée</p>}
