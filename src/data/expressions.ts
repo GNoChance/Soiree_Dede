@@ -30,7 +30,7 @@ export interface ExpressionDef {
 export const EXPRESSIONS: Record<ExpressionId, ExpressionDef> = {
   joie: { id: 'joie', label: 'Joie', emoji: '😄', condition: 'Débloquée d\'office', default: true },
   pouces: { id: 'pouces', label: 'Pouces', emoji: '👍', condition: '5 victoires', progress: { stat: 'wins', target: 5, unit: "victoires" } },
-  gamer: { id: 'gamer', label: 'Gamer', emoji: '🎮', condition: '25 victoires', progress: { stat: 'wins', target: 25, unit: "victoires" } },
+  gamer: { id: 'gamer', label: 'Champion', emoji: '🏆', condition: '25 victoires', progress: { stat: 'wins', target: 25, unit: "victoires" } },
   cool: { id: 'cool', label: 'Cool', emoji: '😎', condition: 'Être n°1 du classement général (victoires)' },
   clin_oeil: { id: 'clin_oeil', label: 'Clin d\'œil', emoji: '😉', condition: 'Gagner Undercover en étant l\'undercover', progress: { stat: 'undercover_won_as_undercover', target: 1, unit: "victoire en undercover" } },
   reflexion: { id: 'reflexion', label: 'Réflexion', emoji: '🤔', condition: '10 parties d\'Undercover jouées', progress: { stat: 'undercover_played', target: 10, unit: "parties d'Undercover" } },
@@ -42,7 +42,7 @@ export const EXPRESSIONS: Record<ExpressionId, ExpressionDef> = {
   colere: { id: 'colere', label: 'Colère', emoji: '😡', condition: 'Perdre 3 parties d\'affilée', progress: { stat: 'max_loss_streak', target: 3, unit: "défaites d'affilée" } },
   pleurs: { id: 'pleurs', label: 'Pleurs', emoji: '😭', condition: 'Finir dernier 5 fois', progress: { stat: 'last_place_count', target: 5, unit: "fois dernier" } },
   dodo: { id: 'dodo', label: 'Dodo', emoji: '😴', condition: 'Terminer une soirée après 2h du matin (Europe/Paris)', progress: { stat: 'late_soirees_count', target: 1, unit: "soirée tardive" } },
-  determine: { id: 'determine', label: 'Déterminé', emoji: '😤', condition: 'Débloquer Cool ou Gamer (tenues uniquement)' },
+  determine: { id: 'determine', label: 'Déterminé', emoji: '😤', condition: 'Débloquer Cool ou Champion (tenues uniquement)' },
   surprise: { id: 'surprise', label: 'Surprise', emoji: '😮', condition: 'Participer à 10 soirées', progress: { stat: 'soirees_count', target: 10, unit: "soirées" } },
 }
 
