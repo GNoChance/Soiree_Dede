@@ -102,7 +102,8 @@
       "tycoon",
       "star",
       "teacher",
-      "student"
+      "student",
+      "racer"
     ],
     "portraits": [
       "spy",
@@ -123,7 +124,8 @@
       "admiral",
       "tycoon",
       "star",
-      "teacher"
+      "teacher",
+      "racer"
     ]
   },
   "dede": {
