@@ -90,5 +90,17 @@ await db.query(`select public.game_action($1, '{"type":"abort"}'::jsonb)`, [m1])
 ok('partie terminée : friends_playing = []', JSON.stringify(await fp(2)) === '[]')
 ok('partie terminée : un membre peut toujours la lire', (await readMatch(1)).length === 1)
 
+// --- revue finale : pas d'historique ancien, pas de regard pour un exclu -----------------------------
+// m1 est terminée (abort) à l'instant : un ami peut encore la lire (écran de résultats)
+ok('partie terminée à l’instant : l’ami peut encore la lire (résultats)', (await readMatch(2)).length === 1)
+await sys(`update public.matches set finished_at = now() - interval '45 minutes' where id = $1`, [m1])
+ok('partie terminée depuis plus de 30 min : l’ami ne la lit plus (pas d’historique)', (await readMatch(2)).length === 0 && (await can(2)) === false)
+ok('partie ancienne : un membre de la soirée la lit toujours', (await readMatch(1)).length === 1)
+await sys(`update public.matches set finished_at = now() where id = $1`, [m1])
+await sys(`insert into public.soiree_bans(soiree_id, profile_id) values ($1, $2)`, [soiree, C])
+ok('ami EXCLU de la soirée par l’hôte : ne peut plus regarder', (await can(2)) === false && (await readMatch(2)).length === 0)
+await sys(`delete from public.soiree_bans where soiree_id = $1 and profile_id = $2`, [soiree, C])
+ok('exclusion levée : l’ami peut de nouveau regarder', (await can(2)) === true)
+
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)

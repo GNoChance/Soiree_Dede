@@ -54,7 +54,8 @@ export function MatchPage() {
   const state = match?.state as unknown as BaseGameState | undefined
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
-  const spectator = useSpectator(state, meId, isHost)
+  // Tant que la soirée n'est pas connue (chargement), on ne sait pas si je suis l'hôte (meneur qui ne joue pas) : pas de bandeau.
+  const spectator = useSpectator(state, meId, isHost) && Boolean(soireeData || outsider)
   const soireeEnded = soireeData?.soiree.status === 'ended'
   // Soirée terminée (fin auto, hôte…) : plus de salon, retour au hub. Spectateur extérieur : retour à ses amis.
   const backToSalon = () => navigate(outsider ? '/amis' : soireeId && !soireeEnded ? `/soiree/${soireeId}` : '/', { replace: true })

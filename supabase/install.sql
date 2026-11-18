@@ -4263,8 +4263,9 @@ end $$;
 -- Qui peut lire une partie (matches) :
 --   * un membre de la soirée (comme avant) ;
 --   * un AMI ACCEPTÉ (friendships.status = 'accepted', dans les deux sens) d'un joueur de la partie
---     (state->'players') ou de l'hôte de la soirée. Pas d'interrupteur de confidentialité : tout ami
---     accepté peut regarder (décision de conception).
+--     (state->'players') ou de l'hôte de la soirée, pour une partie EN COURS ou terminée depuis moins de
+--     30 min (écran de résultats) — jamais l'historique ancien — et s'il n'a pas été EXCLU de la soirée
+--     (soiree_bans). Pas d'interrupteur de confidentialité : tout ami accepté peut regarder (décision de conception).
 -- Rien d'autre n'est ouvert : soirees, soiree_players, soiree_messages, match_secrets (réservés au
 -- joueur concerné) et match_server_state (aucun accès client) restent comme avant.
 --
@@ -4285,14 +4286,18 @@ as $$
      where m.id = p_match_id
        and (
          public.is_soiree_member(m.soiree_id)
-         or exists (
+         or (
+           (m.status = 'playing' or m.finished_at > now() - interval '30 minutes')
+           and not exists (select 1 from public.soiree_bans b
+                            where b.soiree_id = m.soiree_id and b.profile_id = public.current_profile_id())
+           and exists (
            select 1 from public.friendships f
             where f.status = 'accepted'
               and (f.requester_id = public.current_profile_id() or f.addressee_id = public.current_profile_id())
               and (case when f.requester_id = public.current_profile_id() then f.addressee_id else f.requester_id end)::text
                   in (select jsonb_array_elements_text(case when jsonb_typeof(m.state->'players') = 'array'
                                                             then m.state->'players' else '[]'::jsonb end)
-                      union select s.host_id::text from public.soirees s where s.id = m.soiree_id)))
+                      union select s.host_id::text from public.soirees s where s.id = m.soiree_id))))
   )
 $$;
 
