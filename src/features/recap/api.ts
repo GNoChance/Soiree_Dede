@@ -2,12 +2,12 @@ import { supabase } from '@/lib/supabase'
 import type { MiniProfile, StandingRow } from '@/features/stats/api'
 
 /** Miroir TS de `soiree_recap` (supabase/features/recap.sql, non typée dans db.ts). */
-export type AwardId = 'serie' | 'bluff' | 'deuxieme' | 'pasdebol' | 'bavard' | 'sticker'
+export type AwardId = 'serie' | 'bluff' | 'deuxieme' | 'pasdebol' | 'bavard' | 'sticker' | 'devin'
 export interface RecapAward {
   id: AwardId
   profile_id: string
   value: number
-  extra: { as_undercover?: number; as_wolf?: number; expression?: string; total?: number; tenue?: string }
+  extra: { as_undercover?: number; as_wolf?: number; expression?: string; total?: number; tenue?: string; bets?: number }
 }
 export interface SoireeRecap {
   version: number

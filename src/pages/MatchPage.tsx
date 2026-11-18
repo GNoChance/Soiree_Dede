@@ -140,7 +140,7 @@ export function MatchPage() {
           </Button>
         </Card>
       ) : finished ? (
-        <ResultsScreen key={match.id} state={state} meId={meId} players={byId} game={game} onBack={backToSalon} />
+        <ResultsScreen key={match.id} matchId={match.id} state={state} meId={meId} players={byId} game={game} onBack={backToSalon} />
       ) : Play && soireeId ? (
         <Suspense fallback={<PlaySkeleton />}>
           <Play

@@ -10,6 +10,7 @@ import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { refreshProfile } from '@/lib/auth'
 import type { BaseGameState, GameDefinition, PlayerInfo } from '@/games/types'
+import { PronosResult } from '@/features/pronos/PronosResult'
 import { TrophyUnlockReveal } from '@/features/trophees/TrophyReveal'
 import { TenueUnlockReveal, UnlockReveal } from './components'
 import { mood, playerOrPlaceholder } from './players'
@@ -34,7 +35,7 @@ function CountUp({ to, delay = 0 }: { to: number; delay?: number }) {
 const PODIUM_H = { 1: 'h-28', 2: 'h-20', 3: 'h-14' } as const
 const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' } as const
 
-export function ResultsScreen({ state, meId, players, game, onBack }: { state: BaseGameState; meId: string; players: Record<string, PlayerInfo>; game: GameDefinition | undefined; onBack: () => void }) {
+export function ResultsScreen({ matchId, state, meId, players, game, onBack }: { matchId: string; state: BaseGameState; meId: string; players: Record<string, PlayerInfo>; game: GameDefinition | undefined; onBack: () => void }) {
   const results = [...(state.results ?? [])].sort((a, b) => a.placement - b.placement)
   const me = results.find((r) => r.profile_id === meId)
   const xp = state.xp_gained?.[meId] ?? 0
@@ -103,6 +104,8 @@ export function ResultsScreen({ state, meId, players, game, onBack }: { state: B
           </motion.div>
         ))}
       </div>
+
+      <PronosResult matchId={matchId} meId={meId} byId={players} />
 
       {/* Mon XP */}
       {me && (

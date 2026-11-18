@@ -63,6 +63,12 @@ function awardView(a: RecapAward, who: MiniProfile): AwardView {
         big: plural(a.value, 'message'),
         line: 'Les doigts qui fument ! Heureusement qu’il y avait quelqu’un pour animer le chat.',
       }
+    case 'devin':
+      return {
+        key: a.id, emoji: '🔮', title: 'Meilleur devin', bg: 'bg-sky', who: [who],
+        big: plural(a.value, 'bon pronostic', 'bons pronostics') + (x.bets ? ` sur ${x.bets}` : ''),
+        line: 'Madame Irma, c’est toi ? Tu avais tout vu venir avant même le début de la partie !',
+      }
     default:
       return {
         key: a.id, emoji: '🎟️', title: 'Sticker préféré de la soirée', bg: 'bg-sun', who: [who],

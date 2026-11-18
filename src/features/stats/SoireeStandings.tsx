@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { victoryConfetti } from '@/components/ui/confetti'
 import { fx } from '@/lib/feedback'
+import { DevinLine } from '@/features/pronos/DevinLine'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/store/session'
 import { fetchStandings, useSoireeStandings, type SoireeStandings, type StandingRow } from './api'
@@ -50,6 +51,7 @@ export function SoireeStandingsCard({ soireeId }: { soireeId: string }) {
           <StandingLine key={r.profile_id} row={r} me={r.profile_id === meId} />
         ))}
       </ul>
+      <DevinLine soireeId={soireeId} />
       <p className="text-xs leading-snug text-muted">Victoire = 3 pts, 2e place = 2 pts, 3e = 1 pt.</p>
     </Card>
   )
@@ -175,6 +177,7 @@ export function SoireePodium({ soireeId, onDone }: { soireeId: string; onDone: (
           👑 {crownTitle(winners)}
         </motion.h2>
         <Podium standings={data.standings} />
+        <DevinLine soireeId={soireeId} />
         {rest.length > 0 && (
           <ul className="flex w-full flex-col gap-1.5">
             {rest.map((r, i) => (
