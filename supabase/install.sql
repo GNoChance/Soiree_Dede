@@ -3886,7 +3886,7 @@ begin
     select x.profile_id, x.match_id, m.game_id, m.finished_at, x.won, x.placement, x.stats, m.state,
            count(*) over (partition by x.match_id) as n,
            max(x.placement) over (partition by x.match_id) as maxp,
-           count(distinct x.placement) over (partition by x.match_id) as np
+           (select count(distinct y.placement) from public.match_players y where y.match_id = x.match_id) as np
       from public.match_players x join public.matches m on m.id = x.match_id
      where m.soiree_id = p_soiree_id and m.status = 'finished'
   ), t as (
@@ -3928,13 +3928,17 @@ begin
       cross join lateral (select q.profile_id, count(*)::int as c from public.soiree_messages q
                            where q.soiree_id = p_soiree_id and q.kind = 'sticker' and q.body = top.body
                            group by q.profile_id order by count(*) desc, q.profile_id limit 1) z
+    union all
+    select 'devin', r.profile_id, count(*) filter (where r.ok)::int, jsonb_build_object('bets', count(*)::int)
+      from public._prono_resolved() r where r.soiree_id = p_soiree_id
+     group by r.profile_id having count(*) filter (where r.ok) >= 1
   ), best as (
     select distinct on (c.id) c.id, c.profile_id, c.value, c.extra
       from cand c join public.profiles p on p.id = c.profile_id
      order by c.id, c.value desc, p.sort_order
   )
   select coalesce(jsonb_agg(jsonb_build_object('id', id, 'profile_id', profile_id, 'value', value, 'extra', extra)
-                            order by array_position(array['serie','bluff','deuxieme','pasdebol','bavard','sticker'], id)), '[]'::jsonb)
+                            order by array_position(array['serie','bluff','deuxieme','pasdebol','bavard','sticker','devin'], id)), '[]'::jsonb)
     into v_awards from best;
 
   return jsonb_build_object(
@@ -4833,6 +4837,14 @@ begin
         select coalesce(max(c), 0) into v from (
           select count(*) as c from public.trophy_unlocks u join public.trophies t on t.id = u.trophy_id
            where u.profile_id = p_profile and t.tenue_id is not null group by t.tenue_id) x;
+      when 'prono_streak' then
+        select coalesce(max(len), 0) into v from (
+          select count(*) as len from (
+            select r.ok,
+                   row_number() over (order by r.at, r.match_id)
+                   - row_number() over (partition by r.ok order by r.at, r.match_id) as grp
+              from public._prono_resolved() r where r.profile_id = p_profile) t
+           where t.ok group by t.grp) z;
       else v := 0;
     end case;
   end if;
@@ -4899,9 +4911,13 @@ declare
   v_id   uuid;
   v_new  text[];
   v_map  jsonb := '{}'::jsonb;
+  v_ids  uuid[];
 begin
   select game_id into v_game from public.matches where id = p_match_id;
-  foreach v_id in array coalesce(p_profile_ids, '{}') loop
+  -- joueurs de la partie + parieurs de la manche de pronostics (même absents de la partie)
+  v_ids := array(select distinct x from unnest(coalesce(p_profile_ids, '{}')
+                  || array(select profile_id from public.soiree_pronos where match_id = p_match_id)) x);
+  foreach v_id in array v_ids loop
     v_new := public.evaluate_trophies(v_id, v_game);
     if coalesce(array_length(v_new, 1), 0) > 0 then
       v_map := v_map || jsonb_build_object(v_id::text, to_jsonb(v_new));
@@ -5178,7 +5194,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_grande_tablee', null, null, 'Grande tablée', 'Participer à une soirée de 6 joueurs ou plus', null, '{"agg":"special","name":"biggest_table","threshold":6}'::jsonb, true, 227),
   ('gen_pipelette', null, null, 'Pipelette', 'Envoyer 50 stickers dans le chat', null, '{"agg":"special","name":"stickers","threshold":50}'::jsonb, true, 228),
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
-  ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230)
+  ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230),
+  ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231)
 on conflict (id) do update
   set tenue_id = excluded.tenue_id, slot = excluded.slot, name = excluded.name, description = excluded.description,
       game_id = excluded.game_id, rule = excluded.rule, active = excluded.active, sort_order = excluded.sort_order;

@@ -77,11 +77,11 @@ const openCount = async () => Number((await sys(`select count(*)::int c from pub
 const QDN = { questions: ['Q1', 'Q2'], rounds: 1 }
 const start = (players = [A, B, C]) =>
   call(0, `select public.start_match($1, 'qui-de-nous', $2::jsonb) id`, [soiree, JSON.stringify({ ...QDN, player_ids: players })])
-const finish = (matchId, winners, players = [A, B, C]) =>
-  db.query(`select public.finish_match($1, $2::jsonb)`, [
+const finish = async (matchId, winners, players = [A, B, C]) =>
+  (await db.query(`select public.finish_match($1, $2::jsonb) r`, [
     matchId,
-    JSON.stringify(players.map((p, i) => ({ profile_id: p, points: winners.includes(p) ? 3 : 0, won: winners.includes(p), placement: winners.includes(p) ? 1 : 2 + i }))),
-  ])
+    JSON.stringify(players.map((p, i) => ({ profile_id: p, points: winners.includes(p) ? 3 : 0, won: winners.includes(p), placement: winners.includes(p) ? 1 : 2 + i })))
+  ])).rows[0].r
 
 // --- ouverture -------------------------------------------------------------
 ok('set_prono avant toute ouverture → pronos_closed', (await bet(1, A)).err?.includes('pronos_closed'))
@@ -164,6 +164,40 @@ const row = (id) => board.find((x) => x.profile_id === id)
 ok('soiree_prono_board : bons pronostics comptés (parieur hors manche inclus), annulés ignorés',
   board.length === 2 && row(B).hits === 1 && row(B).bets === 1 && row(D).hits === 1 && row(D).bets === 1, JSON.stringify(board))
 ok('soiree_prono_board par un non-membre → erreur', Boolean((await call(4, `select public.soiree_prono_board($1) r`, [soiree])).err))
+
+
+// --- trophée « Madame Irma » (3 bons pronostics d'affilée) ------------------------
+const round3 = async (winners, bets) => {
+  await open(0, 'qui-de-nous', [A, B, C])
+  for (const [who, pick] of bets) await bet(who, pick)
+  const id = (await start()).r.id
+  return { id, fin: await finish(id, winners) }
+}
+const hasIrma = async (who) => (await sys(`select 1 from public.trophy_unlocks where profile_id = $1 and trophy_id = 'gen_madame_irma'`, [who])).length > 0
+ok('le trophée gen_madame_irma existe (général, actif)', (await sys(`select 1 from public.trophies where id='gen_madame_irma' and tenue_id is null and active`)).length === 1)
+// D (parieur absent de la manche) : ok en m1 ; B : ok en m1
+await round3([A], [[3, A], [1, C]]) // m4 : D ok, B (pick C) perd → série de B cassée
+ok('2 bons pronostics seulement : pas de trophée', !(await hasIrma(D)))
+await round3([], [[3, A]]) // m5 : sans gagnant → annulé, n'interrompt rien
+ok('un pronostic annulé n’interrompt ni n’allonge la série', !(await hasIrma(D)))
+const m6 = await round3([A], [[3, A], [1, A]]) // m6 : D ok (3e), B ok (1 seule d'affilée)
+ok('3e bon pronostic d’affilée (parieur absent de la manche) : trophée débloqué', await hasIrma(D))
+ok('finish_match annonce le trophée du parieur absent dans new_trophies', (m6.fin.new_trophies?.[D] ?? []).includes('gen_madame_irma'), JSON.stringify(m6.fin.new_trophies))
+ok('une série cassée par un faux pronostic : pas de trophée', !(await hasIrma(B)))
+
+// --- award « Meilleur devin » du Wrapped -----------------------------------------
+await call(0, `select public.end_soiree($1)`, [soiree])
+const rec = await call(0, `select public.soiree_recap($1) r`, [soiree])
+if (rec.err) console.log("recap err:", rec.err)
+const awards = rec.r.r.awards
+const devin = awards.find((a) => a.id === 'devin')
+ok('soiree_recap : award devin = meilleur parieur (3 bons pronostics)', devin?.profile_id === D && devin?.value === 3 && devin?.extra?.bets === 3, JSON.stringify(devin))
+const soiree2 = (await call(0, `select public.create_soiree($1::uuid[]) r`, [arr([B, C])])).r.r.id
+const m7 = (await call(0, `select public.start_match($1, 'qui-de-nous', $2::jsonb) id`, [soiree2, JSON.stringify({ ...QDN, player_ids: [A, B, C] })])).r.id
+await finish(m7, [A])
+await call(0, `select public.end_soiree($1)`, [soiree2])
+const awards2 = (await call(0, `select public.soiree_recap($1) r`, [soiree2])).r.r.awards
+ok('soiree_recap sans aucun pari : pas d’award devin', !awards2.some((a) => a.id === 'devin'), JSON.stringify(awards2))
 
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)

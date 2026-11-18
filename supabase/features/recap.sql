@@ -75,7 +75,7 @@ begin
     select x.profile_id, x.match_id, m.game_id, m.finished_at, x.won, x.placement, x.stats, m.state,
            count(*) over (partition by x.match_id) as n,
            max(x.placement) over (partition by x.match_id) as maxp,
-           count(distinct x.placement) over (partition by x.match_id) as np
+           (select count(distinct y.placement) from public.match_players y where y.match_id = x.match_id) as np
       from public.match_players x join public.matches m on m.id = x.match_id
      where m.soiree_id = p_soiree_id and m.status = 'finished'
   ), t as (
@@ -117,13 +117,17 @@ begin
       cross join lateral (select q.profile_id, count(*)::int as c from public.soiree_messages q
                            where q.soiree_id = p_soiree_id and q.kind = 'sticker' and q.body = top.body
                            group by q.profile_id order by count(*) desc, q.profile_id limit 1) z
+    union all
+    select 'devin', r.profile_id, count(*) filter (where r.ok)::int, jsonb_build_object('bets', count(*)::int)
+      from public._prono_resolved() r where r.soiree_id = p_soiree_id
+     group by r.profile_id having count(*) filter (where r.ok) >= 1
   ), best as (
     select distinct on (c.id) c.id, c.profile_id, c.value, c.extra
       from cand c join public.profiles p on p.id = c.profile_id
      order by c.id, c.value desc, p.sort_order
   )
   select coalesce(jsonb_agg(jsonb_build_object('id', id, 'profile_id', profile_id, 'value', value, 'extra', extra)
-                            order by array_position(array['serie','bluff','deuxieme','pasdebol','bavard','sticker'], id)), '[]'::jsonb)
+                            order by array_position(array['serie','bluff','deuxieme','pasdebol','bavard','sticker','devin'], id)), '[]'::jsonb)
     into v_awards from best;
 
   return jsonb_build_object(
