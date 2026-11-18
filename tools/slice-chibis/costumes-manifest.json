@@ -11,7 +11,14 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "tictactoe",
+      "strategist",
+      "bowler",
+      "werewolf",
+      "teacher",
+      "star",
+      "racer"
     ],
     "portraits": [
       "spy",
@@ -25,7 +32,15 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "tycoon",
+      "admiral",
+      "tictactoe",
+      "strategist",
+      "bowler",
+      "teacher",
+      "star",
+      "racer"
     ]
   },
   "cecile": {
