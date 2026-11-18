@@ -18,7 +18,9 @@
       "werewolf",
       "teacher",
       "star",
-      "racer"
+      "racer",
+      "tycoon",
+      "admiral"
     ],
     "portraits": [
       "spy",
@@ -281,7 +283,14 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "star",
+      "teacher",
+      "bowler",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon"
     ],
     "portraits": [
       "spy",
@@ -295,7 +304,13 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "star",
+      "teacher",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "tycoon"
     ]
   },
   "nini": {

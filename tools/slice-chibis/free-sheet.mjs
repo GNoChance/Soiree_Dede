@@ -30,7 +30,55 @@ async function load(file) {
   return { rgb: data, W: info.width, H: info.height };
 }
 
-function segment(img, region, n, tol, white = true, openR = 3) {
+// split : stickers soudés par leur liseré (planches serrées) -> on érode jusqu'à obtenir n noyaux séparés,
+// puis chaque pixel du premier plan est rattaché au noyau le plus proche (croissance géodésique).
+function splitFused(FG, w, h, n) {
+  for (let r = 4; r <= 60; r += 2) {
+    const E = erode(FG, w, h, r);
+    const { lab: el, n: en, comps: ec } = label(E, w, h);
+    // un noyau par case de la grille (n = 12 : 4 x 3) : on écarte les noyaux trop étalés (deux stickers soudés)
+    // et les décorations (une case n'en garde que le plus gros).
+    const cols = n === 12 ? 4 : Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+    const cw = w / cols, ch = h / rows, best = new Map();
+    for (let l = 1; l <= en; l++) {
+      const c = ec[l];
+      if (c.a < 2500 || c.x1 - c.x0 > 1.15 * cw || c.y1 - c.y0 > 1.15 * ch) continue;
+      const cell = Math.floor((c.x0 + c.x1) / 2 / cw) + cols * Math.floor((c.y0 + c.y1) / 2 / ch);
+      if (!best.has(cell) || ec[best.get(cell)].a < c.a) best.set(cell, l);
+    }
+    if (best.size < n) continue;
+    const keep = new Map([...best.entries()].sort((x, y) => x[0] - y[0]).map(([, l], i) => [l, i + 1]));
+    const lab = new Int32Array(w * h);
+    let q = [];
+    for (let i = 0; i < w * h; i++) { const k = el[i] && keep.get(el[i]); if (k) { lab[i] = k; q.push(i); } }
+    while (q.length) {
+      const nq = [];
+      for (const p of q) {
+        const x = p % w, y = (p / w) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const t = ny * w + nx;
+          if (FG[t] && !lab[t]) { lab[t] = lab[p]; nq.push(t); }
+        }
+      }
+      q = nq;
+    }
+    // reste du premier plan (décorations isolées) : composantes à part
+    const rest = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) rest[i] = FG[i] && !lab[i] ? 1 : 0;
+    const rl = label(rest, w, h);
+    for (let i = 0; i < w * h; i++) if (rl.lab[i]) lab[i] = n + rl.lab[i];
+    const comps = [null];
+    for (let l = 1; l <= n + rl.n; l++) comps.push({ x0: 1e9, y0: 1e9, x1: -1, y1: -1, a: 0 });
+    for (let i = 0; i < w * h; i++) { const l = lab[i]; if (!l) continue; const c = comps[l], x = i % w, y = (i / w) | 0; c.a++; if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y; }
+    console.log('  split : noyaux séparés à r=' + r);
+    return { lab, n: n + rl.n, comps };
+  }
+  return null;
+}
+
+function segment(img, region, n, tol, white = true, openR = 3, split = false) {
   const { rgb, W } = img;
   const [x0, y0, x1, y1] = region;
   const w = x1 - x0, h = y1 - y0;
@@ -59,7 +107,8 @@ function segment(img, region, n, tol, white = true, openR = 3) {
   for (let i = 0; i < w * h; i++) FG[i] = BG[i] ? 0 : 1;
   // ouverture : supprime les filets fins (halos de contour, traits de séparation) avant l'étiquetage
   const O = openR ? dilate(erode(FG, w, h, openR), w, h, openR) : FG;
-  const { lab, n: nl, comps } = label(O, w, h);
+  let { lab, n: nl, comps } = label(O, w, h);
+  if (split) { const sp = splitFused(O, w, h, n); if (sp) ({ lab, n: nl, comps } = sp); }
   const all = [];
   for (let l = 1; l <= nl; l++) all.push({ l, ...comps[l] });
   all.sort((a, b) => b.a - a.a);
@@ -129,7 +178,7 @@ for (const s of CFG.sheets) {
   const img = await load(s.file);
   const region = s.region ?? [0, 0, img.W, img.H];
   console.log(`${s.name} (${s.file}) zone ${region.join(',')}`);
-  const seg = segment(img, region, s.n, s.tol ?? 24, s.white ?? true, s.open ?? 3);
+  const seg = segment(img, region, s.n, s.tol ?? 24, s.white ?? true, s.open ?? 3, s.split ?? false);
   const tiles = [];
   for (const k of seg.ordered) tiles.push(await cutSticker(img, seg, k, s.closeR ?? 2));
   if (preview) {
@@ -157,9 +206,15 @@ async function cutoutBlack(file) {
   const { data, info } = await sharp(fs.readFileSync(file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h } = info;
   const dark = (i) => Math.max(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) < 48;
+  // Anti-fuite : le liseré blanc a parfois de minuscules trous ; le noir du fond entrerait alors dans le personnage
+  // et effacerait ses contours noirs. On interdit donc de passer à moins de 10 px d'un pixel non noir, puis on
+  // regagne la frange extérieure (11 px, uniquement sur du noir).
+  const lit = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) lit[i] = dark(i) ? 0 : 1;
+  const barrier = dilate(lit, w, h, 10);
   const out = new Uint8Array(w * h);
   const stack = [];
-  const push = (i) => { if (!out[i] && dark(i)) { out[i] = 1; stack.push(i); } };
+  const push = (i) => { if (!out[i] && dark(i) && !barrier[i]) { out[i] = 1; stack.push(i); } };
   for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
   for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
   while (stack.length) {
@@ -167,11 +222,11 @@ async function cutoutBlack(file) {
     if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w);
   }
   let cur = out;
-  for (let k = 0; k < 2; k++) {
+  for (let k = 0; k < 11; k++) {
     const nx = cur.slice();
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      if (!cur[i] && ((x > 0 && cur[i - 1]) || (x < w - 1 && cur[i + 1]) || (y > 0 && cur[i - w]) || (y < h - 1 && cur[i + w]))) nx[i] = 1;
+      if (!cur[i] && dark(i) && ((x > 0 && cur[i - 1]) || (x < w - 1 && cur[i + 1]) || (y > 0 && cur[i - w]) || (y < h - 1 && cur[i + w]))) nx[i] = 1;
     }
     cur = nx;
   }
