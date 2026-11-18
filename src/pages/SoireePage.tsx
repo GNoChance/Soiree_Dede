@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -366,7 +366,9 @@ function PlayersGrid({ ids, hostId, meId, byId, onKick }: { ids: string[]; hostI
               transition={{ type: 'spring', stiffness: 380, damping: 14 }}
               className="relative flex justify-center"
             >
-              <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
+              <Link to={`/profil/${id}`} aria-label={`Voir le profil de ${p.nickname}`} className="rounded-2xl">
+                <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
+              </Link>
               {onKick && id !== meId && (
                 <button
                   type="button"
