@@ -21,7 +21,7 @@ interface LooseClient {
   channel: typeof supabase.channel
   removeChannel: typeof supabase.removeChannel
 }
-const loose = supabase as unknown as LooseClient
+export const loose = supabase as unknown as LooseClient
 
 export const kickPlayer = (soireeId: string, profileId: string) =>
   loose.rpc('kick_soiree_player', { p_soiree_id: soireeId, p_profile_id: profileId })

@@ -20,6 +20,7 @@ import { leaveSoiree, refetchActiveSoirees, useActiveSoirees, useCurrentMatch, u
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { CheckableToken, ConfirmModal, LaunchCountdown, PlayerToken, UnlockReveal } from '@/features/soiree/components'
 import { GameWheel } from '@/features/soiree/GameWheel'
+import { PronosCard } from '@/features/pronos/PronosCard'
 import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, type WheelSpin } from '@/features/soiree/hostTools'
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
@@ -196,7 +197,10 @@ export function SoireePage() {
           onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })}
         />
       ) : (
-        <WaitingCard hostName={playerOrPlaceholder(byId, soiree.host_id).nickname} meSlug={byId[meId]?.slug} />
+        <>
+          {!launching && <PronosCard soireeId={soiree.id} meId={meId} byId={byId} />}
+          <WaitingCard hostName={playerOrPlaceholder(byId, soiree.host_id).nickname} meSlug={byId[meId]?.slug} />
+        </>
       )}
 
       <FooterActions
