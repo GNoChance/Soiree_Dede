@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { DoorOpen, Play, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { burst } from '@/components/ui/confetti'
@@ -15,10 +15,73 @@ const SPIN_S = 5.5
 /** « Réduire les animations » : la roue tourne quand même (c'est tout le jeu), plus calmement. */
 const SPIN_CALM_S = 2.5
 
-function polar(angleDeg: number, r: number) {
-  const a = ((angleDeg - 90) * Math.PI) / 180
-  return [R + r * Math.cos(a), R + r * Math.sin(a)] as const
+/**
+ * Dessin de la roue sur un canvas 2D, tournée de `angleDeg` (sens horaire). Aucune transformation CSS, aucun
+ * SVG animé, aucune bibliothèque d'animation : seulement notre boucle requestAnimationFrame (comme le bowling),
+ * donc la roue tourne partout (iPhone, Android, « réduire les animations » activé, mode économie d'énergie).
+ */
+function drawWheel(canvas: HTMLCanvasElement, games: GameDefinition[], angleDeg: number) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const dpr = canvas.width / SIZE
+  const css = getComputedStyle(canvas)
+  const ink = css.getPropertyValue('--ink').trim() || '#1f1b2e'
+  const surface = css.getPropertyValue('--surface').trim() || '#ffffff'
+  const n = games.length
+  const seg = 360 / Math.max(n, 1)
+  const rad = (d: number) => (d * Math.PI) / 180
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, SIZE, SIZE)
+  // ombre décalée « sticker » (ne tourne pas : la lumière vient toujours du même côté)
+  ctx.fillStyle = ink
+  ctx.beginPath()
+  ctx.arc(R + 4, R + 4, R - 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.save()
+  ctx.translate(R, R)
+  ctx.rotate(rad(angleDeg))
+  ctx.beginPath()
+  ctx.arc(0, 0, R - 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = 3
+  ctx.strokeStyle = ink
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `${n > 12 ? 22 : 30}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`
+  games.forEach((g, i) => {
+    const a0 = i * seg - 90 // 0° = en haut
+    ctx.fillStyle = g.color
+    ctx.beginPath()
+    if (n === 1) ctx.arc(0, 0, R - 8, 0, Math.PI * 2)
+    else {
+      ctx.moveTo(0, 0)
+      ctx.arc(0, 0, R - 8, rad(a0), rad(a0 + seg))
+      ctx.closePath()
+    }
+    ctx.fill()
+    ctx.stroke()
+    // emoji au milieu de la part, tête vers l'extérieur
+    const mid = a0 + seg / 2
+    ctx.save()
+    ctx.translate(Math.cos(rad(mid)) * R * 0.66, Math.sin(rad(mid)) * R * 0.66)
+    ctx.rotate(rad(mid + 90))
+    ctx.fillStyle = ink
+    ctx.fillText(g.emoji, 0, 0)
+    ctx.restore()
+  })
+  // moyeu
+  ctx.fillStyle = surface
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.arc(0, 0, 22, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
 }
+
+/** Ralentissement progressif (départ vif, arrêt doux). */
+const easeOut = (p: number) => 1 - Math.pow(1 - p, 4)
 
 /**
  * Roue des jeux plein écran : tout le monde la voit tourner et s'arrêter sur le même
@@ -31,72 +94,54 @@ export function GameWheel({ spin, isHost, busy, onLaunch, onRespin, onClose, onG
   const idx = Math.max(0, games.findIndex((g) => g.id === spin.result))
   const winner = games[idx]
   const [done, setDone] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const seg = 360 / Math.max(n, 1)
   // Le centre de la part gagnante finit sous le repère (en haut), avec un léger décalage dans la part.
   const jitter = (((spin.id * 37) % 100) / 100 - 0.5) * seg * 0.6
   const target = 360 * (reduce ? 2 : 6) - (idx + 0.5) * seg - jitter
   const spinS = reduce ? SPIN_CALM_S : SPIN_S
 
-  const finished = useRef(false)
-  const finishRef = useRef<() => void>(() => {})
   useEffect(() => {
-    finished.current = false
+    let finished = false
+    let raf = 0
+    const canvas = canvasRef.current
     const finish = () => {
-      if (finished.current) return
-      finished.current = true
+      if (finished) return
+      finished = true
+      if (canvas) drawWheel(canvas, games, target)
       setDone(true)
       fx.fanfare()
       burst({ x: 0.5, y: 0.5 }, 160)
     }
-    finishRef.current = finish
     setDone(false)
-    // Filet : si l'animation ne notifie pas la fin (onglet masqué…), on affiche quand même le résultat.
+    if (canvas) drawWheel(canvas, games, 0)
+    const start = performance.now()
+    const frame = (now: number) => {
+      const p = Math.min(1, (now - start) / (spinS * 1000))
+      if (canvas) drawWheel(canvas, games, target * easeOut(p))
+      if (p < 1) raf = requestAnimationFrame(frame)
+      else finish()
+    }
+    raf = requestAnimationFrame(frame)
+    // Filet : si la boucle est suspendue (onglet masqué…), on affiche quand même le résultat.
     const t = window.setTimeout(finish, spinS * 1000 + 600)
     // tic-tac pendant le tour
     const ticks = [0.4, 0.9, 1.5, 2.2, 3.0, 3.9, 4.8].map((s) => window.setTimeout(() => fx.tick(), (s / SPIN_S) * spinS * 1000))
     return () => {
+      finished = true
+      cancelAnimationFrame(raf)
       clearTimeout(t)
       ticks.forEach(clearTimeout)
     }
-  }, [spin.id, spinS])
+  }, [spin.id, spinS, games, target])
   if (!winner) return null
+  const dpr = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 3)
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#07050f]/75 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Roue des jeux">
       <div className="flex max-h-[96dvh] w-full max-w-sm flex-col items-center gap-3 overflow-y-auto py-2">
         <h2 className="font-display text-3xl font-extrabold text-white drop-shadow-[3px_3px_0_var(--ink)]">🎡 La roue des jeux</h2>
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
-          {/* reducedMotion="never" : sinon le MotionConfig racine ("user") supprime la rotation et la roue saute au résultat. */}
-          <MotionConfig reducedMotion="never">
-          <motion.svg
-            key={spin.id}
-            viewBox={`0 0 ${SIZE} ${SIZE}`}
-            width={SIZE}
-            height={SIZE}
-            className="overflow-visible drop-shadow-[4px_4px_0_var(--ink)]"
-            initial={{ rotate: 0 }}
-            animate={{ rotate: target }}
-            transition={{ duration: spinS, ease: [0.12, 0.75, 0.15, 1] }}
-            onAnimationComplete={() => finishRef.current()}
-          >
-            <circle cx={R} cy={R} r={R - 2} fill="var(--ink)" />
-            {games.map((g, i) => {
-              const a0 = i * seg
-              const [x0, y0] = polar(a0, R - 8)
-              const [x1, y1] = polar(a0 + seg, R - 8)
-              const [ex, ey] = polar(a0 + seg / 2, R * 0.66)
-              const path = n === 1 ? '' : `M${R} ${R} L${x0} ${y0} A${R - 8} ${R - 8} 0 ${seg > 180 ? 1 : 0} 1 ${x1} ${y1} Z`
-              return (
-                <g key={g.id}>
-                  <path d={path} fill={g.color} stroke="var(--ink)" strokeWidth={3} strokeLinejoin="round" />
-                  <text x={ex} y={ey} textAnchor="middle" dominantBaseline="central" fontSize={n > 12 ? 22 : 30} transform={`rotate(${a0 + seg / 2} ${ex} ${ey})`}>
-                    {g.emoji}
-                  </text>
-                </g>
-              )
-            })}
-            <circle cx={R} cy={R} r={22} fill="var(--surface)" stroke="var(--ink)" strokeWidth={4} />
-          </motion.svg>
-          </MotionConfig>
+          <canvas key={spin.id} ref={canvasRef} width={Math.round(SIZE * dpr)} height={Math.round(SIZE * dpr)} style={{ width: SIZE, height: SIZE }} aria-hidden />
           {/* repère fixe */}
           <svg aria-hidden viewBox="0 0 40 40" width={40} height={40} className="absolute -top-3 left-1/2 -translate-x-1/2 drop-shadow-[2px_2px_0_var(--ink)]">
             <path d="M4 4 H36 L20 36 Z" fill="#EF476F" stroke="var(--ink)" strokeWidth={3.5} strokeLinejoin="round" />
