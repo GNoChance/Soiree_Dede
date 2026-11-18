@@ -20,7 +20,9 @@ import { leaveSoiree, refetchActiveSoirees, useActiveSoirees, useCurrentMatch, u
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { CheckableToken, ConfirmModal, LaunchCountdown, PlayerToken, UnlockReveal } from '@/features/soiree/components'
 import { GameWheel } from '@/features/soiree/GameWheel'
+import { closePronos, openPronos, usePronos } from '@/features/pronos/api'
 import { PronosCard } from '@/features/pronos/PronosCard'
+import { PronosPicker } from '@/features/pronos/PronosPicker'
 import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, type WheelSpin } from '@/features/soiree/hostTools'
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
@@ -489,6 +491,11 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
   const options = optionsByGame[gameId] ?? game.defaultOptions ?? {}
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
   const [starting, setStarting] = useState(false)
+  // Étape Pronostics : 'open' = la manche est ouverte chez tous les joueurs, le lancement suit.
+  const [pronos, setPronos] = useState<'off' | 'open'>('off')
+  const [opening, setOpening] = useState(false)
+  const pronosOpenRef = useRef(false)
+  const { state: pronosState, pick: pickProno } = usePronos(soireeId)
 
   const playing = playerIds.filter((id) => !excluded.has(id))
   const tooFew = playing.length < game.minPlayers
@@ -525,6 +532,8 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
       } catch {
         /* ignore */
       }
+      pronosOpenRef.current = false
+      setPronos('off')
       onStarted(data as string, game.id)
     } catch (e) {
       toastError(e)
@@ -533,11 +542,48 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
     }
   }
 
-  // « Lancer ce jeu » depuis la roue : on sélectionne le jeu puis on démarre au rendu suivant.
-  const [pendingStart, setPendingStart] = useState<string | null>(null)
-  const startRef = useRef(start)
+  // « C'est parti ! » : ouvre les pronostics chez tous les joueurs (le lancement vient après).
+  // Avec moins de 2 joueurs, pas de pronostic possible : on lance directement.
+  const beginPronos = async () => {
+    if (playing.length < 2) return void start()
+    setOpening(true)
+    const { error } = await openPronos(soireeId, game.id, playing)
+    setOpening(false)
+    if (error) return toastError(error)
+    pronosOpenRef.current = true
+    setPronos('open')
+  }
+  const cancelPronos = async () => {
+    pronosOpenRef.current = false
+    setPronos('off')
+    await closePronos(soireeId)
+  }
+  // Le jeu ou les joueurs changent pendant l'étape : les paris repartent de zéro (nouvelle manche).
+  const playingKey = playing.join(',')
   useEffect(() => {
-    startRef.current = start
+    if (!pronosOpenRef.current) return
+    void openPronos(soireeId, gameId, playing).then(({ error }) => {
+      if (error) {
+        toastError(error)
+        pronosOpenRef.current = false
+        setPronos('off')
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seulement quand le jeu ou la liste des joueurs change
+  }, [gameId, playingKey])
+  // L'hôte quitte l'écran sans lancer : on referme la manche (sinon elle expire après 10 min).
+  useEffect(
+    () => () => {
+      if (pronosOpenRef.current) void closePronos(soireeId)
+    },
+    [soireeId],
+  )
+
+  // « Lancer ce jeu » depuis la roue : on sélectionne le jeu puis on ouvre les pronostics au rendu suivant.
+  const [pendingStart, setPendingStart] = useState<string | null>(null)
+  const beginRef = useRef(beginPronos)
+  useEffect(() => {
+    beginRef.current = beginPronos
   })
   useEffect(() => {
     if (!launchReq) return
@@ -551,7 +597,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
       toast.error(tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : tooMany ? `${game.maxPlayers} joueurs maximum.` : 'Une partie est déjà en cours !')
       return
     }
-    void startRef.current()
+    void beginRef.current()
   }, [pendingStart, gameId, busy, tooFew, tooMany, game])
 
   const [spinning, setSpinning] = useState(false)
@@ -635,6 +681,14 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
         </Card>
       )}
 
+      {pronos === 'open' && pronosState.round && (
+        <Card className="flex flex-col gap-3">
+          <h2 className="text-2xl">🔮 Qui va gagner ?</h2>
+          <PronosPicker playerIds={pronosState.round.player_ids} byId={byId} meId={meId} myPick={pronosState.my_pick} onPick={(id) => void pickProno(id)} />
+          <p className="text-sm leading-snug text-muted">Si tu changes de jeu ou de joueurs, les pronostics repartent de zéro.</p>
+        </Card>
+      )}
+
       {(tooFew || tooMany) && (
         <p className="text-center font-bold text-tomato">
           {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
@@ -648,10 +702,33 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
           <div className="mx-auto max-w-md">
             <IdleCountdown deadline={idleDeadline} variant="bar" />
             <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
-              <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
-                C’est parti ! <span className="text-base opacity-80">{game.emoji}</span>
-              </Button>
+              {pronos === 'open' ? (
+                <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
+                  Lancer la partie <span className="text-base opacity-80">{game.emoji}</span>
+                </Button>
+              ) : (
+                <Button size="lg" fullWidth loading={starting || opening} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void beginPronos()}>
+                  C’est parti ! <span className="text-base opacity-80">{game.emoji}</span>
+                </Button>
+              )}
             </motion.div>
+            {pronos === 'open' && (
+              <div className="mt-1 flex items-center justify-between gap-2 text-sm font-bold">
+                <span>
+                  🔮 {pronosState.round?.bets ?? 0}/{playerIds.length} ont parié
+                </span>
+                <button type="button" className="min-h-11 px-2 underline" onClick={() => void cancelPronos()}>
+                  Annuler les pronostics
+                </button>
+              </div>
+            )}
+            {pronos === 'off' && !tooFew && !tooMany && !busy && (
+              <div className="mt-1 text-center">
+                <button type="button" className="min-h-11 px-3 text-sm font-bold text-muted underline" disabled={starting || opening} onClick={() => void start()}>
+                  Lancer sans pronostics
+                </button>
+              </div>
+            )}
             {(tooFew || tooMany) && (
               <p className="mt-1 text-center text-sm font-bold text-tomato">
                 {tooFew ? `Il faut au moins ${game.minPlayers} joueurs pour ${game.name}.` : `${game.maxPlayers} joueurs maximum.`}
