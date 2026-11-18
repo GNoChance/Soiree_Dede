@@ -23,6 +23,7 @@ import { GameWheel } from '@/features/soiree/GameWheel'
 import { closePronos, openPronos, usePronos } from '@/features/pronos/api'
 import { PronosCard } from '@/features/pronos/PronosCard'
 import { PronosPicker } from '@/features/pronos/PronosPicker'
+import { PRONOS_TTL_MS } from '@/features/pronos/types'
 import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, type WheelSpin } from '@/features/soiree/hostTools'
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
@@ -491,11 +492,14 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
   const options = optionsByGame[gameId] ?? game.defaultOptions ?? {}
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
   const [starting, setStarting] = useState(false)
-  // Étape Pronostics : 'open' = la manche est ouverte chez tous les joueurs, le lancement suit.
-  const [pronos, setPronos] = useState<'off' | 'open'>('off')
+  // Étape Pronostics : ouverte = une manche existe sur le serveur (même après un rechargement de la page).
   const [opening, setOpening] = useState(false)
   const pronosOpenRef = useRef(false)
-  const { state: pronosState, pick: pickProno } = usePronos(soireeId)
+  const { state: pronosState, pick: pickProno, refetch: refetchPronos } = usePronos(soireeId)
+  const roundOpen = Boolean(pronosState.round) && Date.now() - new Date(pronosState.round?.opened_at ?? 0).getTime() <= PRONOS_TTL_MS
+  useEffect(() => {
+    pronosOpenRef.current = roundOpen
+  })
 
   const playing = playerIds.filter((id) => !excluded.has(id))
   const tooFew = playing.length < game.minPlayers
@@ -533,7 +537,6 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
         /* ignore */
       }
       pronosOpenRef.current = false
-      setPronos('off')
       onStarted(data as string, game.id)
     } catch (e) {
       toastError(e)
@@ -550,13 +553,12 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
     const { error } = await openPronos(soireeId, game.id, playing)
     setOpening(false)
     if (error) return toastError(error)
-    pronosOpenRef.current = true
-    setPronos('open')
+    await refetchPronos()
   }
   const cancelPronos = async () => {
     pronosOpenRef.current = false
-    setPronos('off')
     await closePronos(soireeId)
+    await refetchPronos()
   }
   // Le jeu ou les joueurs changent pendant l'étape : les paris repartent de zéro (nouvelle manche).
   const playingKey = playing.join(',')
@@ -566,8 +568,9 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
       if (error) {
         toastError(error)
         pronosOpenRef.current = false
-        setPronos('off')
-      }
+        // la manche précédente ne doit pas rester ouverte avec des paris sur des joueurs qui ne jouent plus
+        void closePronos(soireeId).then(() => refetchPronos())
+      } else void refetchPronos()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seulement quand le jeu ou la liste des joueurs change
   }, [gameId, playingKey])
@@ -681,7 +684,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
         </Card>
       )}
 
-      {pronos === 'open' && pronosState.round && (
+      {roundOpen && pronosState.round && (
         <Card className="flex flex-col gap-3">
           <h2 className="text-2xl">🔮 Qui va gagner ?</h2>
           <PronosPicker playerIds={pronosState.round.player_ids} byId={byId} meId={meId} myPick={pronosState.my_pick} onPick={(id) => void pickProno(id)} />
@@ -702,7 +705,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
           <div className="mx-auto max-w-md">
             <IdleCountdown deadline={idleDeadline} variant="bar" />
             <motion.div animate={!tooFew && !tooMany && !busy ? { scale: [1, 1.04, 1] } : undefined} transition={{ repeat: Infinity, duration: 1.3 }}>
-              {pronos === 'open' ? (
+              {roundOpen ? (
                 <Button size="lg" fullWidth loading={starting} disabled={tooFew || tooMany || busy} icon={<Play className="size-7 fill-current" />} onClick={() => void start()}>
                   Lancer la partie <span className="text-base opacity-80">{game.emoji}</span>
                 </Button>
@@ -712,7 +715,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
                 </Button>
               )}
             </motion.div>
-            {pronos === 'open' && (
+            {roundOpen && (
               <div className="mt-1 flex items-center justify-between gap-2 text-sm font-bold">
                 <span>
                   🔮 {pronosState.round?.bets ?? 0}/{playerIds.length} ont parié
@@ -722,7 +725,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
                 </button>
               </div>
             )}
-            {pronos === 'off' && !tooFew && !tooMany && !busy && (
+            {!roundOpen && !tooFew && !tooMany && !busy && (
               <div className="mt-1 text-center">
                 <button type="button" className="min-h-11 px-3 text-sm font-bold text-muted underline" disabled={starting || opening} onClick={() => void start()}>
                   Lancer sans pronostics

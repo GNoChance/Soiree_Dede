@@ -56,7 +56,7 @@ begin
   end if;
 end $$;
 
--- Paris rattachés à une partie TERMINÉE qui a au moins un gagnant : ok = le joueur choisi a gagné.
+-- Paris rattachés à une partie TERMINÉE qui a au moins un gagnant et dont le joueur choisi a joué : ok = il a gagné.
 create or replace function public._prono_resolved()
 returns table(soiree_id uuid, match_id uuid, profile_id uuid, pick uuid, ok boolean, at timestamptz)
 language sql stable security definer
@@ -70,6 +70,8 @@ as $$
     join public.matches m on m.id = p.match_id
    where m.status = 'finished'
      and exists (select 1 from public.match_players w where w.match_id = m.id and w.won)
+     -- un pari sur un joueur qui n'a pas joué la partie est annulé (ni raté, ni compté)
+     and exists (select 1 from public.match_players w where w.match_id = m.id and w.profile_id = p.pick_profile_id)
 $$;
 
 create or replace function public.open_pronos(p_soiree_id uuid, p_game_id text, p_player_ids uuid[])

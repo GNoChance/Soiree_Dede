@@ -50,7 +50,10 @@ export function usePronos(soireeId: string | undefined) {
     if (!soireeId) return
     const ch = loose
       .channel(`pronos:${soireeId}:${Date.now().toString(36)}:${++seq}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'soiree_prono_rounds', filter: `soiree_id=eq.${soireeId}` }, () => void refetch())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'soiree_prono_rounds', filter: `soiree_id=eq.${soireeId}` }, () => void refetch())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'soiree_prono_rounds', filter: `soiree_id=eq.${soireeId}` }, () => void refetch())
+      // Les DELETE ne sont pas filtrables côté Realtime (fermeture / lancement) : on relit à chaque suppression.
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'soiree_prono_rounds' }, () => void refetch())
     ch.subscribe()
     return () => {
       void loose.removeChannel(ch)

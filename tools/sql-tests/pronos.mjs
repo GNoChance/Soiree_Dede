@@ -188,7 +188,6 @@ ok('une série cassée par un faux pronostic : pas de trophée', !(await hasIrma
 // --- award « Meilleur devin » du Wrapped -----------------------------------------
 await call(0, `select public.end_soiree($1)`, [soiree])
 const rec = await call(0, `select public.soiree_recap($1) r`, [soiree])
-if (rec.err) console.log("recap err:", rec.err)
 const awards = rec.r.r.awards
 const devin = awards.find((a) => a.id === 'devin')
 ok('soiree_recap : award devin = meilleur parieur (3 bons pronostics)', devin?.profile_id === D && devin?.value === 3 && devin?.extra?.bets === 3, JSON.stringify(devin))
@@ -198,6 +197,16 @@ await finish(m7, [A])
 await call(0, `select public.end_soiree($1)`, [soiree2])
 const awards2 = (await call(0, `select public.soiree_recap($1) r`, [soiree2])).r.r.awards
 ok('soiree_recap sans aucun pari : pas d’award devin', !awards2.some((a) => a.id === 'devin'), JSON.stringify(awards2))
+
+// --- pari sur un joueur qui n'est pas dans la partie : annulé, ni raté ni compté (revue finale I2) -----------
+const soiree3 = (await call(0, `select public.create_soiree($1::uuid[]) r`, [arr([B, C])])).r.r.id
+await call(0, `select public.open_pronos($1, 'qui-de-nous', $2::uuid[])`, [soiree3, arr([A, B, C])])
+await call(1, `select public.set_prono($1, $2)`, [soiree3, C]) // B parie sur C…
+const m8 = (await call(0, `select public.start_match($1, 'qui-de-nous', $2::jsonb) id`, [soiree3, JSON.stringify({ ...QDN, player_ids: [A, B] })])).r.id // …mais C ne joue pas
+await finish(m8, [A], [A, B])
+const r8 = (await call(1, `select public.match_pronos($1) r`, [m8])).r.r
+ok('pari sur un joueur absent de la partie : pas de pronostic compté (annulé)', r8 === null || r8.picks.length === 0, JSON.stringify(r8))
+ok('pari sur un joueur absent de la partie : absent du classement devin', (await call(1, `select public.soiree_prono_board($1) r`, [soiree3])).r.r.length === 0)
 
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)
