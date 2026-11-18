@@ -14,6 +14,8 @@ import { soireeEndCopy, useCurrentMatch, useGameAction, useMatch, useSoiree, use
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { ConfirmModal, LaunchCountdown } from '@/features/soiree/components'
 import { ResultsScreen } from '@/features/soiree/ResultsScreen'
+import { SpectatorBanner } from '@/features/spectate/SpectatorBanner'
+import { readOnlyAct, useSpectator } from '@/features/spectate/useSpectator'
 
 function PlaySkeleton() {
   return (
@@ -35,24 +37,27 @@ export function MatchPage() {
   const meId = me?.id ?? ''
   const { match, secret, loading, notFound, applyState } = useMatch(matchId)
   const soireeId = match?.soiree_id
-  const { data: soireeData } = useSoiree(soireeId)
-  const { match: current } = useCurrentMatch(soireeId)
+  const { data: soireeData, notFound: soireeHidden } = useSoiree(soireeId)
+  // Spectateur extérieur (ami d'un joueur, hors soirée) : la partie est lisible mais pas la soirée (RLS).
+  const outsider = Boolean(match && soireeHidden && !soireeData)
+  const { match: current } = useCurrentMatch(outsider ? undefined : soireeId)
   const { byId } = usePlayers()
   const { act, pending } = useGameAction(matchId, applyState)
   const [confirmAbort, setConfirmAbort] = useState(false)
   const [next, setNext] = useState<{ id: string; game: string } | null>(null)
 
   // Pas de bandeau « une partie commence » pour cette soirée : l'enchaînement ci-dessous s'en charge.
-  useViewingSoiree(soireeId, 'match')
+  useViewingSoiree(outsider ? undefined : soireeId, 'match')
 
   const isHost = Boolean(soireeData && soireeData.soiree.host_id === meId)
   const game = match ? getGame(match.game_id) : undefined
   const state = match?.state as unknown as BaseGameState | undefined
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
+  const spectator = useSpectator(state, meId, isHost)
   const soireeEnded = soireeData?.soiree.status === 'ended'
-  // Soirée terminée (fin auto, hôte…) : plus de salon, retour au hub.
-  const backToSalon = () => navigate(soireeId && !soireeEnded ? `/soiree/${soireeId}` : '/', { replace: true })
+  // Soirée terminée (fin auto, hôte…) : plus de salon, retour au hub. Spectateur extérieur : retour à ses amis.
+  const backToSalon = () => navigate(outsider ? '/amis' : soireeId && !soireeEnded ? `/soiree/${soireeId}` : '/', { replace: true })
 
   // L'hôte relance une partie pendant que je suis sur les résultats -> on enchaîne.
   useEffect(() => {
@@ -69,8 +74,8 @@ export function MatchPage() {
       <Card className="mt-10 flex flex-col items-center gap-3 text-center">
         <ChibiImage slug={me?.slug ?? 'dede'} expression="surprise" size={120} />
         <h1 className="text-3xl">Partie introuvable</h1>
-        <Button icon={<Home className="size-5" />} onClick={() => navigate('/', { replace: true })}>
-          Retour au hub
+        <Button icon={<Home className="size-5" />} onClick={() => navigate(outsider ? '/amis' : '/', { replace: true })}>
+          {outsider ? 'Retour à mes amis' : 'Retour au hub'}
         </Button>
       </Card>
     )
@@ -82,6 +87,7 @@ export function MatchPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {spectator && !finished && <SpectatorBanner onBack={backToSalon} backLabel={outsider ? 'Mes amis' : 'Salon'} />}
       {/* En-tête */}
       <div className="flex items-center gap-2">
         <motion.span className="text-4xl" initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 12 }}>
@@ -107,7 +113,7 @@ export function MatchPage() {
             <X className="size-5" strokeWidth={3} />
           </button>
         )}
-        {!isHost && !finished && (
+        {!isHost && !spectator && !finished && (
           <button
             type="button"
             aria-label="Retour au salon"
@@ -147,11 +153,11 @@ export function MatchPage() {
             matchId={match.id}
             soireeId={soireeId}
             state={state}
-            secret={secret}
+            secret={spectator ? null : secret}
             meId={meId}
-            isHost={isHost}
+            isHost={spectator ? false : isHost}
             players={byId}
-            act={act}
+            act={spectator ? readOnlyAct : act}
             pending={pending}
             onExit={backToSalon}
           />
