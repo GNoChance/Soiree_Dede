@@ -1,0 +1,7 @@
+{
+  "name": "sql-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests SQL (PGlite) de supabase/install.sql : node pronos.mjs ../../supabase/install.sql",
+  "dependencies": { "@electric-sql/pglite": "^0.3.0" }
+}
