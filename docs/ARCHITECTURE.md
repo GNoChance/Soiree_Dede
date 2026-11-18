@@ -310,6 +310,14 @@ Conception : [docs/superpowers/specs/2026-11-18-pronostics-design.md](superpower
 - **Trophée** général « Madame Irma » (`gen_madame_irma`, règle `special`/`prono_streak` = 3 bons pronostics d'affilée ; un annulé n'interrompt rien) ; `_after_finish_trophies` évalue aussi les parieurs absents de la partie. Award Wrapped `devin` (≥ 1 bon pronostic). Le sticker exclusif du trophée reste à brancher.
 - **Tests SQL** : `cd tools/sql-tests && npm i && node pronos.mjs ../../supabase/install.sql` (PGlite, charge `install.sql` fichier par fichier).
 
+## Mode spectateur (`supabase/features/spectateur.sql`, `src/features/spectate/`)
+Conception : [docs/superpowers/specs/2026-11-18-spectateur-design.md](superpowers/specs/2026-11-18-spectateur-design.md).
+- **Qui est spectateur** : ni hôte ni dans `state.players` (`useSpectator`, `MatchPage`). Le serveur refuse déjà ses actions (`not_in_match`, même les `tick`) : `readOnlyAct` n'envoie donc RIEN (ni tick, ni toast) ; `Play` reçoit `secret = null`, `isHost = false`, bandeau « 👀 Tu regardes — tu joues à la prochaine ! » (`SpectatorBanner`).
+- **Entrées** : salon (`SoireePage`) : « 👀 Regarder la partie » + « Tu joueras à la suivante » pour qui ne joue pas (`MatchHead.player_ids` de `useCurrentMatch`) ; liste d'amis (`FriendsPage`) : la ligne ouvre `/profil/:id`, un œil 👀 (emoji du jeu) ouvre `/partie/:id` pour un ami en partie (`useFriendsPlaying`).
+- **Serveur** : `can_watch_match(match)` = membre de la soirée OU ami accepté d'un joueur / de l'hôte ; la politique `matches_select` est élargie à cette fonction (lecture seule : soirées, chat, `match_secrets`, `match_server_state` inchangés). `friends_playing()` → `[{profile_id, match_id, soiree_id, game_id}]`. Tout ami accepté peut regarder (pas d'interrupteur de confidentialité).
+- **Spectateur extérieur** (ami hors soirée) : `useSoiree` est refusé par la RLS → la page ignore soirée / partie courante / présence, retour vers `/amis`.
+- **Audit des 20 jeux** : `node tools/sql-tests/game-states.mjs supabase/install.sql` génère un vrai état de départ par jeu (`out/states.json`, ignoré par git) ; une page locale rend chaque `Play` avec un joueur étranger (voir l'historique du commit « audit des 20 jeux »). Seul Loup-garou a dû être corrigé. Tests SQL : `tools/sql-tests/spectateur.mjs`.
+
 ## Défi du jour (solo, asynchrone)
 
 - **SQL** : `supabase/features/daily.sql`. Table `daily_runs(profile_id, day, started_at, finished_at, score, answers jsonb)` PK (profile_id, day), RLS select pour tout `authenticated`, aucune écriture directe.
