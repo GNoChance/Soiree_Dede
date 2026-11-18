@@ -164,6 +164,14 @@ export interface MatchHead {
   game_id: string
   status: string
   created_at: string
+  /** Joueurs de la partie (state.players) : qui joue, les autres de la soirée regardent. */
+  player_ids: string[]
+}
+
+/** Ligne matches (state inclus) -> MatchHead. */
+function toHead(row: { id: string; game_id: string; status: string; created_at: string; state?: unknown }): MatchHead {
+  const pl = (row.state as { players?: unknown } | null | undefined)?.players
+  return { id: row.id, game_id: row.game_id, status: row.status, created_at: row.created_at, player_ids: Array.isArray(pl) ? (pl as string[]) : [] }
 }
 
 /** Partie `playing` la plus récente de la soirée (null si aucune). */
@@ -177,7 +185,7 @@ export function useCurrentMatch(soireeId: string | undefined) {
     const rid = ++reqId.current
     const { data, error } = await supabase
       .from('matches')
-      .select('id, game_id, status, created_at')
+      .select('id, game_id, status, created_at, state')
       .eq('soiree_id', soireeId)
       .eq('status', 'playing')
       .order('created_at', { ascending: false })
@@ -185,19 +193,19 @@ export function useCurrentMatch(soireeId: string | undefined) {
       .maybeSingle()
     if (rid !== reqId.current) return
     setLoaded(true)
-    if (!error) setMatch(data ?? null)
+    if (!error) setMatch(data ? toHead(data) : null)
   }, [soireeId])
 
   useEffect(() => {
     if (!soireeId) return
-    const onRow = (row: MatchHead | undefined) => {
+    const onRow = (row: { id: string; game_id: string; status: string; created_at: string; state?: unknown } | undefined) => {
       if (!row?.id) return
       reqId.current++ // invalide une requête en vol, l'évènement est plus frais
       setLoaded(true)
       setMatch((cur) => {
         if (row.status === 'playing') {
           if (!cur || cur.id === row.id || row.created_at >= cur.created_at) {
-            return cur && cur.id === row.id && cur.status === row.status ? cur : { id: row.id, game_id: row.game_id, status: row.status, created_at: row.created_at }
+            return cur && cur.id === row.id && cur.status === row.status ? cur : toHead(row)
           }
           return cur
         }
@@ -206,8 +214,8 @@ export function useCurrentMatch(soireeId: string | undefined) {
     }
     const ch = supabase
       .channel(channelName(`soiree-matches:${soireeId}`))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches', filter: `soiree_id=eq.${soireeId}` }, (p) => onRow(p.new as MatchHead))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `soiree_id=eq.${soireeId}` }, (p) => onRow(p.new as MatchHead))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches', filter: `soiree_id=eq.${soireeId}` }, (p) => onRow(p.new as Parameters<typeof onRow>[0]))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `soiree_id=eq.${soireeId}` }, (p) => onRow(p.new as Parameters<typeof onRow>[0]))
     return subscribe(ch, () => void refetch())
   }, [soireeId, refetch])
 

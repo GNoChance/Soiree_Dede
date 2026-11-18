@@ -176,9 +176,12 @@ export function SoireePage() {
       )}
 
       {match && match.status === 'playing' && !launching && (
-        <Button size="lg" fullWidth onClick={() => navigate(`/partie/${match.id}`)} icon={<Play className="size-6" />}>
-          Rejoindre la partie en cours
-        </Button>
+        <div className="flex flex-col gap-1">
+          <Button size="lg" fullWidth onClick={() => navigate(`/partie/${match.id}`)} icon={<Play className="size-6" />}>
+            {isHost || match.player_ids.includes(meId) ? 'Rejoindre la partie en cours' : '👀 Regarder la partie'}
+          </Button>
+          {!isHost && !match.player_ids.includes(meId) && <p className="text-center text-sm font-bold text-muted">Tu joueras à la suivante</p>}
+        </div>
       )}
 
       {isHost ? (

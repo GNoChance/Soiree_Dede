@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { Check, Clock, UserMinus, UserPlus, X } from 'lucide-react'
+import { Check, Clock, Eye, UserMinus, UserPlus, X } from 'lucide-react'
+import { Link, useNavigate } from 'react-router'
 import { EXPRESSIONS } from '@/data/expressions'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -17,8 +18,12 @@ import { supabase } from '@/lib/supabase'
 import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
 import type { FriendRequestResult, FriendshipRow, ProfileRow, UUID } from '@/types/db'
+import { useFriendsPlaying } from '@/features/spectate/api'
+import { getGame } from '@/games/registry'
 
 export function FriendsPage() {
+  const navigate = useNavigate()
+  const { playing } = useFriendsPlaying()
   const me = useSession((s) => s.profile?.id)
   const [profiles, setProfiles] = useState<ProfileRow[] | null>(null)
   const [links, setLinks] = useState<FriendshipRow[]>([])
@@ -144,6 +149,19 @@ export function FriendsPage() {
           <Section title="Mes amis" count={friends.length} empty="Pas encore d'amis. Ajoute-en ci-dessous !">
             {friends.map((p) => (
               <PersonRow key={p.id} p={p}>
+                {playing[p.id] && (
+                  <button
+                    type="button"
+                    aria-label={`Regarder la partie de ${p.nickname}`}
+                    onClick={() => navigate(`/partie/${playing[p.id].match_id}`)}
+                    className="relative flex size-11 items-center justify-center rounded-full border-[3px] border-ink bg-sky shadow-sticker-sm active:scale-95"
+                  >
+                    <Eye className="size-5" strokeWidth={3} />
+                    <span aria-hidden className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border-2 border-ink bg-surface text-xs">
+                      {getGame(playing[p.id].game_id)?.emoji ?? '🎲'}
+                    </span>
+                  </button>
+                )}
                 <Button size="sm" variant="ghost" aria-label={`Retirer ${p.nickname}`} onClick={() => setToRemove(p)} icon={<UserMinus className="size-5" />} />
               </PersonRow>
             ))}
@@ -229,11 +247,13 @@ function PersonRow({ p, children }: { p: ProfileRow; children: ReactNode }) {
   return (
     <StaggerItem>
       <motion.div layout className="sticker flex items-center gap-3 rounded-card bg-surface p-3">
-        <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={52} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-display text-lg font-extrabold">{p.nickname}</p>
-          <p className="truncate text-xs font-bold text-muted">{p.first_name}</p>
-        </div>
+        <Link to={`/profil/${p.id}`} aria-label={`Voir le profil de ${p.nickname}`} className="flex min-h-11 min-w-0 flex-1 items-center gap-3">
+          <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={52} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-lg font-extrabold">{p.nickname}</p>
+            <p className="truncate text-xs font-bold text-muted">{p.first_name}</p>
+          </div>
+        </Link>
         <div className="flex items-center gap-2">{children}</div>
       </motion.div>
     </StaggerItem>
