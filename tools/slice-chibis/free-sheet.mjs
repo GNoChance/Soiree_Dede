@@ -32,7 +32,40 @@ async function load(file) {
 
 // split : stickers soudés par leur liseré (planches serrées) -> on érode jusqu'à obtenir n noyaux séparés,
 // puis chaque pixel du premier plan est rattaché au noyau le plus proche (croissance géodésique).
-function splitFused(FG, w, h, n) {
+function splitFused(FG, w, h, n, grid = 0) {
+  // grid : planche en grille régulière dont les stickers se touchent (liserés soudés, trop grosse zone de contact
+  // pour séparer par érosion) -> un noyau par case (le centre de la case), puis croissance dans le premier plan.
+  if (grid) { // grid = demi-taille du noyau (fraction de la case) ; 0.15 par défaut, plus grand si le liseré fuit dans un sticker
+    const cols = n === 12 ? 4 : Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols), cw = w / cols, ch = h / rows;
+    const lab = new Int32Array(w * h);
+    let q = [];
+    for (let k = 0; k < n; k++) {
+      const cx = ((k % cols) + 0.5) * cw, cy = (Math.floor(k / cols) + 0.5) * ch;
+      for (let y = Math.floor(cy - ch * grid); y <= cy + ch * grid; y++) for (let x = Math.floor(cx - cw * grid); x <= cx + cw * grid; x++) {
+        const i = y * w + x; if (x >= 0 && y >= 0 && x < w && y < h && FG[i]) { lab[i] = k + 1; q.push(i); }
+      }
+    }
+    while (q.length) {
+      const nq = [];
+      for (const pp of q) {
+        const x = pp % w, y = (pp / w) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const t = ny * w + nx; if (FG[t] && !lab[t]) { lab[t] = lab[pp]; nq.push(t); }
+        }
+      }
+      q = nq;
+    }
+    const rest = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) rest[i] = FG[i] && !lab[i] ? 1 : 0;
+    const rl = label(rest, w, h);
+    for (let i = 0; i < w * h; i++) if (rl.lab[i]) lab[i] = n + rl.lab[i];
+    const comps = [null];
+    for (let l = 1; l <= n + rl.n; l++) comps.push({ x0: 1e9, y0: 1e9, x1: -1, y1: -1, a: 0 });
+    for (let i = 0; i < w * h; i++) { const l = lab[i]; if (!l) continue; const c = comps[l], x = i % w, y = (i / w) | 0; c.a++; if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y; }
+    console.log('  split : grille (un noyau par case)');
+    return { lab, n: n + rl.n, comps };
+  }
   for (let r = 4; r <= 60; r += 2) {
     const E = erode(FG, w, h, r);
     const { lab: el, n: en, comps: ec } = label(E, w, h);
@@ -78,7 +111,7 @@ function splitFused(FG, w, h, n) {
   return null;
 }
 
-function segment(img, region, n, tol, white = true, openR = 3, split = false) {
+function segment(img, region, n, tol, white = true, openR = 3, split = false, pockets = false) {
   const { rgb, W } = img;
   const [x0, y0, x1, y1] = region;
   const w = x1 - x0, h = y1 - y0;
@@ -103,16 +136,39 @@ function segment(img, region, n, tol, white = true, openR = 3, split = false) {
     const p = st.pop(), x = p % w, y = (p / w) | 0;
     if (x > 0) push(p - 1); if (x < w - 1) push(p + 1); if (y > 0) push(p - w); if (y < h - 1) push(p + w);
   }
+  // pockets : planches serrées dont les liserés blancs se touchent -> du fond noir reste enfermé entre les stickers
+  // et l'inondation depuis le bord ne l'atteint pas. On repère les grandes zones « fond » (épaisses, pas des traits
+  // de contour) dont le pourtour n'est que du liseré blanc ou du noir, jamais une couleur de dessin.
+  if (pockets) {
+    const rest = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) rest[i] = like[i] && !BG[i] ? 1 : 0;
+    const thick = dilate(erode(rest, w, h, 7), w, h, 7);
+    const pk = label(thick, w, h, false);
+    const lit = (q) => { const i = px(q % w, (q / w) | 0), r = rgb[i], g = rgb[i + 1], b = rgb[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx - mn > 45; };
+    let nP = 0;
+    for (let l = 1; l <= pk.n; l++) {
+      const c = pk.comps[l]; if (c.a < 1500) continue;
+      const m = new Uint8Array(w * h);
+      for (let y = c.y0; y <= c.y1; y++) for (let x = c.x0; x <= c.x1; x++) if (pk.lab[y * w + x] === l) m[y * w + x] = 1;
+      const ring = dilate(m, w, h, 6);
+      let t = 0, k = 0;
+      for (let y = Math.max(0, c.y0 - 7); y <= Math.min(h - 1, c.y1 + 7); y++) for (let x = Math.max(0, c.x0 - 7); x <= Math.min(w - 1, c.x1 + 7); x++) { const q = y * w + x; if (ring[q] && !m[q]) { t++; if (lit(q)) k++; } }
+      if (t > 100 && k / t < 0.05) { nP++; const g2 = dilate(m, w, h, 4); for (let q = 0; q < w * h; q++) if (g2[q] && like[q]) BG[q] = 1; }
+    }
+    if (nP) console.log('  poches de fond retirées : ' + nP);
+  }
   const FG = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) FG[i] = BG[i] ? 0 : 1;
   // ouverture : supprime les filets fins (halos de contour, traits de séparation) avant l'étiquetage
   const O = openR ? dilate(erode(FG, w, h, openR), w, h, openR) : FG;
   let { lab, n: nl, comps } = label(O, w, h);
-  if (split) { const sp = splitFused(O, w, h, n); if (sp) ({ lab, n: nl, comps } = sp); }
+  if (split) { const sp = splitFused(O, w, h, n, split === "grid" ? 0.15 : typeof split === "number" ? split : 0); if (sp) ({ lab, n: nl, comps } = sp); }
   const all = [];
   for (let l = 1; l <= nl; l++) all.push({ l, ...comps[l] });
   all.sort((a, b) => b.a - a.a);
-  const big = all.slice(0, n), small = all.slice(n).filter((c) => { const cw = c.x1 - c.x0 + 1, ch = c.y1 - c.y0 + 1; return c.a >= 20 && Math.max(cw, ch) / Math.min(cw, ch) <= 4 && c.a >= 0.25 * cw * ch; });
+  // grille : les n noyaux (étiquettes 1..n) sont les stickers, quoi que pèsent les morceaux détachés (mégaphone, cœurs…)
+  const gridSeeds = split === "grid" || typeof split === "number";
+  const big = gridSeeds ? all.filter((c) => c.l <= n && c.a > 0) : all.slice(0, n), small = (gridSeeds ? all.filter((c) => c.l > n) : all.slice(n)).filter((c) => { const cw = c.x1 - c.x0 + 1, ch = c.y1 - c.y0 + 1; return c.a >= 20 && Math.max(cw, ch) / Math.min(cw, ch) <= 4 && c.a >= 0.25 * cw * ch; });
   const areas = big.map((c) => c.a);
   if (all[n]) console.log(`  aires: plus petit sticker ${Math.min(...areas)}, 1re deco ${all[n].a}`);
   const owner = new Map(big.map((c, k) => [c.l, k]));
@@ -178,7 +234,7 @@ for (const s of CFG.sheets) {
   const img = await load(s.file);
   const region = s.region ?? [0, 0, img.W, img.H];
   console.log(`${s.name} (${s.file}) zone ${region.join(',')}`);
-  const seg = segment(img, region, s.n, s.tol ?? 24, s.white ?? true, s.open ?? 3, s.split ?? false);
+  const seg = segment(img, region, s.n, s.tol ?? 24, s.white ?? true, s.open ?? 3, s.split ?? false, s.pockets ?? false);
   const tiles = [];
   for (const k of seg.ordered) tiles.push(await cutSticker(img, seg, k, s.closeR ?? 2));
   if (preview) {

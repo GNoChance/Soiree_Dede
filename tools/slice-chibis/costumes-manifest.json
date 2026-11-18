@@ -225,7 +225,15 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "tycoon",
+      "admiral",
+      "tictactoe",
+      "strategist",
+      "bowler",
+      "teacher",
+      "star",
+      "racer"
     ],
     "portraits": [
       "spy",
@@ -239,7 +247,15 @@
       "philosopher",
       "archer",
       "actor",
-      "coach"
+      "coach",
+      "tycoon",
+      "admiral",
+      "tictactoe",
+      "strategist",
+      "bowler",
+      "teacher",
+      "star",
+      "racer"
     ]
   },
   "marius": {
