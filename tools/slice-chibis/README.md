@@ -43,3 +43,8 @@ Une tenue dont le dossier est incomplet (moins de 12 expressions) est ignorée a
 Ajouter l'id dans `src/data/tenues.ts` **et** une ligne dans `supabase/features/tenues.sql`
 (`insert into public.tenues … on conflict do update`), puis `npm run sql` et recoller `supabase/install.sql`.
 Le script avertit si la tenue d'une planche est absente de `src/data/tenues.ts`.
+
+## Planches récalcitrantes : `closed-sheet.mjs`
+
+Quand `free-sheet.mjs` rate une planche 4×3 sur fond noir (liserés blancs ouverts : le fond « fuit » dans le dessin ; stickers soudés), même en `split: 'grid'` :
+`node tools/slice-chibis/closed-sheet.mjs <planche.png> <slug> <dossier> [--preview]`. Le liseré blanc est refermé avant d'enlever le fond, les blocs soudés sont coupés à la ligne la plus fine, puis les poches de fond enfermées et les éclats sont retirés. Ordre fixe V3 (joie … champion). Retirer ensuite la planche de la config pour qu'un `free-sheet` ne l'écrase pas (ex. Cécile Star).
