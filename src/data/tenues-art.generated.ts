@@ -21,6 +21,25 @@ export const TENUE_ART: readonly string[] = [
   'carole/tycoon',
   'carole/admiral',
   'carole/pirate',
+  'cecile/tycoon',
+  'cecile/admiral',
+  'cecile/tictactoe',
+  'cecile/coach',
+  'cecile/strategist',
+  'cecile/actor',
+  'cecile/archer',
+  'cecile/cinema',
+  'cecile/philosopher',
+  'cecile/bowler',
+  'cecile/pirate',
+  'cecile/pyro',
+  'cecile/werewolf',
+  'cecile/painter',
+  'cecile/student',
+  'cecile/teacher',
+  'cecile/croupier',
+  'cecile/spy',
+  'cecile/star',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
@@ -185,6 +204,24 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'carole/teacher',
   'carole/star',
   'carole/racer',
+  'cecile/tycoon',
+  'cecile/admiral',
+  'cecile/tictactoe',
+  'cecile/coach',
+  'cecile/actor',
+  'cecile/archer',
+  'cecile/cinema',
+  'cecile/philosopher',
+  'cecile/bowler',
+  'cecile/pirate',
+  'cecile/pyro',
+  'cecile/werewolf',
+  'cecile/star',
+  'cecile/spy',
+  'cecile/croupier',
+  'cecile/teacher',
+  'cecile/student',
+  'cecile/painter',
   'cycy/spy',
   'cycy/cinema',
   'cycy/student',
@@ -392,6 +429,63 @@ export const TENUE_ART_BAD: readonly string[] = [
   'carole/pirate/pouces',
   'carole/pirate/timide',
   'carole/pirate/determine',
+  'cecile/tycoon/pouces',
+  'cecile/tycoon/timide',
+  'cecile/tycoon/determine',
+  'cecile/admiral/pouces',
+  'cecile/admiral/timide',
+  'cecile/admiral/determine',
+  'cecile/tictactoe/pouces',
+  'cecile/tictactoe/timide',
+  'cecile/tictactoe/determine',
+  'cecile/coach/pouces',
+  'cecile/coach/timide',
+  'cecile/coach/determine',
+  'cecile/strategist/pouces',
+  'cecile/strategist/timide',
+  'cecile/strategist/determine',
+  'cecile/actor/pouces',
+  'cecile/actor/timide',
+  'cecile/actor/determine',
+  'cecile/archer/pouces',
+  'cecile/archer/timide',
+  'cecile/archer/determine',
+  'cecile/cinema/pouces',
+  'cecile/cinema/timide',
+  'cecile/cinema/determine',
+  'cecile/philosopher/pouces',
+  'cecile/philosopher/timide',
+  'cecile/philosopher/determine',
+  'cecile/bowler/pouces',
+  'cecile/bowler/timide',
+  'cecile/bowler/determine',
+  'cecile/pirate/pouces',
+  'cecile/pirate/timide',
+  'cecile/pirate/determine',
+  'cecile/pyro/pouces',
+  'cecile/pyro/timide',
+  'cecile/pyro/determine',
+  'cecile/werewolf/pouces',
+  'cecile/werewolf/timide',
+  'cecile/werewolf/determine',
+  'cecile/painter/pouces',
+  'cecile/painter/timide',
+  'cecile/painter/determine',
+  'cecile/student/pouces',
+  'cecile/student/timide',
+  'cecile/student/determine',
+  'cecile/teacher/pouces',
+  'cecile/teacher/timide',
+  'cecile/teacher/determine',
+  'cecile/croupier/pouces',
+  'cecile/croupier/timide',
+  'cecile/croupier/determine',
+  'cecile/spy/pouces',
+  'cecile/spy/timide',
+  'cecile/spy/determine',
+  'cecile/star/pouces',
+  'cecile/star/timide',
+  'cecile/star/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -913,6 +1007,101 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
   },
   "carole/pirate": {
     "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/coach": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/actor": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/archer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/cinema": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/philosopher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/pirate": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/pyro": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/werewolf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/painter": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/croupier": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/spy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/star": {
+    "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
   },
