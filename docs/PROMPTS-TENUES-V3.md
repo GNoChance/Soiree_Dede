@@ -1,6 +1,6 @@
 # Prompts images — tenues des nouveaux jeux (style V3)
 
-4 nouvelles tenues × 9 persos = 36 planches + 36 portraits. Format calqué sur le prompt « Amiral » de l'utilisateur.
+5 nouvelles tenues × 9 persos = 45 planches + 45 portraits. Format calqué sur le prompt « Amiral » de l'utilisateur.
 
 | Jeu | Tenue | Dossier (pour Claude) |
 | --- | --- | --- |
@@ -8,6 +8,7 @@
 | Échecs | ♟️ Grand Maître | `chess` |
 | Mini-golf | ⛳ Golfeur | `golfer` |
 | Dédé Party | 🎤 Animateur Télé | `host` |
+| Kems | 🤠 Cow-boy | `cowboy` |
 
 **Mode d'emploi** : joindre une image de référence du perso (une de ses planches V3), coller le prompt tel quel.
 Avant d'envoyer : 12 stickers bien séparés, grosse bordure blanche partout, fond noir uni, ordre respecté.
@@ -75,4 +76,20 @@ Style sticker : contour noir épais autour du personnage, y compris sur la veste
 ### Portrait
 ```
 Illustration portrait du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), en animateur de jeu télé : veste à paillettes dorées, gros nœud papillon, micro à main. Pose : un bras grand ouvert vers le public, le micro dans l'autre main, grand sourire, un pied en avant. Décor : plateau de jeu télé coloré avec projecteurs, un dé géant, un gros buzzer rouge et une pluie de confettis. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
+```
+
+---
+
+## 🤠 Cow-boy — Kems
+
+### Planche
+```
+Planche de 12 stickers chibi du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), grille 4 colonnes × 3 lignes, 12 cases bien séparées, BUSTES uniquement (tête, épaules, haut du torse), en cow-boy joueur de cartes de saloon : chapeau de cow-boy marron avec une carte d'as glissée dans le ruban, bandana rouge autour du cou, gilet en cuir marron sur une chemise à carreaux. Chaque sticker a une pose différente. Ordre de gauche à droite, ligne par ligne :
+1 joie : bras levés, quatre as en éventail dans une main · 2 colère : jette ses cartes en l'air · 3 pleurs : pleure, le chapeau serré contre lui · 4 boude : bras croisés, chapeau baissé sur les yeux · 5 réflexion : main au menton, regarde ses cartes cachées contre lui · 6 dodo : endormi, le chapeau sur le visage · 7 bisou : embrasse une carte d'as de cœur · 8 clin d'œil : clin d'œil complice en se touchant le nez du doigt · 9 surprise : sursaute, ses cartes lui échappent des mains · 10 amoureux : cœurs dans les yeux, serre une carte d'as de cœur · 11 cool : lunettes de soleil, relève le bord de son chapeau du doigt · 12 champion : lève un trophée doré en forme de fer à cheval.
+Style sticker : contour noir épais autour du personnage, y compris sur les cartes blanches et la chemise claire, couleurs vives et flat, GROSSE BORDURE BLANCHE épaisse autour de chaque buste. Fond noir uni #000000, sans dégradé ni ombre. Pas de texte.
+```
+
+### Portrait
+```
+Illustration portrait du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), en cow-boy joueur de cartes de saloon : chapeau de cow-boy marron avec une carte d'as dans le ruban, bandana rouge, gilet en cuir marron, chemise à carreaux, bottes. Pose : debout, jambes écartées, un éventail de quatre as dans une main, l'autre main touchant le bord du chapeau, clin d'œil malicieux. Décor : table de saloon ronde avec des cartes à jouer étalées, portes battantes de saloon, cartes qui volent, un cactus et un fer à cheval. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, y compris sur les cartes blanches, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
 ```
