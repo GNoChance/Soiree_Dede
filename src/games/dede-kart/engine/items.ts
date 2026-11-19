@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { WALL_MARGIN, type Track } from './track'
 
 /** Objets de Dédé Kart (noms et effets originaux). */
-export type ItemId = 'turbo' | 'ball' | 'glue' | 'star' | 'bubble' | 'cloud' | 'confetti' | 'reverse'
+export type ItemId = 'turbo' | 'ball' | 'glue' | 'star' | 'bubble' | 'cloud' | 'confetti' | 'reverse' | 'magnet' | 'butter' | 'hen' | 'honk'
 
 export const ITEMS: Record<ItemId, { emoji: string; label: string }> = {
   turbo: { emoji: '🚀', label: 'Pétard turbo' },
@@ -13,16 +13,20 @@ export const ITEMS: Record<ItemId, { emoji: string; label: string }> = {
   cloud: { emoji: '☁️', label: 'Gros nuage' },
   confetti: { emoji: '🎊', label: 'Confettis' },
   reverse: { emoji: '🔄', label: 'Demi-tour' },
+  magnet: { emoji: '🧲', label: 'Aimant à frigo' },
+  butter: { emoji: '🧈', label: 'Plaquette de beurre' },
+  hen: { emoji: '🐔', label: 'Poule en vadrouille' },
+  honk: { emoji: '📯', label: 'Klaxon de tracteur' },
 }
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[]
 
 /** Objets qui passent par le serveur (ils touchent les autres). */
-export type NetItem = 'ball' | 'glue' | 'cloud' | 'confetti' | 'reverse'
+export type NetItem = 'ball' | 'glue' | 'butter' | 'hen' | 'cloud' | 'confetti' | 'reverse' | 'honk'
 
 /** Piège ou projectile posé sur la piste (state.hazards, contrat SQL). */
 export interface Hazard {
   id: number
-  type: 'ball' | 'glue'
+  type: 'ball' | 'glue' | 'butter' | 'hen'
   owner: string
   x: number
   z: number
@@ -34,7 +38,7 @@ export interface Hazard {
 /** Effet subi par un kart (state.fx). */
 export interface Fx {
   id: number
-  type: 'cloud' | 'confetti' | 'reverse'
+  type: 'cloud' | 'confetti' | 'reverse' | 'honk'
   target: string
   by: string
   /** ISO */
@@ -51,18 +55,20 @@ export interface UsePayload {
 }
 
 /**
- * Tirage selon la place (rattrapage) : les premiers ont des objets de défense,
- * les derniers les gros bonus. Le Gros nuage est réservé à la 2ᵉ moitié, le Demi-tour aux places > 3.
+ * Tirage selon la place (rattrapage) : les premiers ont des pièges et des objets de défense,
+ * les derniers les gros bonus (Pétard, Bouclier, Aimant). Le Gros nuage est réservé à la 2ᵉ moitié,
+ * le Demi-tour aux places > 3, l'Aimant à ceux qui ont quelqu'un devant.
  */
 export function rollItem(place: number, total: number, rnd = Math.random): ItemId {
   const q = total > 1 ? (place - 1) / (total - 1) : 0.5
   const w: Partial<Record<ItemId, number>> =
     q < 0.25
-      ? { bubble: 3, ball: 3, glue: 4, turbo: 1, confetti: 1 }
+      ? { bubble: 3, glue: 3, butter: 3, ball: 2, hen: 2, honk: 2, turbo: 1, confetti: 1 }
       : q <= 0.65
-        ? { turbo: 3, ball: 3, glue: 2, bubble: 2, confetti: 2, reverse: 1, cloud: 0.5 }
-        : { turbo: 4, star: 3, cloud: 2, reverse: 2, ball: 1, confetti: 1 }
+        ? { turbo: 3, ball: 3, magnet: 2, bubble: 2, confetti: 2, glue: 1.5, butter: 1.5, hen: 1.5, honk: 1.5, reverse: 1, cloud: 0.5 }
+        : { turbo: 4, star: 3, magnet: 3, cloud: 2, reverse: 2, ball: 1, confetti: 1, hen: 0.5 }
   if (place <= 3) delete w.reverse
+  if (place <= 1) delete w.magnet
   if (q < 0.5) delete w.cloud
   const entries = Object.entries(w) as [ItemId, number][]
   let r = rnd() * entries.reduce((s, [, v]) => s + v, 0)
@@ -71,6 +77,9 @@ export function rollItem(place: number, total: number, rnd = Math.random): ItemI
   }
   return 'turbo'
 }
+
+/** Durée de vie d'une poule en vadrouille (s) : ensuite elle s'envole. */
+export const HEN_LIFE = 25
 
 export const BALL_SPEED = 52
 const BALL_LIFE = 6
@@ -100,14 +109,13 @@ export class BallSim {
 
   /** Avance jusqu'à l'âge `age` (s). */
   advance(track: Track, age: number) {
-    const wall = track.half + WALL_MARGIN - 1
     while (!this.dead && this.t + STEP <= age) {
       this.t += STEP
       this.x += this.vx * STEP
       this.z += this.vz * STEP
       const loc = track.locate(this.x, this.z, this.idx)
       this.idx = loc.i
-      if (Math.abs(loc.lat) > wall) {
+      if (Math.abs(loc.lat) > track.hw[loc.i] + WALL_MARGIN - 1) {
         // rebond : on renvoie la composante latérale
         const nx = -track.tz[loc.i]
         const nz = track.tx[loc.i]
@@ -149,6 +157,3 @@ export function boxMaterial() {
   }
   return new THREE.MeshBasicMaterial({ map: boxTex, transparent: true, opacity: 0.92 })
 }
-
-/** Rangées de boîtes : fraction du tour où elles sont posées (4 boîtes de front). */
-export const BOX_ROWS = [0.2, 0.47, 0.8]

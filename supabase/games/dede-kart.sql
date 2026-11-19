@@ -10,14 +10,19 @@
 --
 -- Phases : racing (go_at = feu vert) -> results (classement de la course, 15 s)
 --          -> racing (course suivante) ... -> finished.
--- Course terminée : tous arrivés, 30 s après le 1er arrivé, ou échéance de sécurité.
+-- Course terminée : tous arrivés, 45 s après le 1er arrivé, ou échéance de sécurité.
+--
+-- 6 circuits (ordre de src/games/dede-kart/tracks.ts) : 0 Salon, 1 Plage, 2 Montagne,
+-- 3 Potager, 4 Supermarché, 5 Château. La course n joue le circuit (track0 + n - 1) % 6,
+-- track0 = option "track" (0..5) ou tiré au hasard.
 -- =============================================================================
 
--- Temps minimum d'un tour (ms) par circuit.
+-- Temps minimum d'un tour (ms) par circuit : (longueur du tour - gain du raccourci) parcourue
+-- à la vitesse d'un turbo permanent, moins 10 % (un très bon tour réel dure 45 à 55 s).
 create or replace function public._dk_min_lap_ms(p_track integer)
 returns integer language sql immutable
 set search_path = public, extensions
-as $$ select 12000 $$;
+as $$ select (array[31000, 34000, 34000, 31000, 33000, 32000])[coalesce(p_track, 0) % 6 + 1] $$;
 
 -- Tous les karts : joueurs puis bots.
 create or replace function public._dk_racers(p_state jsonb)
@@ -37,7 +42,7 @@ begin
     'phase', 'racing',
     'race', p_race,
     'round', p_race,
-    'track', (p_race - 1) % 3,
+    'track', (coalesce((p_state->>'track0')::integer, 0) + p_race - 1) % 6,
     'go_at', v_go,
     'deadline', v_go + make_interval(secs => 60 + 75 * (p_state->>'laps')::integer),
     'laps_done', '{}'::jsonb,
@@ -64,7 +69,7 @@ begin
   return p_actor::text;
 end $$;
 
--- Retire boules (> 6 s), flaques (> 30 s) et effets expirés.
+-- Retire boules (> 6 s), pièges posés (glue, beurre, poule : > 30 s) et effets expirés.
 create or replace function public._dk_prune(p_state jsonb)
 returns jsonb language sql stable
 set search_path = public, extensions
@@ -114,9 +119,12 @@ as $$
     'used_cloud', coalesce((p_state->'used'->p_pl->>'cloud')::integer, 0),
     'used_confetti', coalesce((p_state->'used'->p_pl->>'confetti')::integer, 0),
     'used_reverse', coalesce((p_state->'used'->p_pl->>'reverse')::integer, 0),
-    'win_track_1', count(*) filter (where place = 1 and track = 1),
-    'win_track_2', count(*) filter (where place = 1 and track = 2),
-    'win_track_3', count(*) filter (where place = 1 and track = 3),
+    'win_track_1', count(*) filter (where place = 1 and track = 0),
+    'win_track_2', count(*) filter (where place = 1 and track = 1),
+    'win_track_3', count(*) filter (where place = 1 and track = 2),
+    'win_track_4', count(*) filter (where place = 1 and track = 3),
+    'win_track_5', count(*) filter (where place = 1 and track = 4),
+    'win_track_6', count(*) filter (where place = 1 and track = 5),
     'comeback', (select count(*) from x a join x b on b.o = a.o - 1 where a.place = 1 and b.place > 3),
     'big_lead', count(*) filter (where place = 1 and t is not null and (t2 is null or t2 - t >= 5000)),
     'grand_slam', case when count(*) >= 3 and count(*) filter (where place = 1) = count(*) and max(nk) >= 4 then 1 else 0 end)
@@ -197,7 +205,8 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Options : {"races": 1|3 (défaut 3), "laps": 2|3 (défaut 3), "fill": 0|6|8|12 (bots pour compléter la grille)}
+-- Options : {"races": 1|3 (défaut 3), "laps": 2|3 (défaut 3), "fill": 0|6|8|12 (bots pour compléter la grille),
+--            "track": 0..5 (1er circuit ; absent ou autre valeur = tiré au hasard)}
 create or replace function public.game_dede_kart_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -207,6 +216,8 @@ declare
   v_races integer := case when p_options->>'races' = '1' then 1 else 3 end;
   v_laps  integer := case when p_options->>'laps' = '2' then 2 else 3 end;
   v_fill  integer := case when coalesce(p_options->>'fill', '') ~ '^\d{1,2}$' then (p_options->>'fill')::integer else 0 end;
+  v_track integer := case when coalesce(p_options->>'track', '') ~ '^[0-5]$' then (p_options->>'track')::integer
+                          else floor(random() * 6)::integer end;
   v_bots  jsonb;
   v_state jsonb;
 begin
@@ -224,6 +235,7 @@ begin
     'laps', v_laps,
     'races', v_races,
     'total_rounds', v_races,
+    'track0', v_track,
     'points', '{}'::jsonb,
     'standings', '[]'::jsonb,
     'hits', '{}'::jsonb,
@@ -287,7 +299,7 @@ begin
         'arrival', p_state->'arrival' || to_jsonb(v_id));
       if jsonb_array_length(p_state->'arrival') = 1 then
         p_state := p_state || jsonb_build_object('deadline',
-                     least((p_state->>'deadline')::timestamptz, now() + interval '30 seconds'));
+                     least((p_state->>'deadline')::timestamptz, now() + interval '45 seconds'));
       end if;
       if jsonb_array_length(p_state->'arrival') >= jsonb_array_length(public._dk_racers(p_state)) then
         return public._dk_end_race(p_state, p_server);
@@ -304,11 +316,13 @@ begin
     end if;
     v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
     v_item := p_action->>'item';
-    if v_item is null or v_item not in ('ball', 'glue', 'cloud', 'confetti', 'reverse') then raise exception 'invalid_action'; end if;
+    if v_item is null or v_item not in ('ball', 'glue', 'butter', 'hen', 'cloud', 'confetti', 'reverse', 'honk') then
+      raise exception 'invalid_action';
+    end if;
     if (p_state->'finish') ? v_id then return jsonb_build_object('state', p_state, 'server', p_server); end if;
     p_state := public._dk_prune(p_state);
     v_seq := coalesce((p_state->>'hz_seq')::integer, 0);
-    if v_item in ('ball', 'glue') then
+    if v_item in ('ball', 'glue', 'butter', 'hen') then
       v_seq := v_seq + 1;
       p_state := p_state || jsonb_build_object('hazards', p_state->'hazards' || jsonb_build_array(jsonb_build_object(
         'id', v_seq, 'type', v_item, 'owner', v_id,
@@ -316,7 +330,7 @@ begin
         'at', now())));
     else
       if jsonb_typeof(p_action->'targets') <> 'array' then raise exception 'invalid_action'; end if;
-      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour utilisés
+      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour (/ klaxon) utilisés
       p_state := p_state || jsonb_build_object('used', coalesce(p_state->'used', '{}'::jsonb) || jsonb_build_object(v_id,
         coalesce(p_state->'used'->v_id, '{}'::jsonb) || jsonb_build_object(v_item,
           coalesce((p_state->'used'->v_id->>v_item)::integer, 0) + 1)));
@@ -331,7 +345,7 @@ begin
     end if;
     return jsonb_build_object('state', p_state || jsonb_build_object('hz_seq', v_seq), 'server', p_server);
 
-  -- ---------------------------------------------------------------- hit (un kart a percuté une boule / une glue)
+  -- ---------------------------------------------------------------- hit (un kart a percuté une boule / une glue / du beurre / une poule)
   elsif v_type = 'hit' then
     if v_phase <> 'racing' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
     v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);

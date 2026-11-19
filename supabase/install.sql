@@ -8007,14 +8007,19 @@ revoke all on function public.game_cerveau_en_fete_action(jsonb, jsonb, uuid, bo
 --
 -- Phases : racing (go_at = feu vert) -> results (classement de la course, 15 s)
 --          -> racing (course suivante) ... -> finished.
--- Course terminée : tous arrivés, 30 s après le 1er arrivé, ou échéance de sécurité.
+-- Course terminée : tous arrivés, 45 s après le 1er arrivé, ou échéance de sécurité.
+--
+-- 6 circuits (ordre de src/games/dede-kart/tracks.ts) : 0 Salon, 1 Plage, 2 Montagne,
+-- 3 Potager, 4 Supermarché, 5 Château. La course n joue le circuit (track0 + n - 1) % 6,
+-- track0 = option "track" (0..5) ou tiré au hasard.
 -- =============================================================================
 
--- Temps minimum d'un tour (ms) par circuit.
+-- Temps minimum d'un tour (ms) par circuit : (longueur du tour - gain du raccourci) parcourue
+-- à la vitesse d'un turbo permanent, moins 10 % (un très bon tour réel dure 45 à 55 s).
 create or replace function public._dk_min_lap_ms(p_track integer)
 returns integer language sql immutable
 set search_path = public, extensions
-as $$ select 12000 $$;
+as $$ select (array[31000, 34000, 34000, 31000, 33000, 32000])[coalesce(p_track, 0) % 6 + 1] $$;
 
 -- Tous les karts : joueurs puis bots.
 create or replace function public._dk_racers(p_state jsonb)
@@ -8034,7 +8039,7 @@ begin
     'phase', 'racing',
     'race', p_race,
     'round', p_race,
-    'track', (p_race - 1) % 3,
+    'track', (coalesce((p_state->>'track0')::integer, 0) + p_race - 1) % 6,
     'go_at', v_go,
     'deadline', v_go + make_interval(secs => 60 + 75 * (p_state->>'laps')::integer),
     'laps_done', '{}'::jsonb,
@@ -8061,7 +8066,7 @@ begin
   return p_actor::text;
 end $$;
 
--- Retire boules (> 6 s), flaques (> 30 s) et effets expirés.
+-- Retire boules (> 6 s), pièges posés (glue, beurre, poule : > 30 s) et effets expirés.
 create or replace function public._dk_prune(p_state jsonb)
 returns jsonb language sql stable
 set search_path = public, extensions
@@ -8111,9 +8116,12 @@ as $$
     'used_cloud', coalesce((p_state->'used'->p_pl->>'cloud')::integer, 0),
     'used_confetti', coalesce((p_state->'used'->p_pl->>'confetti')::integer, 0),
     'used_reverse', coalesce((p_state->'used'->p_pl->>'reverse')::integer, 0),
-    'win_track_1', count(*) filter (where place = 1 and track = 1),
-    'win_track_2', count(*) filter (where place = 1 and track = 2),
-    'win_track_3', count(*) filter (where place = 1 and track = 3),
+    'win_track_1', count(*) filter (where place = 1 and track = 0),
+    'win_track_2', count(*) filter (where place = 1 and track = 1),
+    'win_track_3', count(*) filter (where place = 1 and track = 2),
+    'win_track_4', count(*) filter (where place = 1 and track = 3),
+    'win_track_5', count(*) filter (where place = 1 and track = 4),
+    'win_track_6', count(*) filter (where place = 1 and track = 5),
     'comeback', (select count(*) from x a join x b on b.o = a.o - 1 where a.place = 1 and b.place > 3),
     'big_lead', count(*) filter (where place = 1 and t is not null and (t2 is null or t2 - t >= 5000)),
     'grand_slam', case when count(*) >= 3 and count(*) filter (where place = 1) = count(*) and max(nk) >= 4 then 1 else 0 end)
@@ -8194,7 +8202,8 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Options : {"races": 1|3 (défaut 3), "laps": 2|3 (défaut 3), "fill": 0|6|8|12 (bots pour compléter la grille)}
+-- Options : {"races": 1|3 (défaut 3), "laps": 2|3 (défaut 3), "fill": 0|6|8|12 (bots pour compléter la grille),
+--            "track": 0..5 (1er circuit ; absent ou autre valeur = tiré au hasard)}
 create or replace function public.game_dede_kart_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -8204,6 +8213,8 @@ declare
   v_races integer := case when p_options->>'races' = '1' then 1 else 3 end;
   v_laps  integer := case when p_options->>'laps' = '2' then 2 else 3 end;
   v_fill  integer := case when coalesce(p_options->>'fill', '') ~ '^\d{1,2}$' then (p_options->>'fill')::integer else 0 end;
+  v_track integer := case when coalesce(p_options->>'track', '') ~ '^[0-5]$' then (p_options->>'track')::integer
+                          else floor(random() * 6)::integer end;
   v_bots  jsonb;
   v_state jsonb;
 begin
@@ -8221,6 +8232,7 @@ begin
     'laps', v_laps,
     'races', v_races,
     'total_rounds', v_races,
+    'track0', v_track,
     'points', '{}'::jsonb,
     'standings', '[]'::jsonb,
     'hits', '{}'::jsonb,
@@ -8284,7 +8296,7 @@ begin
         'arrival', p_state->'arrival' || to_jsonb(v_id));
       if jsonb_array_length(p_state->'arrival') = 1 then
         p_state := p_state || jsonb_build_object('deadline',
-                     least((p_state->>'deadline')::timestamptz, now() + interval '30 seconds'));
+                     least((p_state->>'deadline')::timestamptz, now() + interval '45 seconds'));
       end if;
       if jsonb_array_length(p_state->'arrival') >= jsonb_array_length(public._dk_racers(p_state)) then
         return public._dk_end_race(p_state, p_server);
@@ -8301,11 +8313,13 @@ begin
     end if;
     v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
     v_item := p_action->>'item';
-    if v_item is null or v_item not in ('ball', 'glue', 'cloud', 'confetti', 'reverse') then raise exception 'invalid_action'; end if;
+    if v_item is null or v_item not in ('ball', 'glue', 'butter', 'hen', 'cloud', 'confetti', 'reverse', 'honk') then
+      raise exception 'invalid_action';
+    end if;
     if (p_state->'finish') ? v_id then return jsonb_build_object('state', p_state, 'server', p_server); end if;
     p_state := public._dk_prune(p_state);
     v_seq := coalesce((p_state->>'hz_seq')::integer, 0);
-    if v_item in ('ball', 'glue') then
+    if v_item in ('ball', 'glue', 'butter', 'hen') then
       v_seq := v_seq + 1;
       p_state := p_state || jsonb_build_object('hazards', p_state->'hazards' || jsonb_build_array(jsonb_build_object(
         'id', v_seq, 'type', v_item, 'owner', v_id,
@@ -8313,7 +8327,7 @@ begin
         'at', now())));
     else
       if jsonb_typeof(p_action->'targets') <> 'array' then raise exception 'invalid_action'; end if;
-      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour utilisés
+      -- Trophées (Coups bas) : objets nuage / confettis / demi-tour (/ klaxon) utilisés
       p_state := p_state || jsonb_build_object('used', coalesce(p_state->'used', '{}'::jsonb) || jsonb_build_object(v_id,
         coalesce(p_state->'used'->v_id, '{}'::jsonb) || jsonb_build_object(v_item,
           coalesce((p_state->'used'->v_id->>v_item)::integer, 0) + 1)));
@@ -8328,7 +8342,7 @@ begin
     end if;
     return jsonb_build_object('state', p_state || jsonb_build_object('hz_seq', v_seq), 'server', p_server);
 
-  -- ---------------------------------------------------------------- hit (un kart a percuté une boule / une glue)
+  -- ---------------------------------------------------------------- hit (un kart a percuté une boule / une glue / du beurre / une poule)
   elsif v_type = 'hit' then
     if v_phase <> 'racing' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
     v_id := public._dk_actor(p_state, p_actor, p_is_host, p_action);
@@ -8393,9 +8407,11 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 -- Dépend de schema.sql (game_action, start_match, finish_match).
 -- Conception : docs/superpowers/specs/2026-11-19-dede-party-design.md (section « Décisions »).
 --
--- Party game de plateau : boucle de 24 cases, étoiles à 20 pièces, un mini-jeu à chaque tour.
--- Tout le monde lance son dé EN MÊME TEMPS ; le serveur résout tout le tour d'un coup
--- (scénario `moves`, que les écrans ne font qu'animer). Aucune décision sur le plateau.
+-- Party game de plateau : grand plateau de 47 cases (boucle de 36 + 2 embranchements), 1 à 3 étoiles
+-- en jeu selon le nombre de joueurs (30 pièces, la première de chacun à 15), un mini-jeu à chaque tour.
+-- Tout le monde lance ses 2 dés EN MÊME TEMPS ; le serveur résout tout le tour d'un coup
+-- (scénario `moves`, que les écrans ne font qu'animer). Aucune décision sur le plateau :
+-- aux embranchements, un aiguillage (state.sw) envoie le pion et BASCULE après chaque passage.
 --
 -- Phases (toutes enchaînées par `deadline` + {"type":"tick"} idempotent, l'hôte n'a rien à cliquer) :
 --   intro (5 s) -> roll (15 s) -> move (2 + 5 s × joueurs) -> mg_intro (8 s) -> mg_play (selon le
@@ -8409,14 +8425,29 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 create or replace function public._dp_const()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '{"cells":24,"star_price":20,"half_price":10,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":5,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000}'::jsonb $$;
+as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price":15,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":5,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000}'::jsonb $$;
 
 -- Plateau « Le Grand Plateau de Dédé » : type de chaque case (index 0 = Départ).
+-- Cases 0-35 : la grande boucle ; 36-40 : « La Scène » (détour doré de l'aiguillage 13, retour en 15) ;
+-- 41-46 : « Le Tunnel de la pub » (détour piégé de l'aiguillage 22, retour en 25).
 -- Dupliqué avec src/games/dede-party/board.ts (synchro vérifiée par tools/sql-tests/dede-party.mjs).
 create or replace function public._dp_board()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '["start","clap","loge","pub","clap","env","loge","clap","clap","pub","loge","env","clap","loge","clap","pub","env","clap","loge","clap","pub","env","loge","clap"]'::jsonb $$;
+as $$ select '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","clap","pub","clap","env","loge","clap","pub","loge","clap","env","clap","clap","clap","env","loge","clap","pub","loge","clap","env","loge","pub","clap","clap","env","loge","clap","clap","pub","clap","pub","env","pub","clap"]'::jsonb $$;
+
+-- Case suivante de chaque case. Un tableau [tout droit, détour] = embranchement : l'aiguillage
+-- (state.sw, dans l'ordre des embranchements) choisit, puis bascule. Dupliqué avec board.ts (NEXT).
+create or replace function public._dp_next()
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select '[1,2,3,4,5,6,7,8,9,10,11,12,13,[14,36],15,16,17,18,19,20,21,22,[23,41],24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,15,42,43,44,45,46,25]'::jsonb $$;
+
+-- Case précédente (carte « recule ») : à un retour d'embranchement, on recule par la grande boucle.
+create or replace function public._dp_prev()
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,13,36,37,38,39,22,41,42,43,44,45]'::jsonb $$;
 
 -- Les 12 cartes « Enveloppe surprise » (effet immédiat, sans choix).
 create or replace function public._dp_cards()
@@ -8431,10 +8462,10 @@ as $$ select '[
   {"id":"steal3","text":"Pickpocket : prends 3 pièces au joueur le plus riche."},
   {"id":"charity","text":"Téléthon : tout le monde donne 2 pièces au dernier du classement."},
   {"id":"everyone3","text":"Tournée générale : tout le monde gagne 3 pièces !"},
-  {"id":"star_moves","text":"Changement de décor : l’étoile déménage !"},
+  {"id":"star_moves","text":"Changement de décor : ça déménage chez les étoiles !"},
   {"id":"reroll","text":"Bis ! Relance un dé et avance."},
   {"id":"half_price","text":"Promo du jour : ta prochaine étoile est à moitié prix !"},
-  {"id":"gift_double","text":"Cadeau de Dédé : un Double dé en plus !"}
+  {"id":"gift_double","text":"Cadeau de Dédé : un Triple dé en plus !"}
 ]'::jsonb $$;
 
 -- Mini-jeux V1 (ordre de référence du sac).
@@ -8486,7 +8517,7 @@ returns jsonb language sql immutable
 set search_path = public, extensions
 as $$
   select jsonb_build_object('pos', p_state->'pos', 'coins', p_state->'coins', 'stars', p_state->'stars',
-                            'star_cell', p_state->'star_cell', 'dist', p_state->'dist')
+                            'star_cells', p_state->'star_cells', 'sw', p_state->'sw', 'dist', p_state->'dist')
 $$;
 
 -- stats[joueur][clé] += delta.
@@ -8518,24 +8549,28 @@ begin
   return p_state;
 end $$;
 
--- L'étoile déménage dans une autre Loge, tirée au sort.
-create or replace function public._dp_move_star(p_state jsonb)
+-- L'étoile de la case p_from déménage dans une autre Loge libre (sans étoile), tirée au sort.
+drop function if exists public._dp_move_star(jsonb);
+create or replace function public._dp_move_star(p_state jsonb, p_from integer)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
-  v_cur  integer := (p_state->>'star_cell')::integer;
   v_cell integer;
 begin
   select (o - 1)::integer into v_cell
     from jsonb_array_elements_text(public._dp_board()) with ordinality t(c, o)
-   where c = 'loge' and (o - 1) <> v_cur
+   where c = 'loge' and not (p_state->'star_cells') @> to_jsonb((o - 1)::integer)
    order by random() limit 1;
-  return jsonb_set(p_state, '{star_cell}', to_jsonb(v_cell));
+  return jsonb_set(p_state, '{star_cells}',
+    (select jsonb_agg(case when x::integer = p_from then v_cell else x::integer end order by o)
+       from jsonb_array_elements_text(p_state->'star_cells') with ordinality t(x, o)));
 end $$;
 
 -- Fait marcher le pion de p_pid de p_n cases (p_dir = 1 en avant, -1 en arrière).
--- Applique le passage par Départ (+5, en avant seulement) et l'achat automatique de l'étoile
+-- En avant : suit _dp_next() ; à un embranchement, l'aiguillage choisit puis bascule (évènement fork
+-- sur la première case de la voie prise). En arrière : _dp_prev(), sans toucher aux aiguillages.
+-- Applique le passage par Départ (+5, en avant seulement) et l'achat automatique d'une étoile
 -- (au passage comme à l'arrêt). Renvoie {state, steps:[{cell, ev:[...]}]}.
 create or replace function public._dp_walk(p_state jsonb, p_pid text, p_n integer, p_dir integer)
 returns jsonb language plpgsql
@@ -8543,7 +8578,11 @@ set search_path = public, extensions
 as $$
 declare
   c       jsonb := public._dp_const();
-  v_cells integer := (c->>'cells')::integer;
+  v_next  jsonb := public._dp_next();
+  v_prev  jsonb := public._dp_prev();
+  v_nx    jsonb;
+  v_fork  integer;
+  v_way   integer;
   v_pos   integer := (p_state->'pos'->>p_pid)::integer;
   v_steps jsonb := '[]'::jsonb;
   v_ev    jsonb;
@@ -8552,16 +8591,32 @@ declare
   k       integer;
 begin
   for k in 1 .. greatest(p_n, 0) loop
-    v_pos := ((v_pos + p_dir) % v_cells + v_cells) % v_cells;
+    v_ev := '[]'::jsonb;
+    if p_dir < 0 then
+      v_pos := (v_prev->>v_pos)::integer;
+    else
+      v_nx := v_next->v_pos;
+      if jsonb_typeof(v_nx) = 'array' then
+        -- Numéro de l'embranchement = rang parmi les cases à deux sorties.
+        select count(*)::integer into v_fork
+          from jsonb_array_elements(v_next) with ordinality t(x, o)
+         where jsonb_typeof(x) = 'array' and (o - 1) < v_pos;
+        v_way := coalesce((p_state->'sw'->>v_fork)::integer, 0);
+        p_state := jsonb_set(p_state, array['sw', v_fork::text], to_jsonb(1 - v_way));
+        v_ev := v_ev || jsonb_build_object('t', 'fork', 'fork', v_fork, 'way', v_way);
+        v_pos := (v_nx->>v_way)::integer;
+      else
+        v_pos := v_nx::text::integer;
+      end if;
+    end if;
     p_state := jsonb_set(p_state, array['pos', p_pid], to_jsonb(v_pos));
     p_state := jsonb_set(p_state, array['dist', p_pid], to_jsonb(coalesce((p_state->'dist'->>p_pid)::integer, 0) + p_dir));
-    v_ev := '[]'::jsonb;
     if p_dir > 0 and v_pos = 0 then
       v_old := (p_state->'coins'->>p_pid)::integer;
       p_state := public._dp_coins(p_state, p_pid, (c->>'start_bonus')::integer, 'start');
       v_ev := v_ev || jsonb_build_object('t', 'start', 'd', (p_state->'coins'->>p_pid)::integer - v_old);
     end if;
-    if v_pos = (p_state->>'star_cell')::integer then
+    if (p_state->'star_cells') @> to_jsonb(v_pos) then
       v_price := case when coalesce((p_state->'half_price'->>p_pid)::boolean, false)
                       then (c->>'half_price')::integer else (c->>'star_price')::integer end;
       if (p_state->'coins'->>p_pid)::integer >= v_price then
@@ -8570,8 +8625,8 @@ begin
         p_state := jsonb_set(p_state, array['half_price', p_pid], 'false'::jsonb);
         p_state := public._dp_stat(p_state, p_pid, 'stars_bought', 1);
         if k = p_n then p_state := public._dp_stat(p_state, p_pid, 'star_exact', 1); end if;
-        p_state := public._dp_move_star(p_state);
-        v_ev := v_ev || jsonb_build_object('t', 'star', 'cost', v_price, 'to', p_state->'star_cell', 'exact', k = p_n);
+        p_state := public._dp_move_star(p_state, v_pos);
+        v_ev := v_ev || jsonb_build_object('t', 'star', 'cost', v_price, 'stars', p_state->'star_cells', 'exact', k = p_n);
       else
         v_ev := v_ev || jsonb_build_object('t', 'star_poor', 'need', v_price);
       end if;
@@ -8690,8 +8745,10 @@ begin
         p_state := public._dp_coins(p_state, pl, 3, 'card');
       end loop;
     elsif v_card = 'star_moves' then
-      p_state := public._dp_move_star(p_state);
-      v_cev := v_cev || jsonb_build_object('to', p_state->'star_cell');
+      for v_n in select x::integer from jsonb_array_elements_text(p_state->'star_cells') x loop
+        p_state := public._dp_move_star(p_state, v_n);
+      end loop;
+      v_cev := v_cev || jsonb_build_object('stars', p_state->'star_cells');
     elsif v_card = 'half_price' then
       p_state := jsonb_set(p_state, array['half_price', p_pid], 'true'::jsonb);
     elsif v_card = 'gift_double' then
@@ -8732,21 +8789,21 @@ begin
     'deadline', now() + make_interval(secs => (public._dp_const()->>'roll_s')::integer));
 end $$;
 
--- Lance le dé (ou les deux dés) de p_pid.
+-- Lance les dés de p_pid : 2 dés, 3 avec le « Triple dé » (p_double ; noms internes double / double_left).
 create or replace function public._dp_do_roll(p_state jsonb, p_server jsonb, p_pid text, p_double boolean)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
   v_d1 integer;
-  v_d2 integer;
-  v_dice jsonb;
+  v_dice jsonb := '[]'::jsonb;
+  k integer;
 begin
-  select d.p_server, d.v into p_server, v_d1 from public._dp_die(p_server) d;
-  v_dice := jsonb_build_array(v_d1);
+  for k in 1 .. (public._dp_const()->>'dice')::integer + case when p_double then 1 else 0 end loop
+    select d.p_server, d.v into p_server, v_d1 from public._dp_die(p_server) d;
+    v_dice := v_dice || to_jsonb(v_d1);
+  end loop;
   if p_double then
-    select d.p_server, d.v into p_server, v_d2 from public._dp_die(p_server) d;
-    v_dice := v_dice || to_jsonb(v_d2);
     p_state := jsonb_set(p_state, array['double_left', p_pid], to_jsonb((p_state->'double_left'->>p_pid)::integer - 1));
     p_state := public._dp_stat(p_state, p_pid, 'doubles', 1);
   end if;
@@ -9241,7 +9298,7 @@ declare
   v_order  jsonb;
   v_state  jsonb;
   v_zero   jsonb;
-  v_star   integer;
+  v_star   jsonb;
 begin
   if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 8 then raise exception 'too_many_players'; end if;
@@ -9266,8 +9323,11 @@ begin
    where jsonb_typeof(q) = 'string';
 
   select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
-  select (o - 1)::integer into v_star from jsonb_array_elements_text(public._dp_board()) with ordinality t(x, o)
-   where x = 'loge' order by random() limit 1;
+  -- 1 à 3 étoiles en jeu selon le nombre de joueurs, chacune sur sa Loge.
+  select jsonb_agg(i order by i) into v_star
+    from (select (o - 1)::integer i from jsonb_array_elements_text(public._dp_board()) with ordinality t(x, o)
+           where x = 'loge' order by random()
+           limit (c->'star_count'->>(cardinality(p_players) - 2))::integer) z;
   select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
 
   v_state := jsonb_build_object(
@@ -9282,8 +9342,10 @@ begin
     'dist', v_zero,
     'coins', (select jsonb_object_agg(p::text, (c->>'start_coins')::integer) from unnest(p_players) p),
     'stars', v_zero,
-    'star_cell', v_star,
-    'half_price', (select jsonb_object_agg(p::text, false) from unnest(p_players) p),
+    'star_cells', v_star,
+    'sw', jsonb_build_array(floor(random() * 2)::integer, floor(random() * 2)::integer),
+    -- Promo de bienvenue : la première étoile de chacun est à moitié prix.
+    'half_price', (select jsonb_object_agg(p::text, true) from unnest(p_players) p),
     'double_left', (select jsonb_object_agg(p::text, 1) from unnest(p_players) p),
     'rolls', (select jsonb_object_agg(p::text, null) from unnest(p_players) p),
     'moves', '[]'::jsonb,
@@ -9386,6 +9448,8 @@ end $$;
 
 revoke all on function public._dp_const() from public, anon, authenticated;
 revoke all on function public._dp_board() from public, anon, authenticated;
+revoke all on function public._dp_next() from public, anon, authenticated;
+revoke all on function public._dp_prev() from public, anon, authenticated;
 revoke all on function public._dp_cards() from public, anon, authenticated;
 revoke all on function public._dp_kinds() from public, anon, authenticated;
 revoke all on function public._dp_die(jsonb) from public, anon, authenticated;
@@ -9393,7 +9457,7 @@ revoke all on function public._dp_draw(jsonb) from public, anon, authenticated;
 revoke all on function public._dp_snap(jsonb) from public, anon, authenticated;
 revoke all on function public._dp_stat(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._dp_coins(jsonb, text, integer, text) from public, anon, authenticated;
-revoke all on function public._dp_move_star(jsonb) from public, anon, authenticated;
+revoke all on function public._dp_move_star(jsonb, integer) from public, anon, authenticated;
 revoke all on function public._dp_walk(jsonb, text, integer, integer) from public, anon, authenticated;
 revoke all on function public._dp_order_idx(jsonb, text) from public, anon, authenticated;
 revoke all on function public._dp_land(jsonb, jsonb, text) from public, anon, authenticated;

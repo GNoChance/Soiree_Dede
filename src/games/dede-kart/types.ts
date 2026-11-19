@@ -30,7 +30,9 @@ export interface DkState {
   laps: number
   races: number
   race: number
+  /** Circuit de la course en cours (index de TRACKS) = (track0 + race - 1) % 6. */
   track: number
+  track0?: number
   go_at: string
   deadline: string | null
   laps_done: Record<string, number>
@@ -38,9 +40,9 @@ export interface DkState {
   arrival: string[]
   points: Record<string, number>
   standings: DkStanding[]
-  /** Boules et flaques de glue en jeu. */
+  /** Boules, glue, beurre et poules en jeu. */
   hazards: Hazard[]
-  /** Effets en cours (nuage, confettis, demi-tour). */
+  /** Effets en cours (nuage, confettis, demi-tour, klaxon). */
   fx: Fx[]
   /** Touches réussies par lanceur (cumul de la coupe). */
   hits: Record<string, number>
@@ -53,6 +55,8 @@ export interface DkOptions {
   laps: 2 | 3
   /** Compléter la grille avec des bots jusqu'à N karts (0 = pas de bots). */
   fill: 0 | 6 | 8 | 12
+  /** Premier circuit (0..5, index de TRACKS) ; -1 = surprise (tiré au hasard par le serveur). */
+  track: number
 }
 
 export const dkActions = {

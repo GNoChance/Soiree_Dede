@@ -17,6 +17,7 @@ interface Props {
   goAt: number
   now: () => number
   autopilot?: boolean
+  autoCut?: boolean
   /** Affiche le classement local à mon arrivée (essai solo). En multi, c'est le serveur qui classe. */
   showResults?: boolean
   onLap?: (id: string, completed: number) => void
@@ -34,7 +35,7 @@ const DRIFT_COLORS = ['#4CC9F0', '#FF8C42', '#B388FF']
 
 /** Une course : scène 3D plein écran + HUD (place, tour, chrono) + bouton Drift tactile. */
 export default function KartRace(p: Props) {
-  const { track, laps, drivers, meId, localBots, goAt, now, autopilot, showResults = true, children } = p
+  const { track, laps, drivers, meId, localBots, goAt, now, autopilot, autoCut, showResults = true, children } = p
   const host = useRef<HTMLDivElement>(null)
   const game = useRef<Game | null>(null)
   const [hud, setHud] = useState<Hud | null>(null)
@@ -47,7 +48,7 @@ export default function KartRace(p: Props) {
   useEffect(() => {
     if (!host.current) return
     const g = new Game(host.current, {
-      track, laps, drivers, meId, localBots, goAt, now, autopilot, botIds: p.botIds,
+      track, laps, drivers, meId, localBots, goAt, now, autopilot, autoCut, botIds: p.botIds,
       onHud: setHud,
       onLap: (id, n) => cb.current.onLap?.(id, n),
       onUse: (id, u) => cb.current.onUse?.(id, u),
@@ -103,10 +104,11 @@ export default function KartRace(p: Props) {
             </div>
           </div>
 
-          {hud.boost && (
+          {(hud.boost || hud.speed > 0.97) && (
             <div
               className="pointer-events-none absolute inset-0 animate-pulse"
               style={{
+                opacity: hud.boost ? 1 : 0.35,
                 background: 'repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,0.22) 0deg 1.2deg, transparent 1.2deg 9deg)',
                 maskImage: 'radial-gradient(circle at 50% 55%, transparent 32%, black 75%)',
                 WebkitMaskImage: 'radial-gradient(circle at 50% 55%, transparent 32%, black 75%)',
@@ -156,9 +158,13 @@ export default function KartRace(p: Props) {
               }}
             />
           )}
-          {(hud.fx.reverse || hud.fx.slow || hud.fx.spin || hud.fx.star || hud.fx.bubble) && (
+          {(hud.fx.reverse || hud.fx.slow || hud.fx.spin || hud.fx.star || hud.fx.bubble || hud.fx.slip || hud.fx.magnet || hud.fx.draft || hud.fx.cut) && (
             <div className="pointer-events-none absolute inset-x-0 top-20 flex flex-col items-center gap-1 font-display text-2xl font-extrabold text-white [text-shadow:3px_3px_0_#1B1B2F]">
               {hud.fx.spin && <span>💫 Aïe !</span>}
+              {hud.fx.slip && !hud.fx.spin && <span>🫠 Ça glisse !</span>}
+              {hud.fx.magnet && <span>🧲 Aimanté !</span>}
+              {hud.fx.cut && <span className="text-lg">🤫 {track.cutName}</span>}
+              {hud.fx.draft && !hud.boost && <span className="text-lg">💨 Aspiration !</span>}
               {hud.fx.reverse && <span>🔄 Commandes inversées !</span>}
               {hud.fx.slow && <span>☁️ Sous le gros nuage…</span>}
               {hud.fx.star && <span>🌈 Intouchable !</span>}
@@ -180,6 +186,11 @@ export default function KartRace(p: Props) {
             >
               {slot || <span className="font-display text-sm font-extrabold text-ink/60">OBJET</span>}
             </button>
+          )}
+          {meId && hud.phase !== 'finished' && hud.item && !rolling && (
+            <div className="pointer-events-none absolute bottom-[7.6rem] left-4 max-w-[11rem] rounded-chip border-[3px] border-ink bg-surface px-2 py-0.5 font-display text-sm font-extrabold text-text shadow-sticker-sm">
+              {ITEMS[hud.item].label}
+            </div>
           )}
 
           {/* dérapage automatique : jauge de mini-turbo (3 paliers), rien à appuyer */}
@@ -239,6 +250,7 @@ export default function KartRace(p: Props) {
 function MiniMap({ game, dots }: { game: Game | null; dots: Hud['dots'] }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const outline = useMemo(() => game?.outline() ?? [], [game])
+  const cut = useMemo(() => game?.cutOutline() ?? [], [game])
   useEffect(() => {
     const c = ref.current
     const g = c?.getContext('2d')
@@ -255,6 +267,16 @@ function MiniMap({ game, dots }: { game: Game | null; dots: Hud['dots'] }) {
     g.strokeStyle = '#F4F4F4'
     g.lineWidth = 4
     g.stroke()
+    if (cut.length) {
+      // raccourci : pointillés violets
+      g.beginPath()
+      cut.forEach(([x, y], i) => (i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S)))
+      g.setLineDash([5, 4])
+      g.strokeStyle = '#B388FF'
+      g.lineWidth = 3
+      g.stroke()
+      g.setLineDash([])
+    }
     for (const d of [...dots].sort((a, b) => Number(a.me) - Number(b.me))) {
       g.beginPath()
       g.arc(d.x * S, d.y * S, d.me ? 7 : 5, 0, Math.PI * 2)
@@ -264,6 +286,6 @@ function MiniMap({ game, dots }: { game: Game | null; dots: Hud['dots'] }) {
       g.strokeStyle = d.me ? '#FFFFFF' : '#1B1B2F'
       g.stroke()
     }
-  }, [outline, dots])
+  }, [outline, cut, dots])
   return <canvas ref={ref} width={120} height={120} className="size-[96px] rounded-card border-[3px] border-ink bg-black/25" />
 }

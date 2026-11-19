@@ -120,6 +120,28 @@ export class Sfx {
   pop() {
     this.tone(1200, 300, 0.12, 'triangle', 0.08)
   }
+  /** Petite bosse. */
+  hop() {
+    this.tone(220, 420, 0.12, 'triangle', 0.05)
+  }
+  /** Flaque, beurre : ça glisse. */
+  splash() {
+    this.tone(900, 250, 0.3, 'sine', 0.07)
+  }
+  /** Poule : deux petits cris. */
+  cluck() {
+    this.tone(700, 1100, 0.09, 'square', 0.04)
+    setTimeout(() => this.tone(800, 1300, 0.12, 'square', 0.04), 110)
+  }
+  /** Klaxon de tracteur : deux notes graves. */
+  honk() {
+    this.tone(196, 190, 0.45, 'sawtooth', 0.07)
+    this.tone(147, 143, 0.45, 'sawtooth', 0.07)
+  }
+  /** Aimant : montée électrique. */
+  zap() {
+    this.tone(240, 1400, 0.4, 'sawtooth', 0.035)
+  }
 
   stop() {
     void this.ctx?.close()
