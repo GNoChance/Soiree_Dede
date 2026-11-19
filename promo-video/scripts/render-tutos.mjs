@@ -27,7 +27,7 @@ for (const comp of ids) {
   const out = join(outDir, `${id}.mp4`)
   console.log(`\n▶ ${comp}`)
   execSync(
-    `npx remotion render src/index.ts ${comp} "${out}" --codec=h264 --crf=30 --x264-preset=veryslow --pixel-format=yuv420p --audio-bitrate=48k`,
+    `npx remotion render src/index.ts ${comp} "${out}" --codec=h264 --crf=${process.env.CRF ?? 30} --x264-preset=veryslow --pixel-format=yuv420p --audio-bitrate=48k`,
     { cwd: root, stdio: 'inherit' },
   )
   copyFileSync(out, join(appDir, `${id}.mp4`))

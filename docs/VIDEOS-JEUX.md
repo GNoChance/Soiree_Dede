@@ -1,8 +1,8 @@
 # Vidéos « Comment on joue ? » — scripts par jeu
 
-Vidéos d'explication de 34 à 37 s, une par jeu (les 22 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
+Vidéos d'explication de 34 à 37 s, une par jeu (les 23 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
 
-- **Format** : mp4 portrait 720 × 1280, 30 FPS, h264 CRF 30 (préréglage veryslow ; CRF 33 si > 3 Mo, comme Nom de Code), < 3 Mo (2,3 à 2,7 Mo en pratique : rester sous ~37 s). Pas de voix off : textes courts à l'écran + bruitages légers.
+- **Format** : mp4 portrait 720 × 1280, 30 FPS, h264 CRF 30 (préréglage veryslow ; CRF 33 si > 3 Mo, comme Nom de Code et Kems ; `CRF=33 npm run render:tutos -- <id>`), < 3 Mo (2,3 à 2,7 Mo en pratique : rester sous ~37 s). Pas de voix off : textes courts à l'écran + bruitages légers.
 - **Ton** : « sticker book » (contours épais, ombres décalées, couleurs vives, gros rebonds), chibis de la bande, maquettes simplifiées des écrans (jamais de captures).
 - **Structure commune** : Titre (3 s) → Le but (3,6 s) → 4 étapes illustrées (≈ 5-6 s chacune) → Pour gagner (4,2 s) → « À vous de jouer ! » (3 s).
 
@@ -298,3 +298,20 @@ Total : 3 + 3,6 + 21,6 + 4,2 + 3 = 35,4 s. La vidéo montre l’appli, pas les r
 Expressions de Nini en tenue `chess` (`public/chibis/nini/chess/`) : joie, colere, pleurs, boude, reflexion, dodo, bisou, clin_oeil, surprise, cool, amoureux, gamer — pas de `pouces`, `timide` ni `determine`. `cool` existe dans cette tenue (Nini côté gauche de `makeVersus` et dans `makeBetting` : OK, à condition de leur passer la tenue ; Nini n’a pas `cool` en tenue par défaut). Copier `public/chibis/nini/chess/` dans `promo-video/public/chibis/nini/chess/`.
 
 Non montré : promotion (4 gros boutons, dame en premier), roque, prise en passant ; nuls (pat, 3 fois la même position, 50 coups, plus assez de pièces, commun accord via « 🤝 Proposer nul ») ; « 🏳️ Abandonner » ; pièce bloquée qui tremble ; dernier coup surligné, pièces prises et avance de matériel ; sans pendule : 60 s par coup puis coup légal au hasard ; pendule à zéro face à un roi seul = nul ; formats Roi de la table / Tournoi (Duel par défaut) ; mode télé.
+
+## ✅ Kems 🤠 — 4 à 9 joueurs (équipes de 2) — 35,8 s
+**But** : « Réunis quatre cartes identiques… et préviens ton coéquipier en secret ! » · Chibis : 🔴 Rouges : Keke et Dédé · 🔵 Bleus : Manon et Cycy. **Tenues : les Rouges, Keke et Dédé, portent la tenue Cow-boy 🤠 (dossier d’art `cowboy`) dans toute la vidéo (titre et scène finale compris) ; les Bleues, Manon et Cycy, restent en tenue par défaut.**
+
+| # | Durée | Texte à l’écran | Image |
+| --- | --- | --- | --- |
+| 1 | 5,2 s | En équipes de 2, face à face : choisissez un signe secret | Table vue de dessus : Keke face à Dédé (tenue Cow-boy, liseré rouge), Manon face à Cycy (tenue par défaut, liseré bleu), une flèche ↔ relie chaque paire. Puis le téléphone de Keke : « 🤫 Choisis un signe secret avec Dédé », 3 idées (« Faire un clin d’œil », « Se gratter le nez », « Hausser un sourcil »), le doigt touche le gros bouton « Prêt » ; pastille « 🤫 Le signe se fait en vrai ! » |
+| 2 | 5,6 s | Touche ta carte puis une du centre : elles s’échangent | Téléphone de Keke : 4 cartes au centre (7♥ K♦ 10♣ A♠), sa main en bas (9♠ K♠ K♥ 8♣). Le doigt touche le 9♠ (il se soulève) puis le K♦ : les deux cartes se croisent ; en même temps la tête de Manon prend le A♠ au centre ; pastille « ⚡ Tous en même temps ! ». Puis le doigt touche « 🧹 Suivantes » (« 4 sur 4 ») : les 4 cartes du centre sont balayées, 4 nouvelles arrivent (dont le K♣) ; pastille « 🧹 Rien de bon ? Suivantes ! » |
+| 3 | 5,6 s | Un carré ? Fais ton signe : ton coéquipier maintient KEMS ! | Keke échange son 8♣ contre le K♣ : ses 4 rois (K) s’illuminent, « 🃏 Carré ! Fais ton signe 🤫 ». Autour de la table, Keke (tenue Cow-boy, clin_oeil) fait son clin d’œil, un trait pointillé file vers Dédé (tenue Cow-boy, surprise). Le doigt de Dédé reste posé sur le gros bouton rouge « KEMS ! » : la jauge se remplit, pastille « ✋ Maintiens le bouton ! » ; plein écran « KEMS ! », les 4 rois retournés, « +1 » vole vers les 🔴 Rouges, confettis |
+| 4 | 5,6 s | Tu repères leur signe ? Maintiens CONTRE-KEMS ! | Cycy (tenue par défaut, bisou) fait la moue vers Manon ; Keke (tenue Cow-boy, reflexion puis surprise) la voit, une loupe 🔎 se pose sur Cycy. Son doigt reste posé sur le gros bouton noir « CONTRE-KEMS ! », la jauge se remplit ; plein écran « CONTRE-KEMS réussi ! », le carré de dames (Q) de Cycy retourné, « +1 » aux 🔴 Rouges ; Cycy en pleurs, Manon boude. Pastille finale « ❌ Erreur : +1 aux autres ! » |
+| 🏆 | 4,2 s | La première équipe à 5 points gagne ! — *De 2 à 4 équipes de 2. En 3, 5 ou 7 points, au choix de l’hôte.* | Keke et Dédé (tenue Cow-boy, joie) sautent |
+
+Total : 3 + 3,6 + 22 + 4,2 + 3 = 35,8 s (rendu CRF 33, 2,65 Mo). Les rangs sont ceux de l’appli : K = roi, Q = dame. Exemple à 4 joueurs = jeu de 32 cartes (7 → As) : toutes les cartes montrées en font partie. Dans l’appli on peut aussi toucher la carte du centre d’abord, puis celle de sa main. « KEMS ! » n’est valable que si **le partenaire** de celui qui appuie a un carré (on ne l’annonce pas pour soi) ; l’appui long dure ≈ 0,6 s (`HOLD_MS = 600`), bouton KEMS à la couleur de l’équipe, CONTRE-KEMS noir. Les signes de la vidéo sont de vraies idées de `signs.ts` (« Faire un clin d’œil », « Faire la moue »).
+
+Expressions Cow-boy (`public/chibis/<slug>/cowboy/`, livrées pour kevin, dede, mika, marius, nini, cecile) : joie, colere, pleurs, boude, reflexion, dodo, bisou, clin_oeil, surprise, cool, amoureux, gamer. Copier `public/chibis/kevin/cowboy/` et `public/chibis/dede/cowboy/` dans `promo-video/public/chibis/`. Manon et Cycy ont les 12 mêmes expressions en tenue par défaut (pas de Carole ni de Nini en tenue par défaut ici : pas de `cool` / `amoureux`).
+
+Non montré : 4, 6 ou 8 joueurs (52 cartes à 6-8), les autres sur le banc 👀 ; « Trop tard ! » quand deux joueurs visent la même carte du centre ; balayage automatique après 10 s sans échange (un échange annule les votes) ; Kems raté ou Contre-Kems raté = +1 à chaque autre équipe ; Double Kems (+2) ; à 3-4 équipes, CONTRE-KEMS ouvre le choix de l’équipe visée ; fil des derniers échanges ; manche blanche après 3 min ; co-vainqueurs ; mode télé (centre en grand, pour lever les yeux).
