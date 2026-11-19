@@ -69,7 +69,11 @@
       "spy",
       "star",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "tycoon",
@@ -92,7 +96,10 @@
       "painter",
       "strategist",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "host",
+      "cowboy"
     ]
   },
   "cycy": {

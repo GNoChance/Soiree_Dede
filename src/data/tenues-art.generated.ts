@@ -43,6 +43,10 @@ export const TENUE_ART: readonly string[] = [
   'cecile/star',
   'cecile/racer',
   'cecile/hacker',
+  'cecile/chess',
+  'cecile/golfer',
+  'cecile/host',
+  'cecile/cowboy',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
@@ -248,6 +252,9 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'cecile/strategist',
   'cecile/racer',
   'cecile/hacker',
+  'cecile/chess',
+  'cecile/host',
+  'cecile/cowboy',
   'cycy/spy',
   'cycy/cinema',
   'cycy/student',
@@ -538,6 +545,18 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cecile/hacker/pouces',
   'cecile/hacker/timide',
   'cecile/hacker/determine',
+  'cecile/chess/pouces',
+  'cecile/chess/timide',
+  'cecile/chess/determine',
+  'cecile/golfer/pouces',
+  'cecile/golfer/timide',
+  'cecile/golfer/determine',
+  'cecile/host/pouces',
+  'cecile/host/timide',
+  'cecile/host/determine',
+  'cecile/cowboy/pouces',
+  'cecile/cowboy/timide',
+  'cecile/cowboy/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -1225,6 +1244,26 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cecile/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/chess": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/golfer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/host": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/cowboy": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
