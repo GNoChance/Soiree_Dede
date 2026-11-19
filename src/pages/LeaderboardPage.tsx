@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { Crown } from 'lucide-react'
 import { getCharacter } from '@/data/characters'
 import { Avatar } from '@/components/ui/Avatar'
@@ -230,7 +230,11 @@ function Podium({ rows, me }: { rows: Row[]; me?: UUID }) {
       {slots.map(({ row, h, medal, color }, i) => (
         <div key={i} className="flex w-1/3 flex-col items-center">
           {row && (
-            <>
+            <Link
+              to={`/profil/${row.profile_id}`}
+              aria-label={`Profil de ${row.nickname}`}
+              className="flex max-w-full flex-col items-center rounded-2xl"
+            >
               <motion.div
                 initial={{ y: -80, opacity: 0, scale: 0.5 }}
                 animate={{ y: 0, opacity: 1, scale: 1 }}
@@ -257,7 +261,7 @@ function Podium({ rows, me }: { rows: Row[]; me?: UUID }) {
               </motion.div>
               <p className="mt-1 max-w-full truncate font-display text-base font-extrabold">{row.nickname}</p>
               <p className="text-xs font-bold text-muted">{row.wins} victoire{row.wins > 1 ? 's' : ''}</p>
-            </>
+            </Link>
           )}
           <motion.div
             initial={{ height: 0 }}
