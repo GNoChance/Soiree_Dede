@@ -53,7 +53,8 @@ insert into public.tenues (id, label, emoji, game_id, condition_type, threshold,
   ('pilote',     'Pilote',        '🏎️', 'dede-kart',      'game_wins', 10, 200),
   ('hacker',     'Hacker',        '💻', 'nom-de-code',    'game_wins', 10, 210),
   ('grandmaitre', 'Grand Maître', '♟️', 'echecs',         'duel_wins', 10, 220),
-  ('cowboy',     'Cow-boy',       '🤠', 'kems',           'game_wins', 10, 230)
+  ('cowboy',     'Cow-boy',       '🤠', 'kems',           'game_wins', 10, 230),
+  ('golfer',     'Golfeur',       '⛳', 'mini-golf',      'game_wins', 10, 240)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,

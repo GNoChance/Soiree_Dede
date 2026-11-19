@@ -500,6 +500,26 @@ Compteurs posés par le moteur (`server.pstats` → `results[].stats`). « Contr
 | 11 | `kems_double` | Double Kems | Réussir un Double Kems (les deux coéquipiers ont un carré) | `double_kems` (somme ≥ 1) ✅ |
 | 12 | `kems_legende` | Légende du saloon | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
 
+---
+
+### Golfeur ⛳ — Mini-golf (`mini-golf`)
+
+Compteurs dans `results[].stats` (`_mg_tstats`). Calculés par le serveur depuis la carte : `pars` (trous ≤ par), `birdies` (trous sous le par), `aces` (trous en 1), `under_par` / `clean_card` (parcours de **9 trous** uniquement). `picked_up` = trous déclarés « non rentrée en 6 coups » (le ramassage par le chrono ou la fin forcée ne compte pas). Déclarés par le client et bornés par le serveur (`server.tstats`) : `water` (≤ coups du trou), `mill_hits` (coups touchés par une pale, ≤ coups du trou), `bank_shot` (balle rentrée après 3 rebonds ou plus dans le même coup).
+
+| Slot | id | Nom | Condition | Compteur |
+|---|---|---|---|---|
+| 2 | `mg_plouf` | Plouf ! | 3 balles à l'eau en une partie | `water` (max ≥ 3) ✅ |
+| 3 | `mg_don_quichotte` | Don Quichotte | Se faire renvoyer la balle par le moulin 5 fois (cumul) | `mill_hits` (somme ≥ 5) ✅ |
+| 4 | `mg_ramassee` | Balle ramassée | Ne pas rentrer la balle en 6 coups sur un trou | `picked_up` (somme ≥ 1) ✅ |
+| 5 | `mg_habitue` | Habitué du parcours | Jouer 10 parties (cumul) | nombre de parties ≥ 10 ✅ |
+| 6 | `mg_regulier` | Régulier | 50 trous finis dans le par ou mieux (cumul) | `pars` (somme ≥ 50) ✅ |
+| 7 | `mg_petit_oiseau` | Petit oiseau | 10 trous finis en un coup de moins que le par (cumul) | `birdies` (somme ≥ 10) ✅ |
+| 8 | `mg_par_la_bande` | Par la bande | Rentrer la balle après 3 rebonds ou plus dans le même coup | `bank_shot` (max ≥ 1) ✅ |
+| 9 | `mg_trou_en_un` | Trou en un ! | Rentrer la balle du premier coup | `aces` (max ≥ 1) ✅ |
+| 10 | `mg_sous_le_par` | Sous le par | Finir un parcours de 9 trous sous le par | `under_par` (max ≥ 1) ✅ |
+| 11 | `mg_sans_bavure` | Sans bavure | 9 trous sans jamais dépasser le par | `clean_card` (max ≥ 1) ✅ |
+| 12 | `mg_legende` | Légende du green | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
+
 ## 3. Trophées généraux (facultatifs)
 
 Transverses, sans sticker de planche : récompense proposée = badge sur le profil + XP. `tenue_id` et `slot` nuls dans le catalogue.

@@ -27,6 +27,7 @@ const OPTIONS = {
   'le-plus-proche': { questions: n(4, (i) => ({ id: 'e' + i, theme: 'divers', difficulty: 1, prompt: 'Combien de jours dans une année ? (' + i + ')', answer: 365, unit: 'jours' })) },
   'loup-garou': {},
   menteur: {},
+  'mini-golf': {},
   echecs: { mode: 'duel', board: { cadence: 'rapid5' } },
   morpion: {},
   'pas-de-bol': {},

@@ -90,7 +90,7 @@ const MESSAGES: Record<string, string> = {
   wrong_roll: 'Ce lancer ne correspond pas à ta feuille de score.',
   too_early: 'Attends le feu vert !',
   wrong_lap: 'Tour non reconnu : continue la course.',
-  too_fast: 'Tour trop rapide pour être honnête 😏',
+  too_fast: 'Trop rapide pour être honnête 😏',
   invalid_roll: 'Lancer invalide : ces quilles sont déjà tombées.',
   already_done: 'Tu as déjà fini ta partie !',
   // Qui suis-je ?
@@ -123,6 +123,9 @@ const MESSAGES: Record<string, string> = {
   // Kems
   card_taken: 'Trop tard !',
   not_in_hand: 'Cette carte n’est plus dans ta main.',
+  // Mini-golf
+  wrong_hole: 'Ce trou est déjà terminé : place au suivant !',
+  invalid_strokes: 'Nombre de coups invalide.',
   // Échecs
   promotion_required: 'Choisis la pièce de ta promotion !',
   no_draw_offer: 'Personne ne t’a proposé nul.',
