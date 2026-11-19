@@ -300,6 +300,7 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'mika/admiral',
   'mika/tycoon',
   'mika/racer',
+  'mika/bowler',
   'nini/bowler',
   'nini/strategist',
   'nini/tictactoe',
