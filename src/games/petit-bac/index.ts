@@ -16,7 +16,7 @@ export const definition: GameDefinition = {
   minPlayers: 2,
   maxPlayers: 9,
   rules:
-    'Une lettre est tirée : remplis un mot par catégorie sur ton téléphone avant la fin du chrono. On valide ensemble (👎 pour contester) : réponse unique = 2 pts, réponse partagée = 1 pt.',
+    'Une lettre est tirée : remplis un mot par catégorie sur ton téléphone avant la fin du chrono. Le premier qui a tout rempli peut crier STOP ! On valide ensemble (👎 pour contester) : réponse unique = 2 pts, réponse partagée = 1 pt.',
   Play,
   Options: PetitBacOptions,
   Summary,

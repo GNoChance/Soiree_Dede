@@ -37,6 +37,7 @@ const MESSAGES: Record<string, string> = {
   invalid_action: 'Action impossible.',
   unknown_action: 'Action inconnue.',
   wrong_phase: 'Trop tard (ou trop tôt) pour ça !',
+  not_finished: 'Remplis toutes tes cases avant de crier STOP !',
   not_a_player: 'Tu ne joues pas cette partie.',
   not_alive: 'Tu as été éliminé·e : tu regardes la partie.',
   invalid_target: 'Ce joueur ne peut pas être choisi.',

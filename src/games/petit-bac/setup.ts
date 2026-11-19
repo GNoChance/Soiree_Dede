@@ -10,7 +10,8 @@ export const pbActions = {
   /** Sauvegarde (fusion) de mes réponses de la manche `round`. */
   save: (round: number, answers: Record<string, string>) => ({ type: 'save', round, answers }),
   tick: () => ({ type: 'tick' }),
-  endRound: () => ({ type: 'end_round' }),
+  /** « STOP ! » : hôte à tout moment, joueur seulement s'il a tout rempli (ses réponses voyagent avec l'action). */
+  endRound: (answers?: Record<string, string>) => (answers ? { type: 'end_round', answers } : { type: 'end_round' }),
   contest: (category: string, target: string, value: boolean) => ({ type: 'contest', category, target, value }),
   nextCategory: () => ({ type: 'next_category' }),
   closeValidation: () => ({ type: 'close_validation' }),

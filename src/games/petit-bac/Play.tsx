@@ -435,10 +435,16 @@ function Writing({
 
       <ProgressStrip s={s} meId={meId} get={get} />
 
-      {isHost && (
+      {(isHost || (isPlayer && filled === total)) && (
         <>
-          <Button variant="secondary" fullWidth icon={<Hand className="size-5" />} disabled={timeUp || ending} onClick={() => setConfirmEnd(true)}>
-            Fin de manche
+          <Button
+            variant={isPlayer && filled === total ? 'primary' : 'secondary'}
+            fullWidth
+            icon={<Hand className="size-5" />}
+            disabled={timeUp || ending}
+            onClick={() => setConfirmEnd(true)}
+          >
+            {isPlayer && filled === total ? 'STOP ! J’ai fini' : 'Fin de manche'}
           </Button>
           <ConfirmModal
             open={confirmEnd}
@@ -449,8 +455,9 @@ function Writing({
             loading={ending}
             onConfirm={async () => {
               setEnding(true)
-              await flush()
-              await act(pbActions.endRound())
+              clearTimeout(timer.current)
+              // Mes réponses partent avec le STOP : le serveur vérifie que tout est rempli.
+              await act(pbActions.endRound(isPlayer ? Object.fromEntries(Object.entries(answersRef.current).map(([k, v]) => [k, cleanAnswer(v)])) : undefined))
               setEnding(false)
               setConfirmEnd(false)
             }}

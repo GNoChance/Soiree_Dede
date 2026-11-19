@@ -12429,6 +12429,7 @@ declare
   v_value    boolean;
   v_list     jsonb;
   v_contests jsonb;
+  v_res      jsonb;
 begin
   -- ---------------------------------------------------------------- save
   if v_type = 'save' then
@@ -12468,8 +12469,19 @@ begin
 
   -- ---------------------------------------------------------------- end_round
   elsif v_type = 'end_round' then
-    if not p_is_host then raise exception 'not_host'; end if;
+    -- « STOP ! » : l'hôte à tout moment ; un joueur seulement s'il a rempli toutes ses cases.
+    if not p_is_host and not v_player then raise exception 'not_a_player'; end if;
     if v_phase <> 'writing' then raise exception 'wrong_phase'; end if;
+    -- Les dernières réponses du joueur peuvent voyager avec l'action (pas de course avec la sauvegarde auto).
+    if v_player and jsonb_typeof(p_action->'answers') = 'object' then
+      v_res := public.game_petit_bac_action(p_state, p_server, p_actor, p_is_host,
+                 jsonb_build_object('type', 'save', 'round', v_round, 'answers', p_action->'answers'));
+      p_state := v_res->'state';
+      p_server := v_res->'server';
+    end if;
+    if not p_is_host and coalesce((p_state#>>array['progress', v_me])::integer, 0) < v_ncat then
+      raise exception 'not_finished';
+    end if;
     -- L'échéance devient « maintenant » : la tolérance de 2 s s'applique aussi.
     p_state := p_state || jsonb_build_object('deadline', least(now(), (p_state->>'deadline')::timestamptz),
                                              'forced', true);
