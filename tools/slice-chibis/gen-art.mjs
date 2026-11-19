@@ -10,11 +10,7 @@ const ROOT = path.resolve(HERE, '../..');
 const manifest = JSON.parse(fs.readFileSync(path.join(HERE, 'costumes-manifest.json'), 'utf8'));
 
 // Stickers découpés mais ratés (vus sur out-check) : repli sur une autre expression.
-const BAD = [
-  'carole/actor/pouces',
-  'cecile/pyro/colere',
-  'cecile/philosopher/pouces',
-];
+const BAD = [];
 
 const EXPR = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine'.split(' ');
 // Stickers dessinés hors liste standard (planches récentes) : ils comblent, dans l'ordre, les cases vides de la planche.

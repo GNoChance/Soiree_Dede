@@ -46,25 +46,7 @@
     ]
   },
   "cecile": {
-    "costumes": [
-      "cinema",
-      "croupier",
-      "painter",
-      "werewolf",
-      "pyro",
-      "philosopher",
-      "actor",
-      "coach",
-      "bowler",
-      "strategist",
-      "tictactoe",
-      "tycoon",
-      "star",
-      "spy",
-      "teacher",
-      "archer",
-      "admiral"
-    ],
+    "costumes": [],
     "portraits": []
   },
   "cycy": {
@@ -114,30 +96,8 @@
     ]
   },
   "dede": {
-    "costumes": [
-      "cinema",
-      "student",
-      "croupier",
-      "painter",
-      "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "bowler",
-      "strategist",
-      "tictactoe",
-      "tycoon",
-      "star",
-      "admiral",
-      "teacher"
-    ],
-    "portraits": [
-      "bowler",
-      "strategist",
-      "admiral",
-      "tictactoe",
-      "tycoon"
-    ]
+    "costumes": [],
+    "portraits": []
   },
   "kevin": {
     "costumes": [
@@ -232,50 +192,8 @@
     ]
   },
   "marius": {
-    "costumes": [
-      "admiral",
-      "tycoon",
-      "star",
-      "spy",
-      "croupier",
-      "teacher",
-      "student",
-      "painter",
-      "werewolf",
-      "pyro",
-      "tictactoe",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach",
-      "bowler",
-      "strategist",
-      "cinema",
-      "racer"
-    ],
-    "portraits": [
-      "bowler",
-      "strategist",
-      "tictactoe",
-      "admiral",
-      "tycoon",
-      "star",
-      "cinema",
-      "spy",
-      "croupier",
-      "teacher",
-      "student",
-      "painter",
-      "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach",
-      "racer"
-    ]
+    "costumes": [],
+    "portraits": []
   },
   "mika": {
     "costumes": [
@@ -324,43 +242,7 @@
     ]
   },
   "nini": {
-    "costumes": [
-      "bowler",
-      "strategist",
-      "tictactoe",
-      "admiral",
-      "tycoon",
-      "star",
-      "cinema",
-      "spy",
-      "croupier",
-      "teacher",
-      "student",
-      "painter",
-      "werewolf",
-      "pirate",
-      "philosopher",
-      "pyro",
-      "archer",
-      "actor",
-      "coach"
-    ],
-    "portraits": [
-      "bowler",
-      "strategist",
-      "tictactoe",
-      "admiral",
-      "tycoon",
-      "star",
-      "cinema",
-      "spy",
-      "croupier",
-      "teacher",
-      "student",
-      "painter",
-      "werewolf",
-      "pirate",
-      "philosopher"
-    ]
+    "costumes": [],
+    "portraits": []
   }
 }

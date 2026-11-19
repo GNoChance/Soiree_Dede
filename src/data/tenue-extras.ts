@@ -12,25 +12,8 @@ export interface TenueExtra {
   emoji: string
 }
 
-const LABELS: Record<string, { label: string; emoji: string }[]> = {
-  'marius/admiral': [{ label: 'Victoire en mer', emoji: '🎉' }, { label: 'Jumelles !', emoji: '🔭' }],
-  'marius/tycoon': [{ label: 'Jackpot', emoji: '💰' }, { label: 'Bonne main', emoji: '🃏' }],
-  'marius/star': [{ label: 'Yeux étoilés', emoji: '🤩' }, { label: 'Sous les projecteurs', emoji: '🎤' }],
-  'marius/spy': [{ label: 'Oreillette', emoji: '🎧' }, { label: 'Top secret', emoji: '📁' }],
-  'marius/croupier': [{ label: 'Gros gain', emoji: '🎉' }, { label: 'Cartes en main', emoji: '🃏' }],
-  'marius/teacher': [{ label: 'Le nez dans les livres', emoji: '📚' }, { label: 'Au tableau', emoji: '🧪' }],
-  'marius/student': [{ label: 'Hourra, les vacances', emoji: '🎒' }, { label: 'A+ !', emoji: '💯' }],
-  'marius/painter': [{ label: 'Éclaboussures', emoji: '🎨' }, { label: 'Chef-d\'œuvre', emoji: '🖼️' }],
-  'marius/werewolf': [{ label: 'Pattes de loup', emoji: '🐾' }, { label: 'Grand saut', emoji: '🌲' }],
-  'nini/actor': [{ label: 'Rideau !', emoji: '🎭' }],
-  'nini/coach': [{ label: 'Au mégaphone', emoji: '📣' }],
-  'dede/painter': [{ label: 'Yeux étoilés', emoji: '🤩' }, { label: 'Inspiration', emoji: '💖' }, { label: 'Mains de peintre', emoji: '🖐️' }],
-  'dede/werewolf': [{ label: 'Hurlement à la lune', emoji: '🌕' }, { label: 'Gigot !', emoji: '🍖' }, { label: 'Feuilles mortes', emoji: '🍂' }],
-  'dede/pyro': [{ label: "Feu d'artifice", emoji: '🎆' }, { label: 'Bouquet final', emoji: '🎇' }, { label: 'La coupe !', emoji: '🏆' }],
-  'dede/philosopher': [{ label: 'Eurêka !', emoji: '💡' }, { label: 'Thé philosophique', emoji: '☕' }, { label: 'Grand discours', emoji: '📜' }, { label: 'Migraine existentielle', emoji: '🤯' }, { label: 'Méditation', emoji: '🧘' }, { label: 'Le grand livre', emoji: '📖' }],
-  'dede/pirate': [{ label: "Cap sur l'aventure", emoji: '⚓' }, { label: 'Trésor !', emoji: '💰' }, { label: 'Lancer de dés', emoji: '🎲' }, { label: 'Longue-vue', emoji: '🔭' }],
-  'marius/pyro': [{ label: 'Feu d\'artifice', emoji: '🎆' }, { label: 'Étincelle', emoji: '✨' }],
-}
+// Libellés des stickers bonus, clé `slug/dossier` (aucune planche V3 n'en a pour l'instant).
+const LABELS: Record<string, { label: string; emoji: string }[]> = {}
 
 /** Stickers bonus disponibles pour ce perso dans ce dossier d'illustrations (vide si aucun). */
 export function tenueExtrasOf(slug: string, dir: string): TenueExtra[] {
