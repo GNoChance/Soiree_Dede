@@ -11559,6 +11559,220 @@ begin
     1);
 end $$;
 
+-- Ajoute p_delta au compteur p_key du joueur p_pid (server.stats).
+create or replace function public._ndc_bump(p_server jsonb, p_pid text, p_key text, p_delta integer)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select case when p_server->'stats' ? p_pid
+    then jsonb_set(p_server, array['stats', p_pid, p_key],
+                   to_jsonb(coalesce((p_server->'stats'->p_pid->>p_key)::integer, 0) + p_delta))
+    else p_server end
+$$;
+
+-- Fin de manche : victoire de p_winner (raison : words | bomb | last_team), clé rendue publique.
+create or replace function public._ndc_end_round(p_state jsonb, p_server jsonb, p_winner text, p_reason text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'round_end', 'round_winner', p_winner, 'round_end_reason', p_reason,
+    'round_wins', (p_state->'round_wins') || jsonb_build_object(p_winner, coalesce((p_state->'round_wins'->>p_winner)::integer, 0) + 1),
+    'key', p_server->'key', 'deadline', null, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Fin du tour : l'équipe suivante non éliminée (ordre des équipes, circulaire) passe à l'indice.
+create or replace function public._ndc_end_turn(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_n    integer := jsonb_array_length(p_state->'teams');
+  v_cur  integer;
+  v_i    integer;
+  v_next text := p_state->>'turn';
+begin
+  select o - 1 into v_cur from jsonb_array_elements(p_state->'teams') with ordinality t(x, o) where x->>'id' = p_state->>'turn';
+  for v_i in 1 .. v_n loop
+    if not coalesce((p_state->'teams'->((v_cur + v_i) % v_n)->>'eliminated')::boolean, false) then
+      v_next := p_state->'teams'->((v_cur + v_i) % v_n)->>'id';
+      exit;
+    end if;
+  end loop;
+  p_state := p_state || jsonb_build_object(
+    'turn', v_next, 'phase', 'clue', 'clue', null, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb,
+    'guesses_left', 0, 'turn_found', 0, 'deadline', public._ndc_deadline(p_state->>'timer', 'clue'));
+  p_server := p_server || jsonb_build_object('first', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Dévoile la case p_idx pour l'équipe active, puis applique ses effets (manche gagnée, fin du tour…).
+create or replace function public._ndc_reveal(p_state jsonb, p_server jsonb, p_idx integer)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_c      text := p_server->'key'->>p_idx;
+  v_turn   text := p_state->>'turn';
+  v_voters text[];
+  v_v      text;
+  v_first  text := p_server->'first'->>p_idx::text;
+  v_teams  jsonb;
+  v_owner  jsonb;
+  v_alive  jsonb;
+begin
+  select coalesce(array_agg(key), '{}') into v_voters from jsonb_each_text(p_state->'votes') where value = p_idx::text;
+  foreach v_v in array v_voters loop
+    if v_c = 'bomb' then p_server := public._ndc_bump(p_server, v_v, 'bomb_votes', 1);
+    elsif v_c not in ('neutral', 'bomb') and v_c <> v_turn then p_server := public._ndc_bump(p_server, v_v, 'enemy_reveals', 1);
+    end if;
+  end loop;
+  if v_c = v_turn and v_first is not null then p_server := public._ndc_bump(p_server, v_first, 'first_good', 1); end if;
+
+  select jsonb_agg(case
+           when t->>'id' = v_c and v_c = v_turn then t || jsonb_build_object('found', (t->>'found')::integer + 1)
+           when t->>'id' = v_c then t || jsonb_build_object('found', (t->>'found')::integer + 1)
+           when v_c = 'bomb' and t->>'id' = v_turn then t || jsonb_build_object('eliminated', true)
+           else t end order by o)
+    into v_teams from jsonb_array_elements(p_state->'teams') with ordinality x(t, o);
+  p_state := p_state || jsonb_build_object(
+    'teams', v_teams,
+    'revealed', (p_state->'revealed') || jsonb_build_object(p_idx::text, jsonb_build_object('color', v_c, 'by', v_turn)),
+    'votes', '{}'::jsonb, 'stop', '[]'::jsonb);
+  p_server := p_server || jsonb_build_object('first', '{}'::jsonb);
+  if v_c = v_turn then
+    p_state := p_state || jsonb_build_object('turn_found', (p_state->>'turn_found')::integer + 1,
+                                             'guesses_left', (p_state->>'guesses_left')::integer - 1);
+  else
+    p_server := jsonb_set(p_server, array['team_err', v_turn], to_jsonb(coalesce((p_server->'team_err'->>v_turn)::integer, 0) + 1));
+  end if;
+
+  -- (a) l'équipe propriétaire du mot (non éliminée) a tout trouvé → elle gagne
+  select t into v_owner from jsonb_array_elements(v_teams) t where t->>'id' = v_c;
+  if v_owner is not null and not (v_owner->>'eliminated')::boolean
+     and (v_owner->>'found')::integer >= (v_owner->>'total')::integer then
+    return public._ndc_end_round(p_state, p_server, v_c, 'words');
+  end if;
+  -- (b) une seule équipe encore en jeu → elle gagne
+  select jsonb_agg(t) into v_alive from jsonb_array_elements(v_teams) t where not (t->>'eliminated')::boolean;
+  if jsonb_array_length(v_alive) = 1 then
+    return public._ndc_end_round(p_state, p_server, v_alive->0->>'id',
+                                 case when jsonb_array_length(v_teams) = 2 then 'bomb' else 'last_team' end);
+  end if;
+  -- (c)/(d) bombe, neutre, mot adverse ou plus d'essais → fin du tour
+  if v_c <> v_turn or (p_state->>'guesses_left')::integer <= 0 then
+    return public._ndc_end_turn(p_state, p_server);
+  end if;
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+create or replace function public.game_nom_de_code_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type  text := p_action->>'type';
+  v_phase text := p_state->>'phase';
+  v_me    text := p_actor::text;
+  v_team  jsonb;
+  v_spy   text;
+  v_guess boolean;
+  v_need  integer;
+  v_word  text;
+  v_n     numeric;
+  v_idx   integer;
+  v_cnt   integer;
+  v_stop  jsonb;
+  v_unchanged jsonb := jsonb_build_object('state', p_state, 'server', p_server);
+begin
+  select t into v_team from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_state->>'turn';
+  v_spy := v_team->>'spy';
+  v_guess := coalesce((v_team->'players') ? v_me, false) and v_me is distinct from v_spy;
+  v_need := (jsonb_array_length(coalesce(v_team->'players', '[]'::jsonb)) - 1) / 2 + 1;
+
+  -- ---------------------------------------------------------------- clue
+  if v_type = 'clue' then
+    if v_phase <> 'clue' then raise exception 'wrong_phase'; end if;
+    if v_me is distinct from v_spy then raise exception 'not_spy'; end if;
+    v_word := btrim(coalesce(p_action->>'word', ''));
+    v_n := case when jsonb_typeof(p_action->'n') = 'number' then (p_action->>'n')::numeric end;
+    if v_word = '' or v_word ~ '\s' or char_length(v_word) > 24 or public._normalize_word(v_word) = ''
+       or v_n is null or v_n <> trunc(v_n) or v_n < 1 or v_n > 9 then
+      raise exception 'invalid_clue';
+    end if;
+    if exists (select 1 from jsonb_array_elements_text(p_state->'words') with ordinality t(w, o)
+                where not ((p_state->'revealed') ? (o - 1)::text)
+                  and public._normalize_word(w) = public._normalize_word(v_word)) then
+      raise exception 'clue_is_grid_word';
+    end if;
+    p_state := p_state || jsonb_build_object(
+      'clue', jsonb_build_object('word', v_word, 'n', v_n::integer), 'guesses_left', v_n::integer + 1,
+      'turn_found', 0, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb, 'phase', 'guess',
+      'deadline', public._ndc_deadline(p_state->>'timer', 'guess'));
+    return jsonb_build_object('state', p_state, 'server', p_server || jsonb_build_object('first', '{}'::jsonb));
+
+  -- ---------------------------------------------------------------- vote
+  elsif v_type = 'vote' then
+    if v_phase <> 'guess' then raise exception 'wrong_phase'; end if;
+    if not v_guess then raise exception 'not_guesser'; end if;
+    if p_action->'index' is null or jsonb_typeof(p_action->'index') = 'null' then
+      return jsonb_build_object('state', p_state || jsonb_build_object('votes', (p_state->'votes') - v_me), 'server', p_server);
+    end if;
+    if jsonb_typeof(p_action->'index') <> 'number' then raise exception 'invalid_action'; end if;
+    v_idx := (p_action->>'index')::integer;
+    if v_idx < 0 or v_idx > 24 then raise exception 'invalid_action'; end if;
+    -- carte déjà dévoilée (deux votes simultanés) : ignoré sans erreur
+    if (p_state->'revealed') ? v_idx::text then return v_unchanged; end if;
+    p_state := p_state || jsonb_build_object('votes', (p_state->'votes') || jsonb_build_object(v_me, v_idx));
+    if not ((p_server->'first') ? v_idx::text) then
+      p_server := p_server || jsonb_build_object('first', coalesce(p_server->'first', '{}'::jsonb) || jsonb_build_object(v_idx::text, v_me));
+    end if;
+    select count(*) into v_cnt from jsonb_each_text(p_state->'votes') where value = v_idx::text;
+    if v_cnt >= v_need then return public._ndc_reveal(p_state, p_server, v_idx); end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- stop
+  elsif v_type = 'stop' then
+    if v_phase <> 'guess' then raise exception 'wrong_phase'; end if;
+    if not v_guess then raise exception 'not_guesser'; end if;
+    if (p_state->>'turn_found')::integer = 0 then raise exception 'stop_too_early'; end if;
+    if (p_state->'stop') ? v_me then
+      v_stop := (p_state->'stop') - v_me;
+    else
+      v_stop := (p_state->'stop') || jsonb_build_array(v_me);
+    end if;
+    p_state := p_state || jsonb_build_object('stop', v_stop);
+    if jsonb_array_length(v_stop) >= v_need then return public._ndc_end_turn(p_state, p_server); end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- tick
+  elsif v_type = 'tick' then
+    if v_phase in ('clue', 'guess') and jsonb_typeof(p_state->'deadline') = 'string'
+       and now() >= (p_state->>'deadline')::timestamptz then
+      if v_phase = 'clue' then p_server := public._ndc_bump(p_server, v_spy, 'idle_clue', 1); end if;
+      return public._ndc_end_turn(p_state, p_server);
+    end if;
+    return v_unchanged;
+
+  -- ---------------------------------------------------------------- skip (hôte)
+  elsif v_type = 'skip' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase not in ('clue', 'guess') then raise exception 'wrong_phase'; end if;
+    return public._ndc_end_turn(p_state, p_server);
+
+  else
+    raise exception 'unknown_action';
+  end if;
+end $$;
+
+revoke all on function public._ndc_bump(jsonb, text, text, integer) from public, anon, authenticated;
+revoke all on function public._ndc_end_round(jsonb, jsonb, text, text) from public, anon, authenticated;
+revoke all on function public._ndc_end_turn(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._ndc_reveal(jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.game_nom_de_code_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_shuffle(jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_deadline(text, text) from public, anon, authenticated;
 revoke all on function public._ndc_recent_spies(uuid[]) from public, anon, authenticated;

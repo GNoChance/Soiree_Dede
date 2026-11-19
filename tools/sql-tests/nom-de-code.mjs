@@ -90,5 +90,170 @@ ok('10 démarrages : aucun ancien espion repris', reused === 0, `repris ${reused
 await db.query(`update public.matches set finished_at = now() - interval '13 hours' where game_id = 'nom-de-code'`)
 ok('_ndc_recent_spies : rien après 12 h', (await db.query(`select public._ndc_recent_spies($1::uuid[]) r`, [`{${P.join(',')}}`])).rows[0].r.length === 0)
 
+// ----------------------------------------------------------------------------- tours (Task 2)
+const act = async (st, actor, isHost, action) => {
+  try {
+    const r = (await db.query(`select public.game_nom_de_code_action($1::jsonb, $2::jsonb, $3::uuid, $4, $5::jsonb) r`,
+      [JSON.stringify(st.state), JSON.stringify(st.server), actor, isHost, JSON.stringify(action)])).rows[0].r
+    return { r }
+  } catch (e) {
+    return { err: e.message }
+  }
+}
+const must = (res, label) => {
+  if (res.err) throw new Error(label + ' : ' + res.err)
+  return res.r
+}
+const team = (st, id) => st.state.teams.find((t) => t.id === id)
+const spyOf = (st, id = st.state.turn) => team(st, id).spy
+const guessersOf = (st, id = st.state.turn) => team(st, id).players.filter((p) => p !== team(st, id).spy)
+const idxOf = (st, color, k = 0) =>
+  st.server.key.map((c, i) => [c, i]).filter(([c, i]) => c === color && !(String(i) in st.state.revealed)).map(([, i]) => i)[k]
+const otherOf = (st) => st.state.teams.find((t) => t.id !== st.state.turn).id // à 2 équipes
+const giveClue = async (st, word = 'indice', n = 2) => must(await act(st, spyOf(st), false, { type: 'clue', word, n }), 'clue')
+/** Tous les devineurs de l'équipe active votent pour index (s'arrête au dévoilement). */
+const reveal = async (st, index) => {
+  let cur = st
+  for (const g of guessersOf(st)) {
+    cur = must(await act(cur, g, false, { type: 'vote', index }), 'vote')
+    if (String(index) in cur.state.revealed) break
+  }
+  return cur
+}
+const T6 = { red: P.slice(0, 3), blue: P.slice(3, 6) } // 1 espion + 2 devineurs → majorité 2 ; P[6] sur le banc
+const fresh = async (teams = T6, extra = {}, players = P.slice(0, 7)) => {
+  const s = must(await start(teams, extra, players), 'start')
+  return { state: s.state, server: s.server }
+}
+const past = (st) => ({ ...st, state: { ...st.state, deadline: new Date(Date.now() - 1000).toISOString() } })
+const BENCH = P[6]
+
+// indices
+let G = await fresh()
+const e = async (action, actor = spyOf(G), st = G) => (await act(st, actor, false, action)).err
+ok('indice vide → invalid_clue', (await e({ type: 'clue', word: '  ', n: 1 })) === 'invalid_clue')
+ok('deux mots → invalid_clue', (await e({ type: 'clue', word: 'gros chat', n: 2 })) === 'invalid_clue')
+ok('n = 0 ou 10 → invalid_clue', (await e({ type: 'clue', word: 'chat', n: 0 })) === 'invalid_clue' && (await e({ type: 'clue', word: 'chat', n: 10 })) === 'invalid_clue')
+ok('plus de 24 caractères → invalid_clue', (await e({ type: 'clue', word: 'a'.repeat(25), n: 1 })) === 'invalid_clue')
+ok('ponctuation seule → invalid_clue', (await e({ type: 'clue', word: '!!!', n: 1 })) === 'invalid_clue')
+ok('mot de la grille en majuscules → clue_is_grid_word', (await e({ type: 'clue', word: G.state.words[3].toUpperCase(), n: 1 })) === 'clue_is_grid_word')
+const GA = await fresh(T6, { words: ['éléphant', ...WORDS.slice(0, 24)] })
+ok('mot de la grille sans accents → clue_is_grid_word', (await act(GA, spyOf(GA), false, { type: 'clue', word: 'ELEPHANT', n: 1 })).err === 'clue_is_grid_word')
+const c1 = await giveClue(G, 'arc-en-ciel', 2)
+ok('mot à tiret hors grille accepté → phase guess, 3 essais', c1.state.phase === 'guess' && c1.state.clue.word === 'arc-en-ciel' && c1.state.clue.n === 2 && c1.state.guesses_left === 3)
+ok('phase guess : deadline ≈ +180 s', approxSeconds(c1.state.deadline, 180))
+ok('devineur qui donne l’indice → not_spy', (await e({ type: 'clue', word: 'chat', n: 1 }, guessersOf(G)[0])) === 'not_spy')
+ok('espion adverse qui donne l’indice → not_spy', (await e({ type: 'clue', word: 'chat', n: 1 }, spyOf(G, otherOf(G)))) === 'not_spy')
+ok('indice pendant les devinettes → wrong_phase', (await act(c1, spyOf(c1), false, { type: 'clue', word: 'chat', n: 1 })).err === 'wrong_phase')
+
+// rôles
+ok('espion qui vote → not_guesser', (await act(c1, spyOf(c1), false, { type: 'vote', index: 0 })).err === 'not_guesser')
+ok('joueur du banc qui vote → not_guesser', (await act(c1, BENCH, false, { type: 'vote', index: 0 })).err === 'not_guesser')
+ok('adversaire qui vote → not_guesser', (await act(c1, guessersOf(c1, otherOf(c1))[0], false, { type: 'vote', index: 0 })).err === 'not_guesser')
+ok('vote pendant la phase d’indice → wrong_phase', (await act(G, guessersOf(G)[0], false, { type: 'vote', index: 0 })).err === 'wrong_phase')
+
+// majorité
+const [g1, g2] = guessersOf(c1)
+const own = idxOf(c1, c1.state.turn)
+const own2 = idxOf(c1, c1.state.turn, 1)
+const v1 = must(await act(c1, g1, false, { type: 'vote', index: own }), 'v1')
+ok('1 tête sur 2 devineurs : pas de dévoilement', Object.keys(v1.state.revealed).length === 0 && v1.state.votes[g1] === own)
+const vNull = must(await act(v1, g1, false, { type: 'vote', index: null }), 'vNull')
+ok('retirer sa tête (index null)', !(g1 in vNull.state.votes))
+const vMove = must(await act(v1, g1, false, { type: 'vote', index: own2 }), 'vMove')
+ok('déplacer sa tête', vMove.state.votes[g1] === own2)
+const v2 = must(await act(v1, g2, false, { type: 'vote', index: own }), 'v2')
+ok('2e tête : dévoilé, votes vidés', v2.state.revealed[own]?.color === c1.state.turn && v2.state.revealed[own]?.by === c1.state.turn && Object.keys(v2.state.votes).length === 0)
+ok('bon mot : found+1, guesses_left-1, turn_found 1, toujours en guess',
+  team(v2, v2.state.turn).found === 1 && v2.state.guesses_left === 2 && v2.state.turn_found === 1 && v2.state.phase === 'guess')
+const vDone = await act(v2, g1, false, { type: 'vote', index: own })
+ok('vote sur carte dévoilée : ignoré sans erreur', vDone.err === undefined && JSON.stringify(vDone.r.state.revealed) === JSON.stringify(v2.state.revealed) && !(g1 in vDone.r.state.votes))
+ok('index hors grille → invalid_action', (await act(c1, g1, false, { type: 'vote', index: 25 })).err === 'invalid_action')
+const solo = await giveClue(await fresh({ red: P.slice(0, 2), blue: P.slice(2, 4) }, {}, P.slice(0, 4)))
+const soloIdx = idxOf(solo, solo.state.turn)
+const soloR = must(await act(solo, guessersOf(solo)[0], false, { type: 'vote', index: soloIdx }), 'solo')
+ok('équipe d’1 devineur : dévoilement immédiat', String(soloIdx) in soloR.state.revealed)
+
+// effets
+const nIdx = idxOf(c1, 'neutral')
+const neu = await reveal(c1, nIdx)
+ok('neutre : fin du tour → l’autre équipe en phase clue',
+  neu.state.revealed[nIdx]?.color === 'neutral' && neu.state.turn === otherOf(c1) && neu.state.phase === 'clue' && neu.state.clue === null)
+ok('fin du tour : deadline ≈ +120 s', approxSeconds(neu.state.deadline, 120))
+const enemy = otherOf(c1)
+const eIdx = idxOf(c1, enemy)
+const en = await reveal(c1, eIdx)
+ok('mot adverse : compte pour l’adversaire, fin du tour', team(en, enemy).found === 1 && team(en, c1.state.turn).found === 0 && en.state.turn === enemy && en.state.phase === 'clue')
+let lim = await giveClue(G, 'chat', 1)
+lim = await reveal(lim, idxOf(lim, lim.state.turn))
+ok('n = 1 : encore en guess après 1 bon mot', lim.state.phase === 'guess' && lim.state.guesses_left === 1)
+lim = await reveal(lim, idxOf(lim, lim.state.turn))
+ok('n + 1 essais puis fin du tour', lim.state.phase === 'clue' && lim.state.turn === otherOf(G) && team(lim, G.state.turn).found === 2)
+const bmb = await reveal(c1, idxOf(c1, 'bomb'))
+ok('bombe à 2 équipes : l’autre équipe gagne la manche (bomb)',
+  ['round_end', 'finished'].includes(bmb.state.phase) && bmb.state.round_winner === enemy && bmb.state.round_end_reason === 'bomb' && team(bmb, c1.state.turn).eliminated === true)
+ok('fin de manche : clé publique, deadline null', Array.isArray(bmb.state.key) && bmb.state.key.length === 25 && bmb.state.deadline === null)
+// dernier mot de l'adversaire dévoilé par l'équipe active → l'adversaire gagne
+const almost = { ...c1, state: { ...c1.state, teams: c1.state.teams.map((t) => (t.id === enemy ? { ...t, found: t.total - 1 } : t)) } }
+const gift = await reveal(almost, eIdx)
+ok('dernier mot d’une équipe dévoilé par l’adversaire → cette équipe gagne (words)', gift.state.round_winner === enemy && gift.state.round_end_reason === 'words')
+const allOwn = { ...c1, state: { ...c1.state, teams: c1.state.teams.map((t) => (t.id === c1.state.turn ? { ...t, found: t.total - 1 } : t)) } }
+const win = await reveal(allOwn, own)
+ok('dernier mot de son équipe → elle gagne (words)', win.state.round_winner === c1.state.turn && win.state.round_end_reason === 'words')
+
+// stop
+ok('stop avant tout dévoilement → stop_too_early', (await act(c1, g1, false, { type: 'stop' })).err === 'stop_too_early')
+const st1 = must(await act(v2, g1, false, { type: 'stop' }), 'st1')
+ok('1 stop sur 2 : on continue', st1.state.phase === 'guess' && st1.state.stop.includes(g1))
+const stOff = must(await act(st1, g1, false, { type: 'stop' }), 'stOff')
+ok('re-stop : retire son stop', !stOff.state.stop.includes(g1))
+const st2 = must(await act(st1, g2, false, { type: 'stop' }), 'st2')
+ok('stop à la majorité → fin du tour', st2.state.phase === 'clue' && st2.state.turn === otherOf(v2))
+ok('stop par l’espion → not_guesser', (await act(v2, spyOf(v2), false, { type: 'stop' })).err === 'not_guesser')
+
+// chrono
+const tk0 = must(await act(G, P[0], false, { type: 'tick' }), 'tk0')
+ok('tick avant échéance : inchangé', tk0.state.phase === 'clue' && tk0.state.turn === G.state.turn)
+const tk1 = must(await act(past(G), P[0], false, { type: 'tick' }), 'tk1')
+ok('tick indice échu : tour suivant + idle_clue', tk1.state.turn === otherOf(G) && tk1.state.phase === 'clue' && tk1.server.stats[spyOf(G)].idle_clue === 1)
+const tk2 = must(await act(past(c1), P[0], false, { type: 'tick' }), 'tk2')
+ok('tick devinettes échu : fin du tour (sans idle_clue)', tk2.state.turn === otherOf(c1) && tk2.state.phase === 'clue' && tk2.server.stats[spyOf(c1)].idle_clue === 0)
+const tk3 = must(await act(tk1, P[0], false, { type: 'tick' }), 'tk3')
+ok('tick rejoué : idempotent', tk3.state.turn === tk1.state.turn && tk3.server.stats[spyOf(G)].idle_clue === 1)
+const relaxed = await fresh(T6, { timer: 'relaxed' })
+const tkR = must(await act({ ...relaxed, state: { ...relaxed.state } }, P[0], false, { type: 'tick' }), 'tkR')
+ok('relaxed : tick ne fait rien', tkR.state.turn === relaxed.state.turn && tkR.state.phase === 'clue' && tkR.state.deadline === null)
+
+// skip (hôte)
+ok('skip par un non-hôte → not_host', (await act(G, P[1], false, { type: 'skip' })).err === 'not_host')
+const sk1 = must(await act(G, P[1], true, { type: 'skip' }), 'sk1')
+ok('skip en phase clue : équipe suivante, sans idle_clue', sk1.state.turn === otherOf(G) && sk1.state.phase === 'clue' && sk1.server.stats[spyOf(G)].idle_clue === 0)
+const sk2 = must(await act(c1, P[1], true, { type: 'skip' }), 'sk2')
+ok('skip en phase guess : fin du tour', sk2.state.turn === otherOf(c1) && sk2.state.phase === 'clue')
+ok('skip en fin de manche → wrong_phase', (await act(bmb, P[1], true, { type: 'skip' })).err === 'wrong_phase' || bmb.state.phase === 'finished')
+ok('action inconnue → unknown_action', (await act(G, P[1], true, { type: 'danse' })).err === 'unknown_action')
+
+// élimination (3 équipes de 2 : 1 espion + 1 devineur)
+const T3 = { red: P.slice(0, 2), blue: P.slice(2, 4), green: P.slice(4, 6) }
+let E3 = await giveClue(await fresh(T3, {}, P.slice(0, 6)))
+const first = E3.state.turn
+const order = ['red', 'blue', 'green']
+const nextOf = (t, skip = []) => { let i = order.indexOf(t); do { i = (i + 1) % 3 } while (skip.includes(order[i])); return order[i] }
+E3 = await reveal(E3, idxOf(E3, 'bomb'))
+ok('bombe à 3 équipes : équipe éliminée, les autres continuent', team(E3, first).eliminated && E3.state.phase === 'clue' && E3.state.turn === nextOf(first))
+const second = E3.state.turn
+E3 = await reveal(await giveClue(E3), idxOf(E3, 'neutral'))
+ok('le tour saute l’équipe éliminée', E3.state.turn === nextOf(second, [first]) && E3.state.turn !== first)
+// les mots de l'équipe éliminée sont dévoilés par une autre équipe : elle ne gagne pas
+const elimAlmost = { ...E3, state: { ...E3.state, teams: E3.state.teams.map((t) => (t.id === first ? { ...t, found: t.total - 1 } : t)) } }
+const elimLast = await reveal(await giveClue(elimAlmost), idxOf(elimAlmost, first))
+ok('mots de l’équipe éliminée tous dévoilés : elle ne gagne pas', elimLast.state.phase === 'clue' && elimLast.state.round_winner === null)
+// une 2e équipe éliminée (manipulée) → la dernière équipe en jeu gagne
+const two = await giveClue(await fresh(T3, {}, P.slice(0, 6)))
+const elimOne = { ...two, state: { ...two.state, teams: two.state.teams.map((t) => (t.id === nextOf(two.state.turn) ? { ...t, eliminated: true } : t)) } }
+const lastTeam = await reveal(elimOne, idxOf(elimOne, 'bomb'))
+const survivor = order.find((t) => t !== two.state.turn && t !== nextOf(two.state.turn))
+ok('dernière équipe en jeu → gagne (last_team)', lastTeam.state.round_winner === survivor && lastTeam.state.round_end_reason === 'last_team')
+
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)
