@@ -175,6 +175,13 @@ const soloIdx = idxOf(solo, solo.state.turn)
 const soloR = must(await act(solo, guessersOf(solo)[0], false, { type: 'vote', index: soloIdx }), 'solo')
 ok('équipe d’1 devineur : dévoilement immédiat', String(soloIdx) in soloR.state.revealed)
 
+// course : vote tardif sur la carte qui vient de finir le tour → ignoré sans erreur
+const lateNeu = await reveal(c1, idxOf(c1, 'neutral', 1))
+const late = await act(lateNeu, g2, false, { type: 'vote', index: idxOf(c1, 'neutral', 1) })
+ok('vote tardif sur carte dévoilée après fin du tour : ignoré sans erreur', late.err === undefined && late.r.state.turn === lateNeu.state.turn, late.err)
+const lateStop = await act(lateNeu, g2, false, { type: 'stop' })
+ok('stop tardif après fin du tour : ignoré sans erreur', lateStop.err === undefined && lateStop.r.state.phase === 'clue', lateStop.err)
+
 // effets
 const nIdx = idxOf(c1, 'neutral')
 const neu = await reveal(c1, nIdx)
@@ -261,6 +268,7 @@ const STAT_KEYS = ['bomb_votes', 'idle_clue', 'enemy_reveals', 'first_good', 'be
 const res = (st, pid) => st.results.find((x) => x.profile_id === pid)
 // rounds one : manche gagnée → fin de partie
 ok('rounds one : victoire → phase finished + results', win.state.phase === 'finished' && Array.isArray(win.results), win.state.phase)
+ok('state.results recopié (écran de résultats)', Array.isArray(win.state.results) && win.state.results.length === win.results.length && win.state.results.some((x) => x.won))
 ok('results : membres d’équipe seulement, banc exclu', sameSet(win.results.map((x) => x.profile_id), win.state.players) && !win.results.some((x) => x.profile_id === BENCH))
 const winner = win.state.round_winner
 const loser = win.state.teams.find((t) => t.id !== winner).id

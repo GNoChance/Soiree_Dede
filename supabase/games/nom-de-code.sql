@@ -246,7 +246,8 @@ begin
            'stats', coalesce(p_server->'stats'->m, '{}'::jsonb))), '[]'::jsonb)
     into v_results
     from r, jsonb_array_elements_text(r.players) m;
-  p_state := p_state || jsonb_build_object('phase', 'finished', 'winners',
+  -- results aussi dans le state public : l'écran de résultats commun lit state.results
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'results', v_results, 'winners',
     (select jsonb_agg(x->>'id') from jsonb_array_elements(p_state->'teams') x
       where coalesce((p_state->'round_wins'->>(x->>'id'))::integer, 0)
           = (select max(coalesce((p_state->'round_wins'->>(y->>'id'))::integer, 0)) from jsonb_array_elements(p_state->'teams') y)));
@@ -422,6 +423,10 @@ begin
 
   -- ---------------------------------------------------------------- vote
   elsif v_type = 'vote' then
+    -- carte déjà dévoilée (vote simultané, y compris celui qui a fini le tour) : ignoré sans erreur
+    if jsonb_typeof(p_action->'index') = 'number' and (p_state->'revealed') ? (p_action->>'index') then
+      return v_unchanged;
+    end if;
     if v_phase <> 'guess' then raise exception 'wrong_phase'; end if;
     if not v_guess then raise exception 'not_guesser'; end if;
     if p_action->'index' is null or jsonb_typeof(p_action->'index') = 'null' then
@@ -430,8 +435,6 @@ begin
     if jsonb_typeof(p_action->'index') <> 'number' then raise exception 'invalid_action'; end if;
     v_idx := (p_action->>'index')::integer;
     if v_idx < 0 or v_idx > 24 then raise exception 'invalid_action'; end if;
-    -- carte déjà dévoilée (deux votes simultanés) : ignoré sans erreur
-    if (p_state->'revealed') ? v_idx::text then return v_unchanged; end if;
     p_state := p_state || jsonb_build_object('votes', (p_state->'votes') || jsonb_build_object(v_me, v_idx));
     if not ((p_server->'first') ? v_idx::text) then
       p_server := p_server || jsonb_build_object('first', coalesce(p_server->'first', '{}'::jsonb) || jsonb_build_object(v_idx::text, v_me));
@@ -442,7 +445,8 @@ begin
 
   -- ---------------------------------------------------------------- stop
   elsif v_type = 'stop' then
-    if v_phase <> 'guess' then raise exception 'wrong_phase'; end if;
+    -- stop tardif (le tour vient de finir) : ignoré sans erreur
+    if v_phase <> 'guess' then return v_unchanged; end if;
     if not v_guess then raise exception 'not_guesser'; end if;
     if (p_state->>'turn_found')::integer = 0 then raise exception 'stop_too_early'; end if;
     if (p_state->'stop') ? v_me then
