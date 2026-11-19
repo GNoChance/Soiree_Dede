@@ -520,6 +520,24 @@ Compteurs dans `results[].stats` (`_mg_tstats`). Calculés par le serveur depuis
 | 11 | `mg_sans_bavure` | Sans bavure | 9 trous sans jamais dépasser le par | `clean_card` (max ≥ 1) ✅ |
 | 12 | `mg_legende` | Légende du green | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
 
+### Animateur Télé 🎤 — Dédé Party (`dede-party`)
+
+Tenue débloquée à **5 victoires** (partie longue). Compteurs posés par le serveur dans `state.stats` puis recopiés dans `results[].stats` (`_dp_tstats`) : `pubs` (arrêts sur une Page de pub), `broke` (1 si le joueur est tombé à 0 pièce sur une perte : pub, carte, pickpocket, Téléthon — pas sur un achat d'étoile), `no_star` (0 étoile à la fin, étoiles bonus comprises), `coins_earned` (pièces gagnées, pertes non déduites), `envelopes` (cartes tirées), `star_exact` (étoile achetée sur la dernière case d'un déplacement), `mg_streak` (plus longue série de mini-jeux gagnés, 1re place ex aequo comprise), `stars`, `win_mvp` (vainqueur ET Roi des mini-jeux). Aussi posés : `coins`, `mg_wins`, `rounds`.
+
+| Slot | id | Nom | Condition | Compteur |
+|---|---|---|---|---|
+| 2 | `party_coupure_pub` | Coupure pub | S'arrêter sur 3 Pages de pub en une partie | `pubs` (max ≥ 3) ✅ |
+| 3 | `party_fauche` | Fauché | Tomber à 0 pièce | `broke` (somme ≥ 1) ✅ |
+| 4 | `party_ciel_couvert` | Ciel couvert | Finir une partie sans aucune étoile | `no_star` (somme ≥ 1) ✅ |
+| 5 | `party_fidele` | Fidèle au poste | Jouer 5 parties (cumul) | nombre de parties ≥ 5 ✅ |
+| 6 | `party_tirelire` | Tirelire | Gagner 300 pièces (cumul) | `coins_earned` (somme ≥ 300) ✅ |
+| 7 | `party_chouchou` | Chouchou de Dédé | Ouvrir 10 enveloppes surprise (cumul) | `envelopes` (somme ≥ 10) ✅ |
+| 8 | `party_pile_dessus` | Pile dessus | Acheter une étoile en s'arrêtant exactement sur sa case | `star_exact` (somme ≥ 1) ✅ |
+| 9 | `party_triple` | Le triplé | Gagner 3 mini-jeux d'affilée | `mg_streak` (max ≥ 3) ✅ |
+| 10 | `party_constellation` | Constellation | Finir une partie avec 3 étoiles ou plus | `stars` (max ≥ 3) ✅ |
+| 11 | `party_carton_plein` | Carton plein | Gagner la partie en étant aussi Roi des mini-jeux | `win_mvp` (somme ≥ 1) ✅ |
+| 12 | `party_star_ecran` | Star du petit écran | Gagner 10 parties (cumul) | `won` (somme ≥ 10) ✅ |
+
 ## 3. Trophées généraux (facultatifs)
 
 Transverses, sans sticker de planche : récompense proposée = badge sur le profil + XP. `tenue_id` et `slot` nuls dans le catalogue.

@@ -28,6 +28,7 @@ const OPTIONS = {
   'loup-garou': {},
   menteur: {},
   'mini-golf': {},
+  'dede-party': { rounds: 9, quiz: n(3, (i) => ({ prompt: 'Capitale de la France ? (' + i + ')', answer: 'Paris', distractors: ['Lyon', 'Nice', 'Lille'] })), pif: [{ prompt: 'Combien de jours dans une année ?', answer: 365, unit: 'jours' }], majorite: ['Qui de nous ronfle le plus ?'] },
   echecs: { mode: 'duel', board: { cadence: 'rapid5' } },
   morpion: {},
   'pas-de-bol': {},

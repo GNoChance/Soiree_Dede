@@ -126,6 +126,10 @@ const MESSAGES: Record<string, string> = {
   // Mini-golf
   wrong_hole: 'Ce trou est déjà terminé : place au suivant !',
   invalid_strokes: 'Nombre de coups invalide.',
+  // Dédé Party
+  already_rolled: 'Tu as déjà lancé ton dé pour ce tour !',
+  no_double_left: 'Plus de Double dé : il a déjà servi !',
+  invalid_submit: 'Réponse non reconnue, réessaie !',
   // Échecs
   promotion_required: 'Choisis la pièce de ta promotion !',
   no_draw_offer: 'Personne ne t’a proposé nul.',
