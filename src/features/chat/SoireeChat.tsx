@@ -91,7 +91,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
     () => [
       ...tenuePalette(me.slug, me.equippedTenue).filter((e) =>
         inTenue
-          ? slotUnlocked(stickerSlot(e), trophyUnlocks, trophyForSlot(me.equippedTenue, stickerSlot(e))?.id)
+          ? slotUnlocked(stickerSlot(me.slug, me.equippedTenue, e), trophyUnlocks, trophyForSlot(me.equippedTenue, stickerSlot(me.slug, me.equippedTenue, e))?.id)
           : e === 'joie' || EXPRESSIONS[e as ExpressionId]?.default || unlocks[e as ExpressionId],
       ),
       ...tenueExtras(me.slug, me.equippedTenue).map((x) => x.id),
@@ -168,7 +168,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
                     key={e}
                     type="button"
                     disabled={sending}
-                    onClick={() => void send('sticker', e, inTenue ? stickerSlot(e) : undefined)}
+                    onClick={() => void send('sticker', e, inTenue ? stickerSlot(me.slug, me.equippedTenue, e) : undefined)}
                     aria-label={`Envoyer le sticker ${e}`}
                     className="grid place-items-center rounded-chip p-1 active:scale-90"
                   >

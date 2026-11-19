@@ -489,3 +489,127 @@ export const TENUE_ART_BAD: readonly string[] = [
   'nini/actor/determine',
   'nini/coach/determine',
 ]
+
+// Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
+export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "carole/actor": {
+    "pouces": "charmee"
+  },
+  "carole/tictactoe": {
+    "pouces": "charmee"
+  },
+  "carole/strategist": {
+    "pouces": "charmee"
+  },
+  "carole/bowler": {
+    "pouces": "charmee"
+  },
+  "carole/werewolf": {
+    "pouces": "charmee"
+  },
+  "carole/teacher": {
+    "pouces": "charmee"
+  },
+  "carole/star": {
+    "pouces": "charmee"
+  },
+  "carole/racer": {
+    "pouces": "charmee"
+  },
+  "carole/tycoon": {
+    "pouces": "charmee"
+  },
+  "carole/admiral": {
+    "pouces": "charmee"
+  },
+  "cycy/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "marius/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  }
+};

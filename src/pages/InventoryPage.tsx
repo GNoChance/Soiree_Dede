@@ -67,10 +67,10 @@ export function InventoryPage() {
 
   const tenue = profile.equipped_tenue ?? 'default'
   const tenueDef = wornTenue ? getTenue(tenue) : undefined
-  const trophyOf = (id: string) => (tenueDef ? trophyForSlot(tenue, stickerSlot(id)) : undefined)
+  const trophyOf = (id: string) => (tenueDef ? trophyForSlot(tenue, stickerSlot(profile.slug, tenue, id)) : undefined)
   const isUnlocked = (id: string) =>
     tenueDef
-      ? slotUnlocked(stickerSlot(id), trophyUnlocks, trophyOf(id)?.id)
+      ? slotUnlocked(stickerSlot(profile.slug, tenue, id), trophyUnlocks, trophyOf(id)?.id)
       : Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
   const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
   const unlockedCount = all.filter(isUnlocked).length
@@ -97,7 +97,7 @@ export function InventoryPage() {
     try {
       const { data, error } = await supabase.rpc(
         'equip_expression',
-        tenueDef ? { p_expression: id as ExpressionId, p_slot: stickerSlot(id) } : { p_expression: id as ExpressionId },
+        tenueDef ? { p_expression: id as ExpressionId, p_slot: stickerSlot(profile.slug, tenue, id) } : { p_expression: id as ExpressionId },
       )
       if (error) throw error
       patchProfile(data)

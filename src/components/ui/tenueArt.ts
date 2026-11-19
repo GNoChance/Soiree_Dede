@@ -3,7 +3,7 @@ import { getCharacter } from '@/data/characters'
 import { COSTUME_EXPRESSIONS, expressionIn } from '@/data/expressions'
 import { DEFAULT_TENUE, getTenue } from '@/data/tenues'
 import { tenueExtrasOf } from '@/data/tenue-extras'
-import { TENUE_ART, TENUE_ART_BAD, TENUE_PORTRAITS } from '@/data/tenues-art.generated'
+import { TENUE_ART, TENUE_ART_BAD, TENUE_ART_FILL, TENUE_PORTRAITS } from '@/data/tenues-art.generated'
 
 /**
  * Disponibilité des illustrations de tenue.
@@ -42,11 +42,25 @@ export function tenuePortraitUrl(slug: string, tenue: string, thumb = false): st
   return `/chibis/${slug}/portraits/${dir}${thumb ? '@thumb' : ''}.webp`
 }
 
+/**
+ * Les 12 cases d'une planche de tenue : case i = COSTUME_EXPRESSIONS[i] si elle est dessinée, sinon le
+ * sticker hors liste qui la remplace (amoureux, cool, gamer… cf. TENUE_ART_FILL), sinon null (case vide).
+ */
+function tenueSlots(slug: string, dir: string): readonly (string | null)[] {
+  const fill = TENUE_ART_FILL[key(slug, dir)]
+  return COSTUME_EXPRESSIONS.map((e) => (bad.has(`${slug}/${dir}/${e}`) ? (fill?.[e] ?? null) : e))
+}
+
+/** Planche de la tenue portée (dossier), ou undefined si pas d'illustration (planche de base). */
+function wornDir(slug: string, tenue: string): string | undefined {
+  return tenue !== DEFAULT_TENUE && hasTenueArt(slug, tenue) ? tenueArtDir(tenue, slug) : undefined
+}
+
 /** Expressions dessinées pour ce perso dans cette tenue (tenue sans illustration -> planche de base). */
 export function tenuePalette(slug: string, tenue: string): readonly string[] {
-  if (tenue === DEFAULT_TENUE || !hasTenueArt(slug, tenue)) return getCharacter(slug)?.expressions ?? ['joie']
-  const dir = tenueArtDir(tenue, slug)!
-  return COSTUME_EXPRESSIONS.filter((e) => !bad.has(`${slug}/${dir}/${e}`))
+  const dir = wornDir(slug, tenue)
+  if (!dir) return getCharacter(slug)?.expressions ?? ['joie']
+  return tenueSlots(slug, dir).filter((e): e is string => e !== null)
 }
 
 /** Stickers bonus de la tenue portée (hors liste standard), vide si aucun. */
@@ -60,16 +74,18 @@ export function tenueExtras(slug: string, tenue: string) {
  * (COSTUME_EXPRESSIONS) ; `extraN` = 12 + N (stickers bonus, offerts avec la tenue) ; 0 = inconnu.
  * Le slot 1 (joie) est offert avec la tenue, les slots 2..12 se gagnent avec le trophée (tenue, slot).
  */
-export function stickerSlot(id: string): number {
-  const i = (COSTUME_EXPRESSIONS as readonly string[]).indexOf(id)
-  if (i >= 0) return i + 1
+export function stickerSlot(slug: string, tenue: string, id: string): number {
   const m = /^extra([0-9]+)$/.exec(id)
-  return m ? 12 + Number(m[1]) : 0
+  if (m) return 12 + Number(m[1])
+  const dir = wornDir(slug, tenue)
+  return (dir ? tenueSlots(slug, dir) : (COSTUME_EXPRESSIONS as readonly string[])).indexOf(id) + 1
 }
 
 /** Sticker (id d'expression) de rang `slot` dans la planche de ce perso pour cette tenue, ou null s'il n'existe pas. */
 export function tenueStickerAt(slug: string, tenue: string, slot: number): string | null {
   if (slot > 12) return tenueExtras(slug, tenue)[slot - 13]?.id ?? null
+  const dir = wornDir(slug, tenue)
+  if (dir) return tenueSlots(slug, dir)[slot - 1] ?? null
   const e = COSTUME_EXPRESSIONS[slot - 1]
   return e && tenuePalette(slug, tenue).includes(e) ? e : null
 }

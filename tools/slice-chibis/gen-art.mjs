@@ -17,7 +17,10 @@ const BAD = [
 ];
 
 const EXPR = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine'.split(' ');
+// Stickers dessinés hors liste standard (planches récentes) : ils comblent, dans l'ordre, les cases vides de la planche.
+const SUBS = ['amoureux', 'cool', 'gamer', 'charmee'];
 const art = [];
+const fill = {}; // "slug/dossier" -> { expression absente: sticker qui prend sa case }
 const portraits = [];
 const extras = {}; // "slug/dossier" -> nombre de stickers bonus (extra1..extraN)
 for (const slug of Object.keys(manifest).sort()) {
@@ -29,6 +32,10 @@ for (const slug of Object.keys(manifest).sort()) {
     if (n) extras[`${slug}/${c}`] = n;
     // expressions non dessinées sur la planche : écartées (repli sur une voisine)
     for (const e of EXPR) if (!fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, `${e}.webp`)) && !BAD.includes(`${slug}/${c}/${e}`)) BAD.push(`${slug}/${c}/${e}`);
+    const holes = EXPR.filter((e) => BAD.includes(`${slug}/${c}/${e}`));
+    const subs = SUBS.filter((e) => fs.existsSync(path.join(ROOT, 'public/chibis', slug, c, `${e}.webp`)));
+    const f = Object.fromEntries(holes.slice(0, subs.length).map((e, i) => [e, subs[i]]));
+    if (Object.keys(f).length) fill[`${slug}/${c}`] = f;
   }
   for (const c of manifest[slug].portraits ?? []) {
     if (fs.existsSync(path.join(ROOT, 'public/chibis', slug, 'portraits', c + '.webp'))) portraits.push(`${slug}/${c}`);
@@ -52,5 +59,8 @@ fs.writeFileSync(path.join(ROOT, 'src/data/tenues-art.generated.ts'), [
   '// "slug/dossier/expression" ratés au découpage : repli sur une expression voisine.',
   list('TENUE_ART_BAD', BAD),
   '',
+  '// Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.',
+  'export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, string>>>> = ' + JSON.stringify(fill, null, 2) + ';',
+  '',
 ].join('\n'));
-console.log(`tenues-art.generated.ts : ${art.length} tenues, ${portraits.length} portraits, ${BAD.length} stickers écartés`);
+console.log(`tenues-art.generated.ts : ${art.length} tenues, ${portraits.length} portraits, ${BAD.length} stickers écartés, ${Object.values(fill).reduce((n, f) => n + Object.keys(f).length, 0)} cases comblées`);
