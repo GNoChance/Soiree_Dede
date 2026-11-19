@@ -96,7 +96,27 @@
     ]
   },
   "dede": {
-    "costumes": [],
+    "costumes": [
+      "star",
+      "spy",
+      "croupier",
+      "teacher",
+      "student",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "bowler",
+      "philosopher",
+      "cinema",
+      "archer",
+      "actor",
+      "coach",
+      "strategist",
+      "tictactoe",
+      "admiral",
+      "racer"
+    ],
     "portraits": []
   },
   "kevin": {

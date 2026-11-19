@@ -41,6 +41,25 @@ export const TENUE_ART: readonly string[] = [
   'cycy/teacher',
   'cycy/student',
   'cycy/racer',
+  'dede/star',
+  'dede/spy',
+  'dede/croupier',
+  'dede/teacher',
+  'dede/student',
+  'dede/painter',
+  'dede/werewolf',
+  'dede/pyro',
+  'dede/pirate',
+  'dede/bowler',
+  'dede/philosopher',
+  'dede/cinema',
+  'dede/archer',
+  'dede/actor',
+  'dede/coach',
+  'dede/strategist',
+  'dede/tictactoe',
+  'dede/admiral',
+  'dede/racer',
   'kevin/spy',
   'kevin/cinema',
   'kevin/student',
@@ -332,6 +351,63 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cycy/racer/pouces',
   'cycy/racer/timide',
   'cycy/racer/determine',
+  'dede/star/pouces',
+  'dede/star/timide',
+  'dede/star/determine',
+  'dede/spy/pouces',
+  'dede/spy/timide',
+  'dede/spy/determine',
+  'dede/croupier/pouces',
+  'dede/croupier/timide',
+  'dede/croupier/determine',
+  'dede/teacher/pouces',
+  'dede/teacher/timide',
+  'dede/teacher/determine',
+  'dede/student/pouces',
+  'dede/student/timide',
+  'dede/student/determine',
+  'dede/painter/pouces',
+  'dede/painter/timide',
+  'dede/painter/determine',
+  'dede/werewolf/pouces',
+  'dede/werewolf/timide',
+  'dede/werewolf/determine',
+  'dede/pyro/pouces',
+  'dede/pyro/timide',
+  'dede/pyro/determine',
+  'dede/pirate/pouces',
+  'dede/pirate/timide',
+  'dede/pirate/determine',
+  'dede/bowler/pouces',
+  'dede/bowler/timide',
+  'dede/bowler/determine',
+  'dede/philosopher/pouces',
+  'dede/philosopher/timide',
+  'dede/philosopher/determine',
+  'dede/cinema/pouces',
+  'dede/cinema/timide',
+  'dede/cinema/determine',
+  'dede/archer/pouces',
+  'dede/archer/timide',
+  'dede/archer/determine',
+  'dede/actor/pouces',
+  'dede/actor/timide',
+  'dede/actor/determine',
+  'dede/coach/pouces',
+  'dede/coach/timide',
+  'dede/coach/determine',
+  'dede/strategist/pouces',
+  'dede/strategist/timide',
+  'dede/strategist/determine',
+  'dede/tictactoe/pouces',
+  'dede/tictactoe/timide',
+  'dede/tictactoe/determine',
+  'dede/admiral/pouces',
+  'dede/admiral/timide',
+  'dede/admiral/determine',
+  'dede/racer/pouces',
+  'dede/racer/timide',
+  'dede/racer/determine',
   'kevin/spy/pouces',
   'kevin/spy/timide',
   'kevin/spy/determine',
@@ -712,6 +788,101 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cycy/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/spy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/croupier": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/painter": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/werewolf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/pyro": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/pirate": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/philosopher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/cinema": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/archer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/actor": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/coach": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/racer": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
