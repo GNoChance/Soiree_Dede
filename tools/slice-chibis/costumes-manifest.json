@@ -405,7 +405,11 @@
       "admiral",
       "bowler",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "racer",
@@ -428,7 +432,9 @@
       "croupier",
       "spy",
       "star",
-      "hacker"
+      "hacker",
+      "cowboy",
+      "host"
     ]
   }
 }
