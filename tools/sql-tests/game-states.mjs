@@ -1,4 +1,4 @@
-// Génère un VRAI état public de départ pour chacun des 20 jeux (fonctions SQL game_<id>_start sur install.sql, PGlite)
+// Génère un VRAI état public de départ pour chacun des jeux (fonctions SQL game_<id>_start sur install.sql, PGlite)
 // → tools/sql-tests/out/states.json, lu par la page locale d'audit du mode spectateur (src/pages/SpectateAuditPage.tsx).
 // Usage : node game-states.mjs ../../supabase/install.sql
 import fs from 'node:fs'
@@ -27,6 +27,7 @@ const OPTIONS = {
   'le-plus-proche': { questions: n(4, (i) => ({ id: 'e' + i, theme: 'divers', difficulty: 1, prompt: 'Combien de jours dans une année ? (' + i + ')', answer: 365, unit: 'jours' })) },
   'loup-garou': {},
   menteur: {},
+  echecs: { mode: 'duel', board: { cadence: 'rapid5' } },
   morpion: {},
   'pas-de-bol': {},
   'nom-de-code': { teams: { red: ids.slice(0, 3), blue: ids.slice(3, 6) }, rounds: 'one', timer: 'normal', words: n(25, (i) => 'mot' + i) },
@@ -60,4 +61,4 @@ for (const fn of fns) {
 fs.mkdirSync(new URL('./out/', import.meta.url), { recursive: true })
 fs.writeFileSync(new URL('./out/states.json', import.meta.url), JSON.stringify(out))
 console.log(`\n${okCount}/${fns.length} jeux`)
-process.exit(okCount === 20 ? 0 : 1)
+process.exit(okCount === fns.length ? 0 : 1)

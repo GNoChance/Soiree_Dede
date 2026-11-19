@@ -21,11 +21,12 @@
 -- (id '4-a-b' -> préfixe game_4_a_b_ ; joueurs = uuid en TEXTE)
 --  * game_<id>_board_new(p_ctx jsonb, p_a text, p_b text) returns jsonb   [obligatoire]
 --      p_ctx = {duel_no, game_no, a, b, starter, options}  (options = p_options.board)
---      -> {board: {...public}, server?: any, secrets?: {"<uid>": any}, setup_seconds?: int}
+--      -> {board: {...public}, server?: any, secrets?: {"<uid>": any}, setup_seconds?: int, turn_seconds?: number}
 --  * game_<id>_board_move(p_board jsonb, p_server jsonb, p_actor text, p_move jsonb) returns jsonb [obligatoire]
 --      lève une erreur métier si le coup est illégal (invalid_move, column_full…)
---      -> {board, server?, secrets?, outcome: null|'win'|'draw', winner?: uid, turn?: uid}
---      (turn absent = alternance ; server absent = inchangé)
+--      -> {board, server?, secrets?, outcome: null|'win'|'draw', winner?: uid, turn?: uid, turn_seconds?: number}
+--      (turn absent = alternance ; server absent = inchangé ; turn_seconds = durée du prochain coup,
+--       absent = session.turn_seconds — ex. échecs : temps restant à la pendule du joueur au trait)
 --  * game_<id>_board_auto(p_board jsonb, p_server jsonb, p_actor text) returns jsonb [obligatoire]
 --      -> un coup LÉGAL tiré au hasard (même format que p_move), rejoué via board_move.
 --  * game_<id>_board_setup(p_board jsonb, p_server jsonb, p_actor text, p_move jsonb) returns jsonb [optionnel]
@@ -33,7 +34,11 @@
 --      Appelé avec : un coup de préparation du jeu ({type:'setup', move} côté client) ;
 --      {"type":"ready"} (valider, lever setup_incomplete si besoin) ; {"type":"auto"}
 --      (compléter AU HASARD la préparation de p_actor, à l'échéance) ; {"type":"begin"}
---      avec p_actor NULL (les deux sont prêts : passer au jeu). -> {board, server?, secrets?}
+--      avec p_actor NULL (les deux sont prêts : passer au jeu). -> {board, server?, secrets?, turn_seconds?}
+--  * game_<id>_board_offturn(p_board jsonb, p_server jsonb, p_actor text, p_move jsonb) returns jsonb [optionnel]
+--      Coup d'un duelliste HORS de son tour (ex. abandon aux échecs). Même retour que board_move ;
+--      lever not_your_turn pour refuser. outcome null = plateau mis à jour, tour et échéance inchangés.
+--      Hook absent = not_your_turn (comportement historique).
 --
 -- server (match_server_state) : {"board": <server du jeu>} — le jeu ne voit que sa part.
 -- Secrets : upsert par game_action ; inclure duel_no/game_no dans le secret pour que
@@ -141,6 +146,16 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- utilitaires
+
+-- Durée du prochain coup : turn_seconds renvoyé par un hook (nombre > 0), sinon session.turn_seconds (défaut 30).
+create or replace function public._duel_turn_secs(p_r jsonb, p_state jsonb)
+returns numeric language sql immutable
+set search_path = public, extensions
+as $$
+  select case when jsonb_typeof(p_r->'turn_seconds') = 'number' and (p_r->>'turn_seconds')::numeric > 0
+              then least((p_r->>'turn_seconds')::numeric, 86400)
+              else coalesce((p_state->'session'->>'turn_seconds')::numeric, 30) end;
+$$;
 
 create or replace function public._duel_other(p_duel jsonb, p text)
 returns text language sql immutable
@@ -361,7 +376,8 @@ begin
     v_state := v_state || jsonb_build_object('phase', 'setup', 'deadline', public._duel_in(v_setup));
   else
     v_d := v_d || jsonb_build_object('turn', v_starter);
-    v_state := v_state || jsonb_build_object('phase', 'playing', 'deadline', public._duel_in(v_secs));
+    v_state := v_state || jsonb_build_object('phase', 'playing',
+                 'deadline', public._duel_in(public._duel_turn_secs(v_r, jsonb_build_object('session', jsonb_build_object('turn_seconds', v_secs)))));
   end if;
   v_state := v_state || jsonb_build_object('session', v_s, 'duel', v_d, 'board', v_r->'board');
   return public._duel_add_secrets(
@@ -557,7 +573,36 @@ begin
     if v_turn not in (v_d->>'a', v_d->>'b') then raise exception 'invalid_board'; end if;
     v_state := v_state || jsonb_build_object(
       'duel', v_d || jsonb_build_object('turn', v_turn),
-      'deadline', public._duel_in(coalesce((v_state->'session'->>'turn_seconds')::integer, 30)));
+      'deadline', public._duel_in(public._duel_turn_secs(v_r, v_state)));
+  end if;
+  return public._duel_add_secrets(p_x || jsonb_build_object('state', v_state, 'server', v_server), v_r->'secrets');
+end $$;
+
+-- Coup d'un duelliste hors de son tour (hook optionnel board_offturn, ex. abandon aux échecs).
+-- Sans hook : not_your_turn. Ni le compteur de coups ni le tour ni l'échéance ne bougent (sauf fin de manche).
+create or replace function public._duel_offturn_move(p_game text, p_x jsonb, p_actor text, p_move jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_fn     text := public._duel_hook(p_game, 'board_offturn', 'jsonb, jsonb, text, jsonb');
+  v_state  jsonb := p_x->'state';
+  v_server jsonb := coalesce(p_x->'server', '{}'::jsonb);
+  v_r      jsonb;
+  v_out    text;
+begin
+  if v_fn is null then raise exception 'not_your_turn'; end if;
+  execute format('select public.%I($1, $2, $3, $4)', v_fn) into v_r
+    using v_state->'board', coalesce(v_server->'board', 'null'::jsonb), p_actor, p_move;
+  if v_r is null or jsonb_typeof(v_r->'board') is distinct from 'object' then raise exception 'invalid_board'; end if;
+  v_out := v_r->>'outcome';
+  if v_out is not null and v_out not in ('win', 'draw') then raise exception 'invalid_board'; end if;
+  if v_r ? 'server' then v_server := v_server || jsonb_build_object('board', v_r->'server'); end if;
+  v_state := v_state || jsonb_build_object('board', v_r->'board',
+    'duel', (v_state->'duel') || jsonb_build_object('last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', false)));
+  if v_out is not null then
+    v_state := public._duel_end_game(v_state, v_out, v_r->>'winner',
+                 case when v_r ? 'game' then jsonb_build_object('game', v_r->'game') end);
   end if;
   return public._duel_add_secrets(p_x || jsonb_build_object('state', v_state, 'server', v_server), v_r->'secrets');
 end $$;
@@ -580,7 +625,7 @@ begin
     'phase', 'playing',
     'board', v_r->'board',
     'duel', v_d || jsonb_build_object('turn', v_d->>'starter'),
-    'deadline', public._duel_in(coalesce((v_state->'session'->>'turn_seconds')::integer, 30)));
+    'deadline', public._duel_in(public._duel_turn_secs(v_r, v_state)));
   return public._duel_add_secrets(p_x || jsonb_build_object('state', v_state, 'server', v_server), v_r->'secrets');
 end $$;
 
@@ -902,8 +947,11 @@ begin
     v_move := p_action->'move';
     if v_move is null or jsonb_typeof(v_move) <> 'object' then raise exception 'invalid_move'; end if;
     if v_phase = 'playing' then
-      if v_d->>'turn' is distinct from v_me then raise exception 'not_your_turn'; end if;
-      v_x := public._duel_apply_move(p_game, v_x, v_me, v_move, false);
+      if v_d->>'turn' is distinct from v_me then
+        v_x := public._duel_offturn_move(p_game, v_x, v_me, v_move);   -- hook optionnel, sinon not_your_turn
+      else
+        v_x := public._duel_apply_move(p_game, v_x, v_me, v_move, false);
+      end if;
     elsif v_phase = 'setup' then
       if (v_d->'ready') ? v_me then raise exception 'already_ready'; end if;
       if v_move->>'type' in ('ready', 'auto', 'begin') then raise exception 'invalid_move'; end if;
@@ -947,6 +995,8 @@ revoke all on function public._duel_board_new(text, jsonb, text, text) from publ
 revoke all on function public._duel_board_move(text, jsonb, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_board_auto(text, jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_board_setup(text, jsonb, jsonb, text, jsonb) from public, anon, authenticated;
+revoke all on function public._duel_turn_secs(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._duel_offturn_move(text, jsonb, text, jsonb) from public, anon, authenticated;
 revoke all on function public._duel_other(jsonb, text) from public, anon, authenticated;
 revoke all on function public._duel_stat(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._duel_score(jsonb, text, integer) from public, anon, authenticated;

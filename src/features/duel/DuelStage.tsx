@@ -3,7 +3,7 @@ import { ChibiImage } from '@/components/ui/ChibiImage'
 import { mood, pickExpression } from '@/features/soiree/players'
 import { cn } from '@/lib/cn'
 import type { PlayerInfo } from '@/games/types'
-import { winsNeeded } from './logic'
+import { fmtTurnClock, winsNeeded } from './logic'
 import type { DuelInfo, DuelPhase, DuelSession } from './types'
 
 /** Anneau de minuteur (fraction restante 0..1). */
@@ -113,7 +113,7 @@ function Fighter({ player, side, color, me, active, frac, secLeft, score, wins, 
               secLeft <= 5 && 'bg-tomato text-white',
             )}
           >
-            {secLeft}s
+            {fmtTurnClock(secLeft)}
           </span>
         )}
         {ready && (

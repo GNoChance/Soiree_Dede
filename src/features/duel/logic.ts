@@ -100,6 +100,12 @@ export function betsOpen(s: Pick<DuelState, 'phase' | 'duel'>, now: number): boo
   return d.moves === 0 || (!!d.bets_until && now < new Date(d.bets_until).getTime())
 }
 
+/** Chrono d'un coup : « 25s », ou « 4:07 » à partir d'une minute (pendule des échecs). */
+export function fmtTurnClock(sec: number): string {
+  const s = Math.max(0, Math.ceil(sec))
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`
+}
+
 /** Nombre de manches à gagner pour remporter le duel. */
 export const winsNeeded = (bestOf: number) => Math.floor((bestOf + 1) / 2)
 

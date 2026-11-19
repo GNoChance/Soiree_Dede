@@ -13,7 +13,7 @@ import { DuelResultBanner } from './DuelResult'
 import { TimerRing } from './DuelStage'
 import { DuelTransition } from './DuelTransition'
 import { Bracket, ScoreStrip } from './SessionBoard'
-import { FIGHTER_MOODS, fighterMood, pickSideColors, roundNameSingular, winsNeeded } from './logic'
+import { FIGHTER_MOODS, fighterMood, fmtTurnClock, pickSideColors, roundNameSingular, winsNeeded } from './logic'
 import { useDuel, useDuelTicker } from './useDuel'
 import type { DuelInfo, DuelSession, DuelState } from './types'
 
@@ -175,7 +175,7 @@ function TvFighter({ s, duel, session, id, player, side, color, size, frac, secL
             )}
             style={{ fontSize: Math.max(18, size * 0.16) }}
           >
-            {secLeft}s
+            {fmtTurnClock(secLeft)}
           </span>
         )}
       </div>

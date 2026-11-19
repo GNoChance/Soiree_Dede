@@ -16,7 +16,7 @@ import { TvButton } from '@/features/tv/TvButton'
 import { DuelTv } from './DuelTv'
 import { useDuelTv } from './tv'
 import { SessionBoard } from './SessionBoard'
-import { pickSideColors } from './logic'
+import { fmtTurnClock, pickSideColors } from './logic'
 import { useDuel, useDuelTicker } from './useDuel'
 import type { DuelAction, DuelBoardProps } from './types'
 
@@ -122,7 +122,7 @@ function DuelPlayScreen<B, M>({ soireeId, state, secret, meId, isHost, players, 
               >
                 {v.isMyTurn ? (
                   <motion.span animate={reduce ? undefined : { scale: [1, 1.06, 1] }} transition={{ repeat: Infinity, duration: 1 }}>
-                    {myTurnHint ?? 'À toi de jouer !'} <span className="tabular-nums">({secLeft}s)</span>
+                    {myTurnHint ?? 'À toi de jouer !'} <span className="tabular-nums">({fmtTurnClock(secLeft)})</span>
                   </motion.span>
                 ) : turnPlayer ? (
                   <>

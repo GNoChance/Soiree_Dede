@@ -2,14 +2,15 @@ import { lazy, type ComponentType } from 'react'
 import type { BaseGameState, GameDefinition, GameOptionsProps, GamePlayProps, GameSummaryProps } from '@/games/types'
 import { DuelOptions } from './DuelOptions'
 import { DUEL_DEFAULT_OPTIONS, duelHeadline, prepareDuelOptions } from './logic'
-import type { DuelBoardOptionsProps, DuelState } from './types'
+import type { DuelBoardOptionsProps, DuelMode, DuelState } from './types'
 
 /**
  * Fabrique la `GameDefinition` d'un jeu en duel. Le jeu fournit :
  *  - son identité (id, nom, emoji, couleur, ordre, règles) ;
  *  - `Play` : composant LAZY qui rend <DuelPlay {...props} Board={Plateau} /> ;
  *  - optionnellement `Summary` (lazy ; défaut = DuelSummary), `BoardOptions`
- *    (options propres, stockées sous `options.board`) et `defaultBoardOptions`.
+ *    (options propres, stockées sous `options.board`), `defaultBoardOptions`
+ *    et `defaultMode` (format de session proposé, défaut : Roi de la table).
  * Le reste (Options communes, prepareStart, roundLabel, 2-9 joueurs) est fourni.
  *
  * Exemple (src/games/<id>/index.ts) :
@@ -30,6 +31,8 @@ export interface DuelGameConfig {
   Summary?: ComponentType<GameSummaryProps>
   BoardOptions?: ComponentType<DuelBoardOptionsProps>
   defaultBoardOptions?: Record<string, unknown>
+  /** Format de session présélectionné (défaut 'king' ; ex. échecs : 'duel', une session « roi » serait trop longue). */
+  defaultMode?: DuelMode
   /** Transforme les options propres avant envoi (tirage de contenu…). */
   prepareBoard?: (board: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>
 }
@@ -56,7 +59,7 @@ export function makeDuelGame(cfg: DuelGameConfig): GameDefinition {
     Play: cfg.Play,
     Options,
     Summary: cfg.Summary ?? DefaultSummary,
-    defaultOptions: { ...DUEL_DEFAULT_OPTIONS, board: { ...(cfg.defaultBoardOptions ?? {}) } },
+    defaultOptions: { ...DUEL_DEFAULT_OPTIONS, mode: cfg.defaultMode ?? DUEL_DEFAULT_OPTIONS.mode, board: { ...(cfg.defaultBoardOptions ?? {}) } },
     prepareStart: async (options, ctx) => {
       const out = prepareDuelOptions(options, ctx.playerIds)
       if (cfg.prepareBoard) out.board = await cfg.prepareBoard((out.board as Record<string, unknown>) ?? {})

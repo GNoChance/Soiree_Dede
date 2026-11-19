@@ -460,6 +460,26 @@ Tous les compteurs sont posés par le moteur (`server.stats` → `results[].stat
 | 11 | `ndc_telepathie` | Télépathie | En espion, faire trouver 4 mots ou plus avec un seul indice | `best_clue` (max ≥ 4) ✅ |
 | 12 | `ndc_legende` | Légende du code | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
 
+---
+
+### Grand Maître ♟️ — Échecs (`echecs`)
+
+Compteurs de manche renvoyés par `board_move` (`game`, rangés par le socle dans `duel.games[].x`), agrégés par `game_echecs_trophy_stats` ; `duel_wins` vient du socle duel. « Coup » = coup d'un joueur (pas un demi-coup). Seuils à calibrer après deux ou trois soirées.
+
+| Slot | id | Nom | Condition | Donnée |
+|---|---|---|---|---|
+| 2 | `ech_berger` | Le coup du berger | Se faire mater en 10 coups ou moins | `fast_mated` (somme ≥ 1) ✅ |
+| 3 | `ech_adieu_ma_dame` | Adieu ma dame | Se faire prendre sa dame 5 fois (cumul) | `queens_lost` (somme ≥ 5) ✅ |
+| 4 | `ech_pat_zut` | Pat… zut ! | Mettre l'adversaire pat alors qu'on avait 5 points de matériel d'avance ou plus | `stalemate_blunders` (somme ≥ 1) ✅ |
+| 5 | `ech_gourmand` | Le gourmand | Prendre 50 pièces (cumul) | `captures` (somme ≥ 50) ✅ |
+| 6 | `ech_partie_fleuve` | Partie fleuve | Finir une manche de 40 coups ou plus | `max_moves` (max ≥ 40) ✅ |
+| 7 | `ech_au_chaud` | Bien au chaud | Roquer 10 fois (cumul) | `castles` (somme ≥ 10) ✅ |
+| 8 | `ech_en_passant` | En passant | Réussir une prise en passant | `en_passants` (somme ≥ 1) ✅ |
+| 9 | `ech_nouvelle_reine` | Nouvelle reine | Promouvoir 3 pions (cumul) | `promotions` (somme ≥ 3) ✅ |
+| 10 | `ech_et_mat` | Échec et mat ! | Gagner 5 manches par échec et mat (cumul) | `mates` (somme ≥ 5) ✅ |
+| 11 | `ech_mat_eclair` | Mat éclair | Mater en 15 coups ou moins | `fast_mates` (somme ≥ 1) ✅ |
+| 12 | `ech_grand_maitre` | Grand Maître | Gagner 25 duels (cumul) | `duel_wins` (somme ≥ 25) ✅ |
+
 ## 3. Trophées généraux (facultatifs)
 
 Transverses, sans sticker de planche : récompense proposée = badge sur le profil + XP. `tenue_id` et `slot` nuls dans le catalogue.

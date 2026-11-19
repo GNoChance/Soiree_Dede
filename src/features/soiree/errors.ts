@@ -120,6 +120,9 @@ const MESSAGES: Record<string, string> = {
   already_ready: 'Tu es déjà prêt·e !',
   invalid_move: 'Coup impossible.',
   column_full: 'Cette colonne est pleine !',
+  // Échecs
+  promotion_required: 'Choisis la pièce de ta promotion !',
+  no_draw_offer: 'Personne ne t’a proposé nul.',
   invalid_mode: 'Format de session inconnu.',
   invalid_duel_players: 'Choisis deux joueurs différents de la partie.',
   invalid_board: 'Erreur du plateau, réessaie.',
