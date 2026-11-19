@@ -1,8 +1,8 @@
 # Vidéos « Comment on joue ? » — scripts par jeu
 
-Vidéos d'explication de 34 à 37 s, une par jeu (les 20 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
+Vidéos d'explication de 34 à 37 s, une par jeu (les 21 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
 
-- **Format** : mp4 portrait 720 × 1280, 30 FPS, h264 CRF 30 (préréglage veryslow), < 3 Mo (2,3 à 2,7 Mo en pratique : rester sous ~37 s). Pas de voix off : textes courts à l'écran + bruitages légers.
+- **Format** : mp4 portrait 720 × 1280, 30 FPS, h264 CRF 30 (préréglage veryslow ; CRF 33 si > 3 Mo, comme Nom de Code), < 3 Mo (2,3 à 2,7 Mo en pratique : rester sous ~37 s). Pas de voix off : textes courts à l'écran + bruitages légers.
 - **Ton** : « sticker book » (contours épais, ombres décalées, couleurs vives, gros rebonds), chibis de la bande, maquettes simplifiées des écrans (jamais de captures).
 - **Structure commune** : Titre (3 s) → Le but (3,6 s) → 4 étapes illustrées (≈ 5-6 s chacune) → Pour gagner (4,2 s) → « À vous de jouer ! » (3 s).
 
@@ -22,6 +22,8 @@ Vidéos d'explication de 34 à 37 s, une par jeu (les 20 jeux sont faits), affic
 **Ajouter un jeu** : 1) écrire `games/<id>.tsx` (copier `morpion.tsx`) : `goal`, 4 `steps` (texte ≤ ~60 caractères + maquette `Mock` dessinée dans 720 × 880 px), `win` ; 2) l'ajouter à `registry.ts` ; 3) contrôler les planches (`sh scripts/sheet.sh <id> 50 92`) et, au besoin, une image précise (`npx remotion still src/index.ts Tuto-<id> out/x.png --frame=300`) ; 4) `npm run render:tutos -- <id>` ; 5) ajouter l'id à `TUTO_GAME_IDS`.
 
 **Pièges** : la maquette reçoit `f` décalé de 8 frames, donc **négatif au tout début** de l'étape (ne jamais indexer un tableau avec `f` sans `Math.max(0, f)`) ; les planches ne montrent pas ces frames, seul le rendu complet les traverse. Carole et Nini n'ont pas les expressions `cool` / `amoureux` (ne pas les mettre dans les scènes de duel). Les textes des pastilles débordent vite : ≤ ~30 caractères à 36 px.
+
+**Tenues** : `Chibi` accepte `outfit` (défaut `default`) et `TutoSpec.outfits` l’applique aux scènes titre/finale ; la tenue doit exister dans `promo-video/public/chibis/<slug>/<tenue>/` (copie de `public/chibis`).
 
 État : ✅ réalisé — ⏳ script prêt, vidéo à faire. Les tableaux ci-dessous décrivent les vidéos telles qu'elles sont rendues.
 
@@ -264,3 +266,18 @@ Non montré : variante « Pile ! » (option), règles d’enchère sur les 1 («
 | 🏆 | 4,2 s | Le meilleur total gagne la coupe ! — *En 1 course ou en coupe de 3 courses.* | Manon saute |
 
 Barème réel : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 points. En 1 course ou en coupe de 3 courses.
+
+## ✅ Nom de Code 🔐 — 4 à 9 joueurs — 35,4 s
+**But** : « Fais deviner tous tes mots à ton équipe… sans toucher la bombe ! » · Chibis : Rouges : Dédé (espion), Keke, Manon, Mika · Bleus : Cycy (espionne), Marius, Cécile. **Tenues : les deux espions, Dédé et Cycy, portent la tenue Hacker 💻 dans toute la vidéo (titre et scène finale compris) ; tous les autres restent en tenue par défaut.**
+
+| # | Durée | Texte à l’écran | Image |
+| --- | --- | --- | --- |
+| 1 | 5,2 s | En équipes : seul l’espion voit quels mots sont les vôtres | Panneaux 🔴 Rouges / 🔵 Bleus, Dédé et Cycy en tenue Hacker (pastille « 🕵️ Espion »), leurs équipiers en tenue par défaut ; puis le téléphone de Dédé : grille 5 × 5 aux cartes teintées (rouge, bleu, beige, 💣 sur « VOLCAN ») ; « 🤫 Les autres ne voient pas les couleurs » |
+| 2 | 5,6 s | L’espion donne un indice : UN seul mot et un nombre | Téléphone de Dédé (tenue Hacker, réflexion) : « CHAT », « LION », « REQUIN » clignotent en rouge, il tape « ANIMAL », touche le gros bouton « 3 » puis « Envoyer » ; « 3 = trois mots à trouver » |
+| 3 | 5,6 s | Pose ta tête sur un mot : la majorité de l’équipe dévoile | Grille sans couleurs, bandeau « 🔎 ANIMAL · 3 » : les têtes de Keke puis Manon (tenue par défaut) se posent sur « CHAT » (« 2 sur 3 »), la carte se retourne en rouge, Dédé (tenue Hacker) jubile dans un coin ; « ✅ Bon mot : vous continuez ! » |
+| 4 | 5,2 s | Raté ? Le tour passe. La bombe 💣 ? Ton équipe est éliminée ! | Les Rouges tentent « HIBOU » : carte beige, « 😬 Neutre : aux Bleus ! » (Keke boude) ; puis les Bleus dévoilent « VOLCAN » : 💥 explosion, l’écran tremble, Marius et Cécile (tenue par défaut) surpris, Cycy (tenue Hacker) en pleurs, « 💣 Boum ! » |
+| 🏆 | 4,2 s | La première équipe qui trouve tous ses mots gagne ! — *De 2 à 4 équipes. Sans chrono, ou avec, au choix de l’hôte.* | Dédé (tenue Hacker), Keke, Manon et Mika (tenue par défaut) sautent |
+
+Grille d’exemple (mots réels de `words.ts`) : chat, pizza, lune, piano, pirate / fusée, lion, clé, volcan, tarte / robot, vélo, requin, roi, neige / plage, épée, citron, hibou, train / lampe, micro, gâteau, phare, golf. Rouges : chat, lion, requin (+ 6 autres) ; « hibou » neutre (le piège de l’indice « ANIMAL ») ; bombe : volcan. Majorité = plus de la moitié des devineurs (3 devineurs rouges → 2 têtes).
+
+Non montré : essais = nombre de l’indice + 1 (le « HIBOU » de l’étape 4 est ce 4ᵉ essai) ; bouton « ✋ Stop, on passe » (à la majorité, après un mot dévoilé) ; un mot d’une autre équipe dévoilé compte pour elle et termine le tour ; l’indice ne peut pas être un mot de la grille ; à 3-4 équipes la partie continue sans l’équipe éliminée (la dernière en lice gagne), à 2 équipes la bombe fait gagner l’adversaire ; option « chacun son tour d’espion » (plusieurs manches) ; banc 👀 ; mode télé.

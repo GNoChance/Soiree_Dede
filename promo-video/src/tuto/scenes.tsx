@@ -27,7 +27,7 @@ const CastRow: React.FC<{ f: number; spec: TutoSpec; at: number; top: number; si
               transform: `rotate(${wiggle(f, k * 9, 3)}deg)`, zIndex: k % 2,
             }}
           >
-            <Chibi slug={slug} expression={jump ? 'joie' : k % 2 ? 'clin_oeil' : 'joie'} size={size} />
+            <Chibi slug={slug} expression={jump ? 'joie' : k % 2 ? 'clin_oeil' : 'joie'} size={size} outfit={spec.outfits?.[slug]} />
           </div>
         )
       })}
@@ -82,7 +82,7 @@ export const GoalScene: React.FC<{ f: number; dur: number; spec: TutoSpec }> = (
       </Pop>
     </div>
     <div style={{ position: 'absolute', left: TW / 2 - 170, top: 850 + (1 - sp(f, 14)) * 500 + bob(f, 0, 14, 28), transform: `rotate(${wiggle(f, 0, 3)}deg)` }}>
-      <Chibi slug={spec.cast[0]} expression={f < 50 ? 'reflexion' : 'joie'} size={340} />
+      <Chibi slug={spec.cast[0]} expression={f < 50 ? 'reflexion' : 'joie'} size={340} outfit={spec.outfits?.[spec.cast[0]]} />
     </div>
     <Sfx name="whoosh" at={0} volume={0.4} />
     <Sfx name="pop" at={8} />
@@ -147,7 +147,7 @@ export const WinScene: React.FC<{ f: number; dur: number; spec: TutoSpec }> = ({
       </div>
       {w.map((slug, k) => (
         <div key={slug} style={{ position: 'absolute', left: x0 + k * gap, top: 860 + (1 - sp(f, 16 + k * 5)) * 500 + bob(f, k * 9, 40, 15), transform: `rotate(${wiggle(f, k * 7, 4)}deg)` }}>
-          <Chibi slug={slug} expression="joie" size={size} />
+          <Chibi slug={slug} expression="joie" size={size} outfit={spec.outfits?.[slug]} />
         </div>
       ))}
       <ConfettiBurst f={f} at={18} y={820} seed={spec.id} />

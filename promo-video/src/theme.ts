@@ -28,4 +28,4 @@ export const CHARACTERS: { slug: Slug; nickname: string; firstName: string; colo
   { slug: 'nini', nickname: 'Nini', firstName: 'Nicolas', color: '#7AE582', expressions: ['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','pouces','timide','gamer'] },
 ]
 /** URL d'un chibi (staticFile). thumb = 160 px. */
-export const chibiPath = (slug: Slug, expr = 'joie', thumb = false) => `chibis/${slug}/default/${expr}${thumb ? '@thumb' : ''}.webp`
+export const chibiPath = (slug: Slug, expr = 'joie', thumb = false, outfit = 'default') => `chibis/${slug}/${outfit}/${expr}${thumb ? '@thumb' : ''}.webp`

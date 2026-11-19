@@ -32,6 +32,8 @@ export interface TutoSpec {
   goal: string
   /** Chibis présents à l'écran titre / final (3 à 5). */
   cast: Slug[]
+  /** Tenue d'un perso (défaut `default`), pour les scènes titre / finale. */
+  outfits?: Partial<Record<Slug, string>>
   steps: TutoStep[]
   extra?: TutoExtra
   win: {

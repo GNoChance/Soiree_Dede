@@ -19,11 +19,11 @@ export const wiggle = (t: number, phase = 0, deg = 4, period = 72) => Math.sin((
 
 export const bySlug = (slug: Slug) => CHARACTERS.find((c) => c.slug === slug)!
 
-export const Chibi: React.FC<{ slug: Slug; expression?: string; size: number; thumb?: boolean; style?: React.CSSProperties }> = ({
-  slug, expression = 'joie', size, thumb, style,
+export const Chibi: React.FC<{ slug: Slug; expression?: string; size: number; thumb?: boolean; outfit?: string; style?: React.CSSProperties }> = ({
+  slug, expression = 'joie', size, thumb, outfit, style,
 }) => (
   <Img
-    src={staticFile(chibiPath(slug, expression, thumb ?? size <= 70))}
+    src={staticFile(chibiPath(slug, expression, thumb ?? size <= 70, outfit))}
     style={{ width: size, height: size, objectFit: 'contain', display: 'block', ...style }}
   />
 )
