@@ -47,5 +47,13 @@ export const CHARACTERS_BY_SLUG = Object.fromEntries(
 export const getCharacter = (slug: string): Character | undefined =>
   (CHARACTERS_BY_SLUG as Record<string, Character>)[slug]
 
+/**
+ * Version des illustrations de TENUE (planches + portraits V3) : les fichiers gardent leur nom d'une
+ * génération à l'autre, ce suffixe force le téléchargement des nouveaux (cache du service worker 90 j
+ * + cache HTTP 7 j). À incrémenter à chaque refonte des planches. Les chibis de base ne changent pas.
+ */
+export const TENUE_ART_VERSION = 3
+export const artVersion = (tenue: string) => (tenue === 'default' ? '' : `?v=${TENUE_ART_VERSION}`)
+
 export const chibiUrl = (slug: string, expression: string = 'joie', tenue: string = 'default', thumb = false) =>
-  `/chibis/${slug}/${tenue}/${expression}${thumb ? '@thumb' : ''}.webp`
+  `/chibis/${slug}/${tenue}/${expression}${thumb ? '@thumb' : ''}.webp${artVersion(tenue)}`

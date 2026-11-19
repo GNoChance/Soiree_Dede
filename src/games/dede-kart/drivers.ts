@@ -1,4 +1,4 @@
-import { CHARACTERS } from '@/data/characters'
+import { CHARACTERS, TENUE_ART_VERSION } from '@/data/characters'
 import { DEFAULT_TENUE } from '@/data/tenues'
 import { hasTenueArt, tenueArtDir } from '@/components/ui/tenueArt'
 import type { PlayerInfo } from '../types'
@@ -10,7 +10,7 @@ export const kartOf = (slug: string) => Math.max(0, CHARACTERS.findIndex((c) => 
 /** Chibi du pilote : sa tenue équipée si elle est dessinée, sinon sa tenue de soirée. */
 function spriteOf(p: PlayerInfo) {
   const t = p.equippedTenue
-  if (t && t !== DEFAULT_TENUE && hasTenueArt(p.slug, t)) return `/chibis/${p.slug}/${tenueArtDir(t, p.slug)}/joie.webp`
+  if (t && t !== DEFAULT_TENUE && hasTenueArt(p.slug, t)) return `/chibis/${p.slug}/${tenueArtDir(t, p.slug)}/joie.webp?v=${TENUE_ART_VERSION}`
   return `/chibis/${p.slug}/default/joie.webp`
 }
 

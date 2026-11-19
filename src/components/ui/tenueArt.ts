@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { getCharacter } from '@/data/characters'
+import { getCharacter, TENUE_ART_VERSION } from '@/data/characters'
 import { COSTUME_EXPRESSIONS, expressionIn } from '@/data/expressions'
 import { DEFAULT_TENUE, getTenue } from '@/data/tenues'
 import { tenueExtrasOf } from '@/data/tenue-extras'
@@ -39,7 +39,7 @@ export function hasTenueArt(slug: string, tenue: string): boolean {
 export function tenuePortraitUrl(slug: string, tenue: string, thumb = false): string | null {
   const dir = tenueArtDir(tenue, slug)
   if (!dir || !portraits.has(key(slug, dir))) return null
-  return `/chibis/${slug}/portraits/${dir}${thumb ? '@thumb' : ''}.webp`
+  return `/chibis/${slug}/portraits/${dir}${thumb ? '@thumb' : ''}.webp?v=${TENUE_ART_VERSION}`
 }
 
 /**

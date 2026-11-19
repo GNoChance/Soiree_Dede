@@ -260,9 +260,9 @@ function PortraitCard({ src, label, unlocked, reveal }: { src: string; label: st
         <div className={cn(face, 'bg-surface')}>
           <img src={src} alt={label} loading="lazy" decoding="async" draggable={false} className="size-full object-contain" />
         </div>
-        {/* Verso : portrait flouté (tenue à débloquer) */}
+        {/* Verso : silhouette noire (tenue à débloquer) */}
         <div className={cn(face, 'flex items-center justify-center bg-sunk [transform:rotateY(180deg)]')}>
-          <img src={src} alt="" aria-hidden loading="lazy" decoding="async" draggable={false} className="size-full scale-105 object-contain opacity-90 blur-[7px]" />
+          <img src={src} alt="" aria-hidden loading="lazy" decoding="async" draggable={false} className="size-full object-contain brightness-0" />
           <Lock className="absolute size-9 text-white drop-shadow-[0_2px_0_var(--ink)]" strokeWidth={3} />
         </div>
       </motion.div>
