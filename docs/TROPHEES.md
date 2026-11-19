@@ -442,6 +442,24 @@ La variante (`classic` / `giant` / `ultimate`) est dans `session.board_options`.
 
 ---
 
+### Hacker 💻 — Nom de Code (`nom-de-code`)
+
+Tous les compteurs sont posés par le moteur (`server.stats` → `results[].stats`).
+
+| Slot | id | Nom | Condition | Donnée |
+|---|---|---|---|---|
+| 2 | `ndc_kaboum` | Kaboum ! | Avoir voté pour la bombe | `bomb_votes` (somme ≥ 1) ✅ |
+| 3 | `ndc_page_blanche` | Page blanche | En espion, laisser filer le chrono sans donner d'indice | `idle_clue` (somme ≥ 1) ✅ |
+| 4 | `ndc_taupe` | Taupe malgré toi | Faire dévoiler 3 mots d'une autre équipe (cumul) | `enemy_reveals` (somme ≥ 3) ✅ |
+| 5 | `ndc_bon_flair` | Bon flair | Être le premier à poser sa tête sur 10 mots de son équipe (cumul) | `first_good` (somme ≥ 10) ✅ |
+| 6 | `ndc_agent_terrain` | Agent de terrain | Jouer 10 parties (cumul) | nombre de parties ≥ 10 ✅ |
+| 7 | `ndc_coup_double` | Coup double | En espion, faire trouver 3 mots avec un seul indice | `best_clue` (max ≥ 3) ✅ |
+| 8 | `ndc_maitre_espion` | Maître espion | Gagner 3 manches en espion (cumul) | `spy_wins` (somme ≥ 3) ✅ |
+| 9 | `ndc_sans_faute` | Sans faute | Gagner une manche sans aucune erreur de son équipe | `flawless` (somme ≥ 1) ✅ |
+| 10 | `ndc_remontada` | Remontada | Gagner une manche après avoir eu 3 mots de retard ou plus | `comeback` (somme ≥ 1) ✅ |
+| 11 | `ndc_telepathie` | Télépathie | En espion, faire trouver 4 mots ou plus avec un seul indice | `best_clue` (max ≥ 4) ✅ |
+| 12 | `ndc_legende` | Légende du code | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
+
 ## 3. Trophées généraux (facultatifs)
 
 Transverses, sans sticker de planche : récompense proposée = badge sur le profil + XP. `tenue_id` et `slot` nuls dans le catalogue.

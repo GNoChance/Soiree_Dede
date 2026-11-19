@@ -15,7 +15,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 - Chibis : `cd tools/slice-chibis && node slice.mjs [--tenues | <slug>-<tenue>]` (package.json séparé).
 
 ## Arborescence clé
-- `src/games/<id>/` : un dossier par jeu (19 jeux), `index.ts` exporte `definition` (auto-découvert par `src/games/registry.ts`, champ `order`). Play/Summary en `lazy`. Types du jeu dans `src/games/<id>/types.ts` (ne pas toucher `src/types/db.ts`).
+- `src/games/<id>/` : un dossier par jeu (21 jeux), `index.ts` exporte `definition` (auto-découvert par `src/games/registry.ts`, champ `order`). Play/Summary en `lazy`. Types du jeu dans `src/games/<id>/types.ts` (ne pas toucher `src/types/db.ts`).
 - `supabase/games/<id>.sql` : moteur du jeu (`game_<id_underscore>_start` / `_action`), idempotent, terminé par les `revoke`.
 - `src/features/` : `soiree` (salon, horloge serveur, `errors.ts`), `duel` (socle des jeux à 2), `tenues`, `admin`.
 - `supabase/features/*.sql` : briques partagées (duel, tenues…), chargées entre `schema.sql` et `games/`.
@@ -38,7 +38,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 - Piège : tenue blanche sur fond blanc sans contour noir épais → découpe ratée, faire régénérer la planche (contour noir épais ou fond coloré).
 - Portraits de tenue : images générées à part par l'utilisateur (une image par tenue) → `<slug>-<dossier>-portrait.png` dans le dossier v3, entrée `portraits` de la config (`cutout: true` si sticker sur fond noir → noir rendu transparent), ajout à `portraits` du manifest, `free-sheet.mjs <config> portraits`, puis `gen-art.mjs`.
 - **Seul le style V3 compte** (4×3, fond noir, ordre : joie colère pleurs boude / réflexion dodo bisou clin d'œil / surprise amoureux cool champion=gamer ; Karo : charmée au lieu d'amoureux). V3 complet pour les 9 persos (20 planches + 20 portraits chacun). Pas besoin de pouces/timide/déterminé : cases comblées par `TENUE_ART_FILL` (gen-art).
-- 20 dossiers d'art par perso (star/cinema et teacher/student sont distincts, racer inclus). Inventaire des manques : comparer `TENUE_ART` / `TENUE_PORTRAITS` de `tenues-art.generated.ts` à cette liste.
+- 21 dossiers d'art par perso (star/cinema et teacher/student sont distincts, racer et hacker inclus ; hacker = tenue de Nom de Code, planches de Dédé et Karo encore à recevoir). Inventaire des manques : comparer `TENUE_ART` / `TENUE_PORTRAITS` de `tenues-art.generated.ts` à cette liste.
 - L'utilisateur fournit les planches, Claude les intègre (découpe, génération, commit).
 - Détails : [tools/slice-chibis/README.md](tools/slice-chibis/README.md).
 

@@ -284,6 +284,17 @@ Points par place (12 places) : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 (moins de j
 ### Étapes de réalisation
 1 cadrage (ce document) · 2 course solo (moteur 3D, kart, drift, circuit 1) · 3 multi (broadcast, karts des autres) · 4 objets + SQL · 5 3 circuits, coupe, résumé, karts par perso.
 
+## Jeu `nom-de-code` — « Nom de Code » 🔐 (jeu n°21)
+
+Conception : `docs/superpowers/specs/2026-11-19-nom-de-code-design.md` ; plan : `docs/superpowers/plans/2026-11-19-nom-de-code.md`.
+
+- **Règles** : 4-9 joueurs, 2 à 4 équipes (`red`, `blue`, `green`, `yellow` = ordre de jeu), 2 joueurs min. par équipe, **banc** = joueurs hors équipe (pas dans `state.players`, ils regardent). Grille de 25 mots : 2 équipes 9/8 + 7 neutres + 1 bombe ; 3 équipes 7/6/6 + 5 + 1 ; 4 équipes 6/5/5/5 + 3 + 1 (l'équipe qui commence, tirée au sort, a le plus de mots). L'espion tape **un mot + un nombre (1-9)** ; ses devineurs posent leur tête sur une carte, **majorité** (`floor(g/2)+1`) = dévoilement ; essais = n + 1 ; « Stop, on passe » à la majorité (après 1 dévoilement). Bombe : l'équipe est éliminée (à 2 équipes, l'autre gagne). Manches : `one` ou `each` (= taille de la plus grande équipe, rotation des espions). Chrono : Détendu / Normal 120 s + 180 s / Rapide 60 s + 120 s. Hôte : « Passer le tour » (`skip`).
+- **Secrets** : la clé (`cell[25]` = équipe | `neutral` | `bomb`) est dans `server.key` et dans `match_secrets` **des seuls espions** (`{round, key}`, les autres membres reçoivent `{round, key: null}` dès la manche 2) ; publique (`state.key`) en fin de manche. Espions de la partie précédente (< 12 h, ≥ 2 joueurs en commun) évités (`_ndc_recent_spies`).
+- **State public** (`src/games/nom-de-code/types.ts`) : `phase` (`clue` | `guess` | `round_end` | `finished`), `players`, `bench`, `round`/`total_rounds`, `rounds`, `timer`, `deadline`, `words[25]`, `teams[{id, players, spy, found, total, eliminated}]`, `turn`, `revealed{index: {color, by}}`, `clue{word, n}`, `guesses_left`, `votes{joueur: index}`, `stop[]`, `turn_found`, `round_wins`, `round_winner`, `round_end_reason` (`words`|`bomb`|`last_team`), `key`, `winners`.
+- **Actions** : `clue {word, n}` (espion actif) · `vote {index|null}` (devineur actif ; carte déjà dévoilée = ignoré sans erreur) · `stop` · `tick` · `skip` (hôte) · `next_round` (hôte). Erreurs : `invalid_teams`, `invalid_clue`, `clue_is_grid_word`, `not_spy`, `not_guesser`, `stop_too_early`.
+- **Fin** : gagnants = équipes au max de manches gagnées ; `results[].stats` : `bomb_votes`, `idle_clue`, `enemy_reveals`, `first_good`, `best_clue`, `spy_wins`, `flawless`, `comeback` (trophées de la tenue Hacker, `docs/TROPHEES.md`).
+- **Front** : `src/games/nom-de-code/` (`words.ts` : pioche de ~500 mots, 25 tirés par manche par `prepareStart`) ; sélecteur réutilisable `src/features/teams/TeamsPicker.tsx` (2-4 équipes + banc). Tests : `tools/sql-tests/nom-de-code.mjs`. À venir : mode télé, vidéo tuto.
+
 ## Chat de soirée (`supabase/features/chat.sql`, `src/features/chat/`)
 Un fil par soirée, visible au salon ET pendant les jeux : bulle flottante (`SoireeChat`, montée une fois dans `Root`, suit la soirée déclarée par `useViewingSoiree`), feuille de discussion, aperçus des messages reçus.
 - Table `soiree_messages(id, soiree_id, profile_id, kind, body, tenue, created_at)` : `kind = text` (1 à 200 caractères) ou `sticker` (`body` = id d'expression, `tenue` = tenue de l'auteur à l'envoi). Lecture : membres de la soirée (RLS `is_soiree_member`) + Realtime `postgres_changes` INSERT.
