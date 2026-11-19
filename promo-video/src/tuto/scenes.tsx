@@ -129,6 +129,7 @@ export const StepScene: React.FC<{ f: number; dur: number; spec: TutoSpec; step:
 // ---------------------------------------------------------------------------
 export const WinScene: React.FC<{ f: number; dur: number; spec: TutoSpec }> = ({ f, dur, spec }) => {
   const w = spec.win.winners
+  const Board = spec.win.Board
   const size = w.length > 2 ? 230 : 300
   const gap = size * 0.82
   const x0 = (TW - (gap * (w.length - 1) + size)) / 2
@@ -145,6 +146,7 @@ export const WinScene: React.FC<{ f: number; dur: number; spec: TutoSpec }> = ({
           </Panel>
         </Pop>
       </div>
+      {Board && <div style={{ position: 'absolute', left: 0, right: 0, top: 610 }}><Board f={f} /></div>}
       {w.map((slug, k) => (
         <div key={slug} style={{ position: 'absolute', left: x0 + k * gap, top: 860 + (1 - sp(f, 16 + k * 5)) * 500 + bob(f, k * 9, 40, 15), transform: `rotate(${wiggle(f, k * 7, 4)}deg)` }}>
           <Chibi slug={slug} expression="joie" size={size} outfit={spec.outfits?.[slug]} />

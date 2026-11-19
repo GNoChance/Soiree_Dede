@@ -41,5 +41,7 @@ export interface TutoSpec {
     /** Petite ligne complémentaire. */
     sub?: string
     winners: Slug[]
+    /** Bloc optionnel affiché sous le texte (ex. carte de score), zone y ≈ 610-860. */
+    Board?: React.FC<{ f: number }>
   }
 }

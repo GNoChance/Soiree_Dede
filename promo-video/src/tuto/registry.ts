@@ -21,8 +21,9 @@ import { bowling } from './games/bowling'
 import { tourDesPotes } from './games/tour-des-potes'
 import { dedeKart } from './games/dede-kart'
 import { nomDeCode } from './games/nom-de-code'
+import { miniGolf } from './games/mini-golf'
 import { echecs } from './games/echecs'
 import { kems } from './games/kems'
 import type { TutoSpec } from './types'
 
-export const TUTOS: TutoSpec[] = [morpion, undercover, dessineDevine, quatreALaSuite, batailleNavale, quiDeNous, tuPreferes, lePlusProche, cerveauEnFete, petitBac, actionOuVerite, quiSuisJe, devineEnEquipe, pasDeBol, bombeAMots, menteur, loupGarou, bowling, tourDesPotes, dedeKart, nomDeCode, echecs, kems]
+export const TUTOS: TutoSpec[] = [morpion, undercover, dessineDevine, quatreALaSuite, batailleNavale, quiDeNous, tuPreferes, lePlusProche, cerveauEnFete, petitBac, actionOuVerite, quiSuisJe, devineEnEquipe, pasDeBol, bombeAMots, menteur, loupGarou, bowling, tourDesPotes, dedeKart, nomDeCode, echecs, kems, miniGolf]
