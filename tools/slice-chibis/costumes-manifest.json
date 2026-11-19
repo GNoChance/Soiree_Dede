@@ -309,7 +309,11 @@
       "spy",
       "star",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "painter",
@@ -332,7 +336,11 @@
       "bowler",
       "philosopher",
       "cinema",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ]
   },
   "mika": {
