@@ -9,5 +9,5 @@ export default {
   slug: 'kevin',
   src: 'assets-source/costumes/kevin-v3',
   sheets: 'student star coach philosopher archer painter pyro tycoon actor bowler admiral werewolf pirate teacher tictactoe racer cinema spy croupier strategist hacker'.split(' ').map(S),
-  portraits: 'admiral archer coach actor student croupier spy bowler werewolf tycoon tictactoe pyro painter philosopher pirate teacher cinema strategist star racer'.split(' ').map((n) => ({ file: `kevin-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: 'admiral archer coach actor student croupier spy bowler werewolf tycoon tictactoe pyro painter philosopher pirate teacher cinema strategist star racer hacker'.split(' ').map((n) => ({ file: `kevin-${n}-portrait.png`, dir: n, cutout: true })),
 };

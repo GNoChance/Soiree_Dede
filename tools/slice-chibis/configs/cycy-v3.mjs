@@ -10,6 +10,5 @@ export default {
   slug: 'cycy',
   src: 'assets-source/costumes/cycy-v3',
   sheets: NAMES.map((n) => ({ ...S(n), ...(OV[n] ?? {}) })),
-  // portraits : seulement les tenues dont le portrait a été livré
-  portraits: NAMES.filter((n) => !['hacker'].includes(n)).map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: NAMES.map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
 };

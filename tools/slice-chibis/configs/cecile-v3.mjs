@@ -14,5 +14,5 @@ export default {
   slug: 'cecile',
   src: 'assets-source/costumes/cecile-v3',
   sheets: 'tycoon admiral tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker'.split(' ').flatMap((n) => (n === 'admiral' ? CELLS(n) : [S(n)])),
-  portraits: 'tycoon admiral tictactoe coach actor archer cinema philosopher bowler pirate pyro werewolf star spy croupier teacher student painter strategist racer'.split(' ').map((n) => ({ file: `cecile-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: 'tycoon admiral tictactoe coach actor archer cinema philosopher bowler pirate pyro werewolf star spy croupier teacher student painter strategist racer hacker'.split(' ').map((n) => ({ file: `cecile-${n}-portrait.png`, dir: n, cutout: true })),
 };

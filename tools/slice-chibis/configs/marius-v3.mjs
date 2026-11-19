@@ -11,5 +11,5 @@ export default {
   slug: 'marius',
   src: 'assets-source/costumes/marius-v3',
   sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker'.split(' ').map(S),
-  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema hacker'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
 };

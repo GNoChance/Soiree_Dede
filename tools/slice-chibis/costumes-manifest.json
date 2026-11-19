@@ -42,7 +42,8 @@
       "bowler",
       "teacher",
       "star",
-      "racer"
+      "racer",
+      "hacker"
     ]
   },
   "cecile": {
@@ -89,7 +90,8 @@
       "student",
       "painter",
       "strategist",
-      "racer"
+      "racer",
+      "hacker"
     ]
   },
   "cycy": {
@@ -136,7 +138,8 @@
       "tycoon",
       "star",
       "teacher",
-      "racer"
+      "racer",
+      "hacker"
     ]
   },
   "dede": {
@@ -182,7 +185,8 @@
       "croupier",
       "star",
       "racer",
-      "strategist"
+      "strategist",
+      "hacker"
     ]
   },
   "kevin": {
@@ -229,7 +233,8 @@
       "tycoon",
       "star",
       "teacher",
-      "racer"
+      "racer",
+      "hacker"
     ]
   },
   "manon": {
@@ -276,7 +281,8 @@
       "bowler",
       "teacher",
       "star",
-      "racer"
+      "racer",
+      "hacker"
     ]
   },
   "marius": {
@@ -323,7 +329,8 @@
       "pirate",
       "bowler",
       "philosopher",
-      "cinema"
+      "cinema",
+      "hacker"
     ]
   },
   "mika": {
@@ -370,7 +377,8 @@
       "admiral",
       "tycoon",
       "racer",
-      "bowler"
+      "bowler",
+      "hacker"
     ]
   },
   "nini": {
@@ -417,7 +425,8 @@
       "teacher",
       "croupier",
       "spy",
-      "star"
+      "star",
+      "hacker"
     ]
   }
 }

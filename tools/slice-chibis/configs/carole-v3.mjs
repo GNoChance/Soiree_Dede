@@ -11,5 +11,5 @@ export default {
   slug: 'carole',
   src: 'assets-source/costumes/carole-v3',
   sheets: 'tycoon admiral tictactoe strategist coach actor cinema bowler philosopher archer pyro painter student werewolf teacher croupier star spy racer pirate'.split(' ').map((n) => S(n)),
-  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer hacker'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
 };
