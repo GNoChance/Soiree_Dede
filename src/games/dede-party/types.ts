@@ -9,12 +9,17 @@ export type MgKind = 'quiz' | 'pif' | 'majorite' | 'buzzer' | 'etoiles' | 'chron
 
 /** Évènement d'une étape de déplacement (ou de la case d'arrivée). */
 export interface DpEvent {
-  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card'
+  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card' | 'fork'
   /** Pièces gagnées / perdues (start, clap, pub ; pickpocket, Téléthon). */
   d?: number
-  /** Étoile : prix payé, nouvelle Loge, achat pile sur la case. */
+  /** Étoile : prix payé, nouvelles cases des étoiles (aussi carte « changement de décor »), achat pile sur la case. */
   cost?: number
+  stars?: number[]
+  /** Téléthon : joueur qui reçoit. */
   to?: number | string
+  /** Embranchement : numéro de l'aiguillage et voie prise (0 = tout droit, 1 = détour). */
+  fork?: number
+  way?: number
   exact?: boolean
   need?: number
   /** Carte : id, texte, gain du tireur, dé relancé, joueur visé… */
@@ -39,7 +44,10 @@ export interface DpSnap {
   pos: Record<string, number>
   coins: Record<string, number>
   stars: Record<string, number>
-  star_cell: number
+  /** Cases des étoiles en jeu (1 à 3 selon le nombre de joueurs). */
+  star_cells: number[]
+  /** Aiguillages des embranchements (0 = tout droit, 1 = détour) : basculent à chaque passage. */
+  sw: number[]
   dist: Record<string, number>
 }
 
@@ -153,7 +161,8 @@ export interface DedePartyState {
   dist: Record<string, number>
   coins: Record<string, number>
   stars: Record<string, number>
-  star_cell: number
+  star_cells: number[]
+  sw: number[]
   half_price: Record<string, boolean>
   double_left: Record<string, number>
   rolls: Record<string, DpRoll | null>

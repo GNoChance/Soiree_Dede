@@ -40,7 +40,7 @@ export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?
         })}
       </div>
       <p className={cn('font-bold text-muted', big ? 'text-2xl' : 'text-sm')}>
-        {s.rounds} tours · le plus d’étoiles ⭐ gagne · 20 🪙 = 1 étoile
+        {s.rounds} tours · le plus d’étoiles ⭐ gagne · 30 🪙 = 1 étoile (la 1re à 15 !)
       </p>
     </div>
   )
@@ -323,6 +323,103 @@ export function MoveCenter({ s, view, get, big }: { s: DedePartyState; view: Boa
           >
             {eventLabel(last, (id) => get(id).nickname)}
           </motion.span>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/** Bandeau incrusté sur le plateau 3D : qui joue, ses dés, ce qui vient d'arriver. */
+export function MoveBanner({ s, view, get, big }: { s: DedePartyState; view: BoardView; get: Get; big?: boolean }) {
+  const m = view.mover
+  if (!m) {
+    return (
+      <span className={cn('sticker-sm bg-surface/95 px-3 py-1 text-center font-display font-extrabold', big ? 'text-3xl' : 'text-base')}>
+        {view.done ? 'Tout le monde a bougé !' : 'Les pions se mettent en place…'}
+      </span>
+    )
+  }
+  const p = get(m.id)
+  const last = view.events[0]
+  const total = m.dice.reduce((a, b) => a + b, 0)
+  return (
+    <div className="flex max-w-full flex-col items-center gap-1.5">
+      <motion.div key={m.id} initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: 'spring', stiffness: 380, damping: 22 }} className={cn('sticker-sm flex items-center bg-surface/95 font-display font-extrabold leading-none', big ? 'gap-3 px-4 py-2 text-4xl' : 'gap-2 px-2.5 py-1 text-lg')}>
+        <Avatar slug={p.slug} tenue={p.equippedTenue} size={big ? 64 : 34} />
+        <span className="min-w-0 truncate">{p.nickname}</span>
+        <span className={cn('flex items-center', big ? 'gap-1.5' : 'gap-1')}>
+          {m.dice.map((d, i) => (
+            <Die key={`${m.id}${i}`} value={m.rolling ? null : d} rolling={m.rolling} size={big ? 46 : 26} className={big ? undefined : 'border-2 shadow-none'} />
+          ))}
+        </span>
+        {!m.rolling && <span className="tabular-nums">= {total}</span>}
+        <span className={cn('text-muted', big ? 'text-2xl' : 'text-xs')}>
+          {s.moves.findIndex((x) => x.id === m.id) + 1}/{s.moves.length}
+        </span>
+      </motion.div>
+      <AnimatePresence mode="popLayout">
+        {last && (
+          <motion.span
+            key={`${m.id}${view.events.length}`}
+            initial={{ scale: 0.4, rotate: -6, opacity: 0 }}
+            animate={{ scale: 1, rotate: -1.5, opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={cn('sticker-sm max-w-full bg-sun px-2 py-1 text-center font-display font-extrabold leading-tight text-[#1f1b2e]', big ? 'text-3xl' : 'text-sm')}
+          >
+            {eventLabel(last, (id) => get(id).nickname)}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/** Grandes familles d'écrans : le rideau passe quand on change de famille. */
+const actOf = (s: DedePartyState) => (s.phase === 'roll' || s.phase === 'move' ? 'board' : s.phase.startsWith('mg') ? `mg${s.mg?.no ?? 0}` : s.phase)
+
+/**
+ * Transition « rideau de théâtre » entre le plateau, les mini-jeux et la cérémonie : le state affiché
+ * est retenu le temps que le rideau se ferme, puis remplacé derrière lui. `shown` = state à afficher,
+ * `closed` = rideau fermé (à passer à <Curtain />).
+ */
+export function useCurtain(s: DedePartyState): { shown: DedePartyState; closed: boolean } {
+  const act = actOf(s)
+  const [held, setHeld] = useState({ act, s })
+  const latest = useRef(s)
+  useEffect(() => {
+    latest.current = s
+  }, [s])
+  useEffect(() => {
+    if (held.act === act) return
+    playSound('whoosh')
+    const t = window.setTimeout(() => setHeld({ act, s: latest.current }), 420)
+    return () => clearTimeout(t)
+  }, [act, held.act])
+  const closed = held.act !== act
+  return { shown: closed ? held.s : s, closed }
+}
+
+/** Les deux pans du rideau rouge (plein cadre du parent `relative`, ou plein écran avec `fixed`). */
+export function Curtain({ closed, fixed }: { closed: boolean; fixed?: boolean }) {
+  const pane = (side: 'left' | 'right') => (
+    <motion.div
+      key={side}
+      initial={{ x: side === 'left' ? '-102%' : '102%' }}
+      animate={{ x: 0 }}
+      exit={{ x: side === 'left' ? '-102%' : '102%' }}
+      transition={{ duration: 0.36, ease: [0.3, 0.9, 0.4, 1] }}
+      className={cn('absolute inset-y-0 w-1/2 border-ink', side === 'left' ? 'left-0 border-r-4' : 'right-0 border-l-4')}
+      style={{ background: 'repeating-linear-gradient(90deg, #d62839 0 18px, #a4133c 18px 30px, #c1121f 30px 44px)', boxShadow: 'inset 0 -18px 0 0 #FFD23F, inset 0 -22px 0 0 #1f1b2e' }}
+    />
+  )
+  return (
+    <div className={cn('pointer-events-none inset-0 z-50 overflow-hidden', fixed ? 'fixed' : 'absolute rounded-card')} aria-hidden>
+      <AnimatePresence>{closed && [pane('left'), pane('right')]}</AnimatePresence>
+      <AnimatePresence>
+        {closed && (
+          <motion.div key="logo" initial={{ scale: 0, rotate: -20 }} animate={{ scale: 1, rotate: -4 }} exit={{ scale: 0, opacity: 0 }} transition={{ delay: 0.12, type: 'spring', stiffness: 320, damping: 16 }} className="absolute inset-0 flex items-center justify-center">
+            <span className="sticker bg-sun px-4 py-1 font-display text-4xl font-extrabold text-[#1f1b2e]">🎤 Dédé Party</span>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

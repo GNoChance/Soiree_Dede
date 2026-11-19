@@ -17,7 +17,7 @@ export const definition: GameDefinition = {
   minPlayers: 2,
   maxPlayers: 8,
   rules:
-    'Tout le monde tape son dé en même temps, les pions avancent tout seuls sur le Grand Plateau de Dédé. Passe sur l’étoile avec 20 pièces : elle est à toi ! À chaque tour, un mini-jeu rapporte des pièces (1er 10, 2e 6, 3e 4). Le plus d’étoiles gagne !',
+    'Tout le monde lance ses 2 dés en même temps, les pions avancent tout seuls sur le Grand Plateau de Dédé (aux embranchements, l’aiguillage décide et bascule à chaque passage). Passe sur une étoile avec 30 pièces (15 pour ta première) : elle est à toi ! À chaque tour, un mini-jeu rapporte des pièces (1er 10, 2e 6, 3e 4). Le plus d’étoiles gagne !',
   Play,
   tv: true,
   Options: DedePartyOptions,

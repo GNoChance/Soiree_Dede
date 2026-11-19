@@ -200,3 +200,34 @@ mini-jeux 3D, voix de Dédé, choix du mini-jeu par les joueurs, partie à plus 
 - Les 6 mini-jeux proposés (quiz, estimation, vote, buzzer, pluie d'étoiles, top chrono) ; mini-jeux 3D : V2.
 - Étoiles bonus de fin conservées (Roi des mini-jeux, Prix de la poisse).
 - Télé facultative (mini-plateau sur téléphone), mais recommandée.
+
+## Décisions (2026-11-20) — grand plateau, plateau 3D (« un plateau plus grand, un meilleur jeu »)
+
+Ces choix remplacent, là où ils diffèrent, les sections 2, 3 et 6 ci-dessus (boucle de 24 cases, un dé, étoile à 20 pièces, plateau 2D).
+
+**Plateau de 47 cases** (grille 11 × 9, `board.ts` ↔ `_dp_board()` / `_dp_next()` / `_dp_prev()`) :
+- une grande boucle de 36 cases (0-35) aux coins en escalier, Départ en bas à gauche ;
+- **La Scène** 🎭 (36-40) : détour doré de 5 cases (3 Applaudissements, 1 Enveloppe, 1 Loge) à l'embranchement de la case 13 ; tout droit = 1 case de Pub (14) ;
+- **Le Tunnel de la pub** 📺 (41-46) : détour piégé de 6 cases (3 Pubs, 2 Applaudissements, 1 Enveloppe) à l'embranchement de la case 22 ; tout droit = 2 Applaudissements (23, 24).
+- Un tour fait 36 cases au plus court, 44 par les deux détours. Répartition : 1 Départ, 20 Applaudissements, 9 Pubs, 8 Enveloppes, 9 Loges (8 sur la boucle, 1 sur La Scène).
+
+**Embranchements sans choix : l'aiguillage qui bascule.** Chaque embranchement a une flèche (`state.sw`, tirée au sort au départ) : le pion suit la flèche,
+puis elle **bascule** pour le suivant (un pion sur deux par chaque voie). S'arrêter pile sur l'embranchement ne la fait pas basculer ; reculer (carte) non plus.
+Retenu plutôt qu'un tirage au sort ou une règle « selon les pièces » : ça se voit sur le plateau avant de lancer, c'est juste (alternance stricte) et ça fait parler
+(« il vient de tourner, tu vas au tunnel ! »). Dédé commente chaque passage (16 répliques `fork_*`). Carte « recule de 3 » : par la grande boucle aux retours de détour.
+
+**Rythme adapté au grand plateau.**
+- **2 dés** par lancer (moyenne 7 : ~1,6 tour de plateau en 9 tours de jeu) ; le bonus une fois par partie devient le **Triple dé** (3 dés). Noms internes inchangés (`double`, `double_left`, stat `doubles`, carte `gift_double`).
+- **1 à 3 étoiles en jeu en même temps** : 1 à 2 joueurs, 2 de 3 à 6, 3 à 7-8 (`star_count`). Une étoile achetée déménage dans une Loge libre ; la carte « changement de décor » les déplace toutes.
+- **Étoile à 30 pièces, la première de chacun à 15** (« promo de bienvenue » : le drapeau `half_price` existant est vrai pour tout le monde au départ ; la carte Promo le réarme).
+- Durées de phase inchangées (lancer 15 s, 5 s par pion, mini-jeu) : une partie de 9 tours garde sa durée. Un pion fait au plus 24 cases en un tour (3 dés + carte) : la durée d'un saut s'adapte (130 à 300 ms) pour tenir dans les 5 s.
+
+**Équilibrage mesuré** (`node dede-party.mjs ../../supabase/install.sql 100` ; « niveaux » = joueurs de force inégale aux mini-jeux, chiffres dans le rapport de livraison) :
+objectif « presque tout le monde a une étoile » (< 10 % de joueurs sans étoile, contre 15-26 % avant) sans aplatir l'écart : le meilleur joueur garde environ deux fois plus d'étoiles que le moins bon.
+Le vainqueur finit plutôt à 3-4 étoiles (2-3 avant).
+
+**Plateau en 3D** (three, déjà dans le projet ; style sticker book : aplats cartoon, contours encre) : voir ARCHITECTURE.md. Plateau télé avec rideaux, gradins et public, projecteurs, néons,
+estrade de Dédé ; caméra vue d'ensemble puis suivi du pion ; pions chibi sur socle qui sautent case par case ; dés, étoiles, pièces, confettis ; rideau de théâtre vers les mini-jeux.
+Même rendu au téléphone (portrait : caméra tournée d'un quart de tour) et à la télé. Sans WebGL : plateau 2D (`GameBoard.tsx`), aussi affiché dans l'aide « Les cases ».
+
+Reste à faire hors de ce lot : la vidéo tuto (`promo-video/src/tuto/games/dede-party.tsx`) montre encore l'ancien plateau de 24 cases et le « Double dé ».

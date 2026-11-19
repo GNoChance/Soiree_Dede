@@ -24,6 +24,10 @@ export type LineKind =
   | 'winner'
   | 'tie'
   | 'self'
+  | 'fork_scene'
+  | 'fork_scene_no'
+  | 'fork_tunnel'
+  | 'fork_tunnel_no'
 
 const LINES: Record<LineKind, string[]> = {
   intro: [
@@ -33,11 +37,12 @@ const LINES: Record<LineKind, string[]> = {
     'Installez-vous, prenez vos dés, c’est parti pour Dédé Party !',
   ],
   roll: [
-    'Tout le monde tape son dé, on ne traîne pas !',
+    'Tout le monde tape ses dés, on ne traîne pas !',
     'Les dés, s’il vous plaît ! Le plateau n’attend pas.',
     'Un petit lancer et on y va !',
     'Allez, allez, on lance ! J’ai une émission à boucler, moi.',
-    'Pensez au Double dé… mais une seule fois, hein !',
+    'Pensez au Triple dé… mais une seule fois, hein !',
+    'Deux dés chacun, et que ça roule ! Le plateau est grand, il faut des mollets.',
   ],
   start: [
     '{name} repasse par le Départ : 5 pièces, cadeau de la production !',
@@ -73,7 +78,7 @@ const LINES: Record<LineKind, string[]> = {
   ],
   star_poor: [
     '{name} passe devant l’étoile… mais les poches sont vides !',
-    'Il faut 20 pièces, {name}. Reviens avec des sous !',
+    'Il faut 30 pièces, {name} (15 pour ta première). Reviens avec des sous !',
     'L’étoile te fait coucou, {name}… pas assez de pièces.',
     'Si près du but, {name} ! Mais il manque des pièces.',
   ],
@@ -135,6 +140,30 @@ const LINES: Record<LineKind, string[]> = {
     'Bon, c’est moi qui joue, là. Je me commente, c’est mon émission !',
     'Dédé est candidate ET animatrice. Personne n’a rien dit, hein ?',
     'Je joue, mais je reste impartiale. Promis.',
+  ],
+  fork_scene: [
+    'L’aiguillage envoie {name} sur La Scène ! Souris, tu passes à l’antenne !',
+    'Par ici {name}, en scène ! Le public n’attend que toi.',
+    'Tapis rouge pour {name} : direction La Scène, les applaudissements sont offerts !',
+    '{name} monte sur scène ! Attention aux projecteurs, ça chauffe.',
+  ],
+  fork_scene_no: [
+    'Tout droit pour {name} ! La Scène, ce sera pour le prochain. Jaloux ?',
+    'Pas de scène pour {name} : l’aiguillage a dit « circulez » !',
+    '{name} file tout droit… et l’aiguillage tourne pour le suivant, petit veinard !',
+    'Raccourci pour {name} ! Moins de gloire, mais ça avance.',
+  ],
+  fork_tunnel: [
+    'Oh non, {name} part dans le Tunnel de la pub ! Trois coupures d’affilée, courage !',
+    'L’aiguillage est sans pitié : {name}, direction le Tunnel de la pub !',
+    '{name} entre dans le Tunnel de la pub… On se retrouve après la lessive et les yaourts.',
+    'Tunnel de la pub pour {name} ! Garde tes pièces près du cœur.',
+  ],
+  fork_tunnel_no: [
+    'Ouf ! {name} évite le Tunnel de la pub. Le suivant ne rigolera pas autant…',
+    'Tout droit, {name} ! Le tunnel sera pour le prochain, hi hi.',
+    '{name} passe à côté de la pub. Les annonceurs sont déçus, pas moi.',
+    'Aiguillage sympa : pas de tunnel pour {name} ! Il se retourne déjà vers le suivant…',
   ],
 }
 

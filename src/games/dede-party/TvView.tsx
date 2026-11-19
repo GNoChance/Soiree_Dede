@@ -6,25 +6,27 @@ import { playerOrPlaceholder } from '@/features/soiree/players'
 import { useViewport } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
 import { moverLine, useBoardView } from './anim'
-import { Board } from './GameBoard'
+import { Stage } from './Stage'
 import { CELL_INFO, type CellType } from './board'
 import { dedeLine } from './dede-lines'
 import { MINIGAMES } from './minigames'
-import { Countdown, DedeHost, Die, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
-import { AwardsScreen, IntroScreen, MgIntroScreen, MgResultScreen, MoveCenter } from './Screens'
+import { Countdown, DedeHost, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
+import { AwardsScreen, Curtain, IntroScreen, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
 import type { DedePartyState } from './types'
 
 /**
  * Vue télé de Dédé Party (rendue par Play sous TvContext) : lecture seule, seuls les `tick` partent.
- * Le plateau en grand avec Dédé au centre, le bandeau des scores ; pendant un mini-jeu : la règle,
+ * Le plateau 3D en grand (caméra qui suit le pion en vedette), Dédé et sa bulle incrustés, le bandeau des scores ; pendant un mini-jeu : la règle,
  * la question ou la pluie d'étoiles, qui a répondu, puis le podium ; la cérémonie en plein écran.
  */
 export function DedePartyTv({ state, act, players }: GamePlayProps) {
-  const s = state as unknown as DedePartyState
+  const live = state as unknown as DedePartyState
+  // Rideau de théâtre entre le plateau, les mini-jeux et la cérémonie : `s` = state affiché.
+  const { shown: s, closed } = useCurtain(live)
   const get: Get = useCallback((id: string) => playerOrPlaceholder(players, id), [players])
   const { w, h } = useViewport()
   const landscape = w > h * 1.05
-  const left = useDeadlineTick(s, act, true)
+  const left = useDeadlineTick(live, act, true)
   const view = useBoardView(s)
   const mg = s.mg
 
@@ -41,6 +43,31 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
     lastEv.current = n
   }, [view.events])
 
+  // Incrustations sur le plateau 3D : en haut qui joue (ou le tour), en bas Dédé et sa bulle.
+  const dede =
+    s.phase === 'move'
+      ? { line: moverLine(s, view, get), expression: view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie' }
+      : { line: dedeLine(s.phase === 'roll' ? (s.round === s.rounds ? 'finale' : 'roll') : 'mg_intro', String(s.round)), expression: 'joie' }
+  const top =
+    s.phase === 'move' ? (
+      <MoveBanner s={s} view={view} get={get} big />
+    ) : s.phase === 'roll' ? (
+      <div className="flex items-center gap-3">
+        <span className="sticker bg-surface/95 px-4 py-1 font-display text-4xl font-extrabold">
+          Tour {s.round} / {s.rounds}
+        </span>
+        {s.round === s.rounds && <span className="sticker bg-tomato px-3 py-1 font-display text-3xl font-extrabold text-white">🔥 La Finale !</span>}
+        <Countdown left={left} big />
+      </div>
+    ) : undefined
+  const bottom =
+    s.phase === 'move' || s.phase === 'roll' ? (
+      <div className="max-w-[78%]">
+        <DedeHost line={dede.line} size={104} big expression={dede.expression} />
+      </div>
+    ) : undefined
+
+  // Repli sans WebGL : le contenu du milieu du plateau 2D.
   let center: React.ReactNode
   if (s.phase === 'move') {
     center = (
@@ -87,19 +114,17 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
   const note = (id: string) => {
     if (s.phase === 'roll') {
       const r = s.rolls[id]
-      return r ? `🎲 ${r.dice.join(' + ')}${r.double ? ' (Double dé !)' : ''}` : '… lance son dé'
+      return r ? `🎲 ${r.dice.join(' + ')}${r.double ? ' (Triple dé !)' : ''}` : '… lance ses dés'
     }
     if (s.phase === 'mg_play' && mg) return mg.submitted.includes(id) ? '✔ a joué' : '… joue'
-    if (s.half_price[id]) return `Étoile à moitié prix !`
+    if (s.half_price[id]) return `⭐ à moitié prix !`
     return null
   }
 
   return (
     <div className={cn('flex h-[100dvh] w-full gap-4 overflow-hidden bg-paper p-4', landscape ? 'flex-row' : 'flex-col')}>
       <div className={cn('relative flex min-h-0 min-w-0 items-center justify-center', landscape ? 'flex-1' : 'flex-[3]')}>
-        <div className={cn('aspect-square', landscape ? 'h-full max-w-full' : 'w-full max-h-full')}>
-          <Board s={s} view={view} get={get} center={center} />
-        </div>
+        <Stage s={s} view={view} get={get} big={landscape} className="size-full" top={top} bottom={bottom} center={center} />
         <AnimatePresence mode="wait">
           {overlay && (
             <motion.div
@@ -113,6 +138,7 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
             </motion.div>
           )}
         </AnimatePresence>
+        <Curtain closed={closed} />
       </div>
       <div className={cn('flex min-h-0 shrink-0 flex-col gap-2 overflow-hidden', landscape ? 'w-[min(32vw,420px)]' : 'flex-[2]')}>
         <div className="flex items-center justify-between gap-2">
@@ -121,24 +147,10 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
             {s.phase === 'intro' ? 'Générique' : s.phase === 'awards' ? 'Cérémonie' : `Tour ${s.round}/${s.rounds}`}
           </span>
         </div>
-        {s.phase === 'roll' && (
-          <div className="flex flex-wrap items-center gap-2">
-            {s.order.map((id) => {
-              const r = s.rolls[id]
-              return r ? (
-                <motion.div key={id} initial={{ scale: 0 }} animate={{ scale: 1 }} className="flex gap-0.5">
-                  {r.dice.map((d, i) => (
-                    <Die key={i} value={d} size={34} />
-                  ))}
-                </motion.div>
-              ) : null
-            })}
-          </div>
-        )}
         <div className="min-h-0 flex-1 overflow-hidden">
           <Scoreboard s={s} snap={view.snap} get={get} highlight={view.mover?.id ?? null} big note={note} />
         </div>
-        {landscape && s.players.length <= 6 && (
+        {landscape && s.players.length <= 5 && (
           <div className="grid shrink-0 grid-cols-1 gap-1">
             {(Object.keys(CELL_INFO) as CellType[]).map((t) => (
               <div key={t} className="flex items-center gap-2 text-sm leading-tight font-bold">

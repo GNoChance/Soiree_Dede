@@ -60,11 +60,30 @@ const map = (ids, vals) => Object.fromEntries(ids.map((id, i) => [id, Array.isAr
 
 // ----------------------------------------------------------------------------- plateau / synchro avec board.ts
 const boardTs = fs.readFileSync(new URL('../../src/games/dede-party/board.ts', import.meta.url), 'utf8')
-const tsCells = JSON.parse(boardTs.match(/export const CELLS: CellType\[\] = (\[[^\]]+\])/)[1].replace(/'/g, '"'))
+const tsConst = (name) => JSON.parse(boardTs.match(new RegExp(`export const ${name}[^=]*= (\\[.+\\])\\n`))[1].replace(/'/g, '"'))
+const tsCells = tsConst('CELLS')
 const board = (await db.query(`select public._dp_board() b`)).rows[0].b
+const NEXT = (await db.query(`select public._dp_next() b`)).rows[0].b
+const PREV = (await db.query(`select public._dp_prev() b`)).rows[0].b
 const count = (t) => board.filter((x) => x === t).length
-ok('synchro du plateau SQL ↔ board.ts', JSON.stringify(board) === JSON.stringify(tsCells), JSON.stringify(tsCells))
-ok('plateau : 24 cases (1 Départ, 9 Applaudissements, 4 Pub, 4 Enveloppes, 6 Loges)', board.length === 24 && board[0] === 'start' && count('start') === 1 && count('clap') === 9 && count('pub') === 4 && count('env') === 4 && count('loge') === 6)
+ok('synchro du plateau SQL ↔ board.ts (cases)', JSON.stringify(board) === JSON.stringify(tsCells), JSON.stringify(tsCells))
+ok('synchro du tracé SQL ↔ board.ts (NEXT, PREV)', JSON.stringify(NEXT) === JSON.stringify(tsConst('NEXT')) && JSON.stringify(PREV) === JSON.stringify(tsConst('PREV')))
+ok('plateau : 47 cases (1 Départ, 20 Applaudissements, 9 Pub, 8 Enveloppes, 9 Loges)', board.length === 47 && board[0] === 'start' && count('start') === 1 && count('clap') === 20 && count('pub') === 9 && count('env') === 8 && count('loge') === 9, JSON.stringify([count('clap'), count('pub'), count('env'), count('loge')]))
+const forks = NEXT.map((n, i) => (Array.isArray(n) ? i : -1)).filter((i) => i >= 0)
+ok('tracé : 2 embranchements (cases 13 et 22), chaque case a une suivante et une précédente', NEXT.length === 47 && PREV.length === 47 && JSON.stringify(forks) === '[13,22]')
+ok('tracé : PREV est bien l’inverse de NEXT (par la grande boucle aux retours)', PREV.every((p, i) => [NEXT[p]].flat().includes(i)))
+// Toutes les cases sont atteignables depuis le Départ, et on revient toujours au Départ.
+const reach = new Set([0])
+for (let grew = true; grew; ) {
+  grew = false
+  for (const i of [...reach]) for (const n of [NEXT[i]].flat()) if (!reach.has(n)) { reach.add(n); grew = true }
+}
+const lap = (ways) => {
+  let i = 0, n = 0
+  do { const nx = NEXT[i]; i = Array.isArray(nx) ? nx[ways[forks.indexOf(i)]] : nx; n++ } while (i !== 0 && n < 100)
+  return n
+}
+ok('tracé : tout est atteignable ; tour de 36 cases au plus court, 44 par les deux détours', reach.size === 47 && lap([0, 0]) === 36 && lap([1, 1]) === 44 && lap([1, 0]) === 40 && lap([0, 1]) === 40)
 const LOGES = board.map((t, i) => (t === 'loge' ? i : -1)).filter((i) => i >= 0)
 const cards = (await db.query(`select public._dp_cards() c`)).rows[0].c
 ok('12 cartes Enveloppe surprise', cards.length === 12 && new Set(cards.map((c) => c.id)).size === 12)
@@ -72,8 +91,11 @@ ok('12 cartes Enveloppe surprise', cards.length === 12 && new Set(cards.map((c) 
 // ----------------------------------------------------------------------------- démarrage
 const s0 = must(await start(), 'start')
 ok('state : game dede-party, phase intro (≈ 5 s), tour 0/9', s0.state.game === 'dede-party' && s0.state.phase === 'intro' && s0.state.round === 0 && s0.state.rounds === 9 && approx(s0.state.deadline, 5))
-ok('chacun : Départ, 10 pièces, 0 étoile, 1 Double dé', [A, B, C, D].every((p) => s0.state.pos[p] === 0 && s0.state.coins[p] === 10 && s0.state.stars[p] === 0 && s0.state.double_left[p] === 1))
-ok('étoile posée sur une Loge', LOGES.includes(s0.state.star_cell))
+ok('chacun : Départ, 10 pièces, 0 étoile, 1 Triple dé, première étoile à moitié prix', [A, B, C, D].every((p) => s0.state.pos[p] === 0 && s0.state.coins[p] === 10 && s0.state.stars[p] === 0 && s0.state.double_left[p] === 1 && s0.state.half_price[p] === true))
+const starsOk = (st, n) => st.state.star_cells.length === n && new Set(st.state.star_cells).size === n && st.state.star_cells.every((c) => LOGES.includes(c))
+ok('4 joueurs : 2 étoiles posées sur 2 Loges différentes', starsOk(s0, 2), JSON.stringify(s0.state.star_cells))
+ok('2 joueurs : 1 étoile ; 3 à 6 : 2 étoiles ; 7-8 : 3 étoiles', starsOk(must(await start(OPTS, P.slice(0, 2)), 'n2'), 1) && starsOk(must(await start(OPTS, P.slice(0, 3)), 'n3'), 2) && starsOk(must(await start(OPTS, P.slice(0, 6)), 'n6'), 2) && starsOk(must(await start(OPTS, P.slice(0, 7)), 'n7'), 3) && starsOk(must(await start(OPTS, P.slice(0, 8)), 'n8'), 3))
+ok('aiguillages : 2, chacun à 0 ou 1', s0.state.sw.length === 2 && s0.state.sw.every((x) => x === 0 || x === 1))
 ok('ordre de passage = les 4 joueurs', s0.state.order.length === 4 && [A, B, C, D].every((p) => s0.state.order.includes(p)))
 ok('questions et réponses jamais dans le state public', !JSON.stringify(s0.state).includes('Bonne 0') && s0.server.q.quiz.length === 6 && s0.server.q.pif.length === 2 && s0.server.q.majorite.length === 2)
 ok('options : 6 et 12 tours', must(await start({ rounds: 6 }), 's6').state.rounds === 6 && must(await start({ rounds: 12 }), 's12').state.rounds === 12)
@@ -93,72 +115,106 @@ ok('fin du générique → lancer, tour 1, échéance ≈ 15 s', r1.state.phase 
 ok('tour 1 : ordre de passage inchangé', JSON.stringify(r1.state.order) === JSON.stringify(s0.state.order))
 ok('tick répété : idempotent', must(await act(r1, A, tick), 't1').state.round === 1)
 
-// ----------------------------------------------------------------------------- lancer
+// ----------------------------------------------------------------------------- lancer (2 dés, 3 avec le Triple dé)
 ok('pas joueur → not_a_player', (await act(r1, OUT, roll())).err === 'not_a_player')
-let R = must(await act(patch(r1, {}, { forced_dice: [4, 2, 6], dice_i: 0 }), A, roll()), 'rollA')
-ok('lancer : un dé (dé imposé 4), en attente des autres', JSON.stringify(R.state.rolls[A].dice) === '[4]' && R.state.rolls[A].double === false && R.state.phase === 'roll')
+// Étoiles loin (27, 30) et sans pièces : le trajet de A (0 → 6) ne dépend que des dés.
+const r1f = patch(r1, { star_cells: [27, 30] }, { forced_dice: [4, 2, 6, 1, 3], dice_i: 0 })
+let R = must(await act(r1f, A, roll()), 'rollA')
+ok('lancer : deux dés (dés imposés 4 + 2), en attente des autres', JSON.stringify(R.state.rolls[A].dice) === '[4,2]' && R.state.rolls[A].double === false && R.state.phase === 'roll')
 ok('deuxième lancer → already_rolled', (await act(R, A, roll())).err === 'already_rolled')
 R = must(await act(R, B, roll(true)), 'rollB')
-ok('Double dé : deux dés (2 + 6), plus de Double dé', JSON.stringify(R.state.rolls[B].dice) === '[2,6]' && R.state.double_left[B] === 0 && R.state.stats[B].doubles === 1)
-ok('Double dé déjà utilisé → no_double_left', (await act(patch(R, { rolls: { ...R.state.rolls, [B]: null } }), B, roll(true))).err === 'no_double_left')
+ok('Triple dé : trois dés (6 + 1 + 3), plus de Triple dé', JSON.stringify(R.state.rolls[B].dice) === '[6,1,3]' && R.state.double_left[B] === 0 && R.state.stats[B].doubles === 1)
+ok('Triple dé déjà utilisé → no_double_left', (await act(patch(R, { rolls: { ...R.state.rolls, [B]: null } }), B, roll(true))).err === 'no_double_left')
 const auto = must(await act(late(R), C, tick), 'auto')
-ok('échéance : lancers d’office (dé simple) puis déplacements', auto.state.phase === 'move' && auto.state.rolls[C].auto === true && auto.state.rolls[D].dice.length === 1 && auto.state.moves.length === 4)
+ok('échéance : lancers d’office (2 dés) puis déplacements', auto.state.phase === 'move' && auto.state.rolls[C].auto === true && auto.state.rolls[D].dice.length === 2 && auto.state.moves.length === 4)
 ok('déplacements : scénario dans l’ordre de passage, durée 2 + 5 s × 4', JSON.stringify(auto.state.moves.map((m) => m.id)) === JSON.stringify(auto.state.order) && approx(auto.state.deadline, 22))
-ok('déplacements : instantanés before / after', auto.state.before.pos[A] === 0 && auto.state.moves.every((m) => m.after && typeof m.after.coins === 'object'))
+ok('déplacements : instantanés before / after (pions, étoiles, aiguillages)', auto.state.before.pos[A] === 0 && auto.state.moves.every((m) => m.after && typeof m.after.coins === 'object' && Array.isArray(m.after.star_cells) && Array.isArray(m.after.sw)))
 const mA = auto.state.moves.find((m) => m.id === A)
-ok('pion A : 4 cases, une étape par case', mA.from === 0 && mA.steps.length >= 4 && mA.steps[3].cell === 4)
-let lateRoll = must(await act(late(patch(r1, {}, { forced_dice: [3, 3, 3, 3] })), A, roll()), 'lateRoll')
+ok('pion A : 6 cases, une étape par case', mA.from === 0 && mA.steps.length >= 6 && mA.steps[5].cell === 6)
+let lateRoll = must(await act(late(patch(r1, {}, { forced_dice: [3, 3, 3, 3, 3, 3, 3, 3] })), A, roll()), 'lateRoll')
 ok('lancer après l’échéance : compté, puis tout le tour se résout', lateRoll.state.phase === 'move' && lateRoll.state.rolls[A].auto === undefined && lateRoll.state.rolls[B].auto === true)
 
 // ----------------------------------------------------------------------------- cases (2 joueurs, ordre A puis B)
 const two = must(await start(OPTS, [A, B]), 'two')
 const T0 = must(await act(late(two), A, tick), 'T0')
-/** Joue un tour : dés imposés pour A puis B (+ dés suivants), cartes imposées. */
-async function turn(st, { pos = {}, coins = {}, stars = {}, star = 18, dist = {}, half = {}, dice = [1, 1], cards = [] } = {}) {
+/**
+ * Joue un tour : `dice` = les 2 dés de A, puis ceux de B (1 + 1 par défaut), puis les dés suivants (carte « Bis »).
+ * Par défaut : B part de la case 1 et s'arrête en 3 (Loge sans étoile : rien), l'étoile est loin (30),
+ * pas de promo de bienvenue, aiguillages tout droit.
+ */
+async function turn(st, { pos = {}, coins = {}, stars = {}, star = [30], sw = [0, 0], dist = {}, half = {}, dice = [1, 1], extra = [], diceB = [1, 1], cards = [] } = {}) {
   const base = patch(st, {
     order: [A, B],
-    pos: { ...st.state.pos, ...pos },
+    pos: { ...st.state.pos, [B]: 1, ...pos },
     coins: { ...st.state.coins, ...coins },
     stars: { ...st.state.stars, ...stars },
     dist: { ...st.state.dist, ...dist },
-    half_price: { ...st.state.half_price, ...half },
-    star_cell: star,
-  }, { forced_dice: dice, dice_i: 0, forced_cards: cards })
+    half_price: { [A]: false, [B]: false, ...half },
+    star_cells: star,
+    sw,
+  }, { forced_dice: [...dice, ...diceB, ...extra], dice_i: 0, forced_cards: cards })
   const a = must(await act(base, A, roll()), 'turn A')
   return must(await act(a, B, roll()), 'turn B')
 }
 const evOf = (r, id = A) => r.state.moves.find((m) => m.id === id).steps.flatMap((s) => s.ev)
-// B part de 13 (Loge sans étoile -> 14 Applaudissements) avec un dé de 1, sauf mention contraire.
-const NB = { pos: { [B]: 12 } }
 
-let t = await turn(T0, { ...NB, dice: [1, 1] })
-ok('Applaudissements : +3', t.state.pos[A] === 1 && t.state.coins[A] === 13 && evOf(t).some((e) => e.t === 'clap' && e.d === 3))
-t = await turn(T0, { ...NB, dice: [2, 1] })
-ok('Loge sans étoile : rien', t.state.pos[A] === 2 && t.state.coins[A] === 10 && evOf(t).length === 0)
-t = await turn(T0, { ...NB, dice: [3, 1] })
-ok('Page de pub : −3, compteur pubs', t.state.coins[A] === 7 && t.state.stats[A].pubs === 1 && evOf(t).some((e) => e.t === 'pub' && e.d === -3))
-t = await turn(T0, { ...NB, coins: { [A]: 1 }, dice: [3, 1] })
+let t = await turn(T0, { dice: [1, 3] })
+ok('Applaudissements : +3', t.state.pos[A] === 4 && t.state.coins[A] === 13 && evOf(t).some((e) => e.t === 'clap' && e.d === 3))
+ok('B (témoin) : case 1 → 3, Loge sans étoile, rien', t.state.pos[B] === 3 && t.state.coins[B] === 10 && evOf(t, B).length === 0)
+t = await turn(T0, { dice: [1, 2] })
+ok('Loge sans étoile : rien', t.state.pos[A] === 3 && t.state.coins[A] === 10 && evOf(t).length === 0)
+t = await turn(T0, { dice: [1, 1] })
+ok('Page de pub : −3, compteur pubs', t.state.pos[A] === 2 && t.state.coins[A] === 7 && t.state.stats[A].pubs === 1 && evOf(t).some((e) => e.t === 'pub' && e.d === -3))
+t = await turn(T0, { coins: { [A]: 1 }, dice: [1, 1] })
 ok('Page de pub : jamais sous 0, Fauché', t.state.coins[A] === 0 && t.state.stats[A].broke === 1 && evOf(t).some((e) => e.t === 'pub' && e.d === -1))
-t = await turn(T0, { ...NB, pos: { ...NB.pos, [A]: 22 }, dice: [3, 1] })
+t = await turn(T0, { pos: { [A]: 34 }, dice: [1, 2] })
 ok('passage par Départ : +5 (+3 à l’arrivée sur Applaudissements)', t.state.pos[A] === 1 && t.state.coins[A] === 18 && evOf(t).some((e) => e.t === 'start' && e.d === 5))
-t = await turn(T0, { ...NB, pos: { ...NB.pos, [A]: 20 }, dice: [4, 1] })
+t = await turn(T0, { pos: { [A]: 33 }, dice: [1, 2] })
 ok('arrêt sur Départ : +5 une seule fois', t.state.pos[A] === 0 && t.state.coins[A] === 15)
-ok('chemin parcouru (dist)', t.state.dist[A] === 4)
+ok('chemin parcouru (dist)', t.state.dist[A] === 3)
 
-// ----------------------------------------------------------------------------- étoile
-t = await turn(T0, { ...NB, coins: { [A]: 20 }, star: 2, dice: [2, 1] })
-ok('étoile à l’arrêt : achetée 20 pièces, Pile dessus', t.state.stars[A] === 1 && t.state.coins[A] === 0 && t.state.stats[A].star_exact === 1 && evOf(t).some((e) => e.t === 'star' && e.exact === true && e.cost === 20))
+// ----------------------------------------------------------------------------- embranchements (l'aiguillage bascule à chaque passage)
+t = await turn(T0, { pos: { [A]: 12 }, sw: [0, 0], dice: [1, 1] })
+ok('aiguillage 13 « tout droit » : 12 → 13 → 14 (Pub), puis il bascule', t.state.pos[A] === 14 && t.state.coins[A] === 7 && JSON.stringify(t.state.sw) === '[1,0]' && evOf(t).some((e) => e.t === 'fork' && e.fork === 0 && e.way === 0))
+t = await turn(T0, { pos: { [A]: 12 }, sw: [1, 0], dice: [1, 1] })
+ok('aiguillage 13 « La Scène » : 12 → 13 → 36 (Applaudissements), puis il bascule', t.state.pos[A] === 36 && t.state.coins[A] === 13 && JSON.stringify(t.state.sw) === '[0,0]' && evOf(t).some((e) => e.t === 'fork' && e.fork === 0 && e.way === 1))
+ok('l’évènement fork est sur la première case de la voie prise', t.state.moves[0].steps[1].cell === 36 && t.state.moves[0].steps[1].ev[0].t === 'fork' && t.state.moves[0].steps[0].ev.length === 0)
+t = await turn(T0, { pos: { [A]: 21 }, sw: [0, 1], dice: [1, 1] })
+ok('aiguillage 22 « Tunnel de la pub » : 21 → 22 → 41 (Pub)', t.state.pos[A] === 41 && t.state.coins[A] === 7 && JSON.stringify(t.state.sw) === '[0,0]' && evOf(t).some((e) => e.t === 'fork' && e.fork === 1 && e.way === 1))
+t = await turn(T0, { pos: { [A]: 21 }, sw: [0, 0], dice: [1, 2] })
+ok('aiguillage 22 « tout droit » : 21 → 22 → 23 → 24', t.state.pos[A] === 24 && JSON.stringify(t.state.sw) === '[0,1]')
+t = await turn(T0, { pos: { [A]: 11 }, sw: [1, 0], dice: [1, 1] })
+ok('s’arrêter SUR l’embranchement ne bascule pas l’aiguillage', t.state.pos[A] === 13 && JSON.stringify(t.state.sw) === '[1,0]' && !evOf(t).some((e) => e.t === 'fork'))
+t = await turn(T0, { pos: { [A]: 12, [B]: 12 }, sw: [1, 0], dice: [1, 1] })
+ok('deux pions de suite : le premier par La Scène, le second tout droit', t.state.pos[A] === 36 && t.state.pos[B] === 14 && JSON.stringify(t.state.sw) === '[1,0]' && t.state.moves[0].after.sw[0] === 0)
+t = await turn(T0, { pos: { [A]: 39 }, dice: [1, 1] })
+ok('La Scène rejoint la boucle : 39 → 40 → 15', t.state.pos[A] === 15 && t.state.coins[A] === 13)
+t = await turn(T0, { pos: { [A]: 45 }, dice: [1, 1] })
+ok('Le Tunnel rejoint la boucle : 45 → 46 → 25', t.state.pos[A] === 25)
+t = await turn(T0, { pos: { [A]: 10 }, sw: [1, 0], dice: [6, 6] })
+ok('grand lancer à travers La Scène : 10 → … 13, 36-40, 15, 16, 17, 18 (12 cases)', t.state.pos[A] === 18 && JSON.stringify(t.state.moves[0].steps.map((s) => s.cell)) === '[11,12,13,36,37,38,39,40,15,16,17,18]', JSON.stringify(t.state.moves[0].steps.map((s) => s.cell)))
+
+// ----------------------------------------------------------------------------- étoiles
+t = await turn(T0, { coins: { [A]: 30 }, star: [3], dice: [1, 2] })
+ok('étoile à l’arrêt : achetée 30 pièces, Pile dessus', t.state.stars[A] === 1 && t.state.coins[A] === 0 && t.state.stats[A].star_exact === 1 && evOf(t).some((e) => e.t === 'star' && e.exact === true && e.cost === 30))
 ok('achat d’étoile : pas « Fauché » même à 0 pièce', t.state.stats[A].broke === 0)
-ok('l’étoile déménage dans une autre Loge', LOGES.includes(t.state.star_cell) && t.state.star_cell !== 2)
-t = await turn(T0, { ...NB, coins: { [A]: 25 }, star: 2, dice: [4, 1] })
+ok('l’étoile déménage dans une autre Loge', t.state.star_cells.length === 1 && LOGES.includes(t.state.star_cells[0]) && t.state.star_cells[0] !== 3 && JSON.stringify(evOf(t).find((e) => e.t === 'star').stars) === JSON.stringify(t.state.moves[0].after.star_cells))
+t = await turn(T0, { coins: { [A]: 35 }, star: [3], dice: [2, 2] })
 ok('étoile au passage : achetée, pas « pile dessus »', t.state.stars[A] === 1 && t.state.coins[A] === 8 && t.state.stats[A].star_exact === 0)
-t = await turn(T0, { ...NB, coins: { [A]: 19 }, star: 2, dice: [2, 1] })
-ok('19 pièces : pas d’achat (star_poor), l’étoile reste', t.state.stars[A] === 0 && t.state.star_cell === 2 && evOf(t).some((e) => e.t === 'star_poor' && e.need === 20))
-t = await turn(T0, { ...NB, coins: { [A]: 10 }, half: { [A]: true }, star: 2, dice: [2, 1] })
-ok('demi-tarif : étoile à 10, promo consommée', t.state.stars[A] === 1 && t.state.coins[A] === 0 && t.state.half_price[A] === false)
+t = await turn(T0, { coins: { [A]: 29 }, star: [3], dice: [1, 2] })
+ok('29 pièces : pas d’achat (star_poor), l’étoile reste', t.state.stars[A] === 0 && t.state.star_cells[0] === 3 && evOf(t).some((e) => e.t === 'star_poor' && e.need === 30))
+t = await turn(T0, { coins: { [A]: 15 }, half: { [A]: true }, star: [3], dice: [1, 2] })
+ok('demi-tarif (promo de bienvenue / carte) : étoile à 15, promo consommée', t.state.stars[A] === 1 && t.state.coins[A] === 0 && t.state.half_price[A] === false)
+t = await turn(T0, { coins: { [A]: 65 }, star: [3, 7], dice: [4, 4] })
+ok('deux étoiles sur le trajet : les deux achetées (65 − 60 − 3 de pub)', t.state.stars[A] === 2 && t.state.coins[A] === 2 && t.state.stats[A].stars_bought === 2)
+ok('les deux étoiles déménagent sur deux Loges différentes', t.state.star_cells.length === 2 && new Set(t.state.star_cells).size === 2 && t.state.star_cells.every((c) => LOGES.includes(c)), JSON.stringify(t.state.star_cells))
+t = await turn(T0, { pos: { [A]: 13 }, coins: { [A]: 30 }, sw: [1, 0], star: [38], dice: [1, 2] })
+ok('étoile dans la Loge de La Scène (38) : achetée quand l’aiguillage y mène', t.state.pos[A] === 38 && t.state.stars[A] === 1)
+t = await turn(T0, { pos: { [A]: 13 }, coins: { [A]: 30 }, sw: [0, 0], star: [38], dice: [1, 1] })
+ok('… et ratée quand l’aiguillage envoie tout droit', t.state.pos[A] === 15 && t.state.stars[A] === 0 && t.state.star_cells[0] === 38)
 
-// ----------------------------------------------------------------------------- les 12 cartes (A part de 0, dé 5 -> Enveloppe en 5)
-const card = async (id, opts = {}) => turn(T0, { ...NB, dice: [5, 1, ...(opts.extra ?? [])], cards: [id], ...opts })
+// ----------------------------------------------------------------------------- les 12 cartes (A part de 0, dés 2 + 3 -> Enveloppe en 5)
+const card = async (id, opts = {}) => turn(T0, { dice: [2, 3], cards: [id], ...opts })
 const cev = (r) => evOf(r).find((e) => e.t === 'card')
 t = await card('plus8')
 ok('carte +8', t.state.coins[A] === 18 && cev(t).card === 'plus8' && cev(t).text.length > 5 && t.state.stats[A].envelopes === 1)
@@ -167,14 +223,20 @@ t = await card('minus5')
 ok('carte −5', t.state.coins[A] === 5)
 t = await card('fwd3')
 const fwdSteps = t.state.moves.find((m) => m.id === A).steps
-ok('carte avance de 3 : 5 → 8, étapes marquées card, pas d’effet d’arrivée (8 = Applaudissements)', t.state.pos[A] === 8 && fwdSteps.length === 8 && fwdSteps.slice(5).every((s) => s.card) && t.state.coins[A] === 10)
-t = await card('fwd3', { coins: { [A]: 20 }, star: 6 })
+ok('carte avance de 3 : 5 → 8, étapes marquées card, pas d’effet d’arrivée (8 = Pub)', t.state.pos[A] === 8 && fwdSteps.length === 8 && fwdSteps.slice(5).every((s) => s.card) && t.state.coins[A] === 10)
+t = await card('fwd3', { coins: { [A]: 30 }, star: [7] })
 ok('carte avance de 3 : achat d’étoile au passage', t.state.stars[A] === 1)
 t = await card('back3')
 ok('carte recule de 3 : 5 → 2, sans effet d’arrivée', t.state.pos[A] === 2 && t.state.coins[A] === 10 && t.state.dist[A] === 2)
-// Enveloppe en 21 (16 + 5) puis avance de 3 : 22, 23, 0 (Départ).
-t = await turn(T0, { ...NB, pos: { ...NB.pos, [A]: 16 }, dice: [5, 1], cards: ['fwd3'] })
-ok('carte avance de 3 par-dessus Départ : +5', t.state.pos[A] === 0 && t.state.coins[A] === 15)
+t = await turn(T0, { pos: { [A]: 14 }, dice: [1, 1], cards: ['back3'] })
+ok('carte recule de 3 depuis 16 : 15, 14, 13 (par la grande boucle)', t.state.pos[A] === 13)
+t = await turn(T0, { pos: { [A]: 13 }, sw: [1, 0], dice: [1, 1], cards: ['back3'] })
+ok('carte recule de 3 depuis La Scène (37) : 36, 13, 12, l’aiguillage ne rebascule pas', t.state.pos[A] === 12 && JSON.stringify(t.state.sw) === '[0,0]')
+t = await turn(T0, { pos: { [A]: 20 }, sw: [0, 0], dice: [1, 1], cards: ['fwd3'] })
+ok('carte avance de 3 à travers un aiguillage (22 → 23, 24, 25) : il bascule', t.state.pos[A] === 25 && JSON.stringify(t.state.sw) === '[0,1]')
+// Enveloppe en 32 (30 + 2) puis « Bis » avec un dé de 4 : 33, 34, 35, 0 (Départ).
+t = await turn(T0, { pos: { [A]: 30 }, dice: [1, 1], extra: [4], cards: ['reroll'] })
+ok('carte Bis par-dessus Départ : +5', t.state.pos[A] === 0 && t.state.coins[A] === 15 && cev(t).die === 4)
 t = await card('swap_lead', { pos: { [A]: 0, [B]: 12 }, dist: { [A]: 0, [B]: 40 } })
 ok('carte échange de place avec le plus loin devant (dist)', t.state.pos[A] === 12 && t.state.moves.find((m) => m.id === A).after.pos[B] === 5 && t.state.dist[A] === 40 && cev(t).with === B)
 t = await card('swap_lead', { pos: { [A]: 0, [B]: 12 }, dist: { [A]: 0, [B]: 0 } })
@@ -189,15 +251,15 @@ t = await card('charity', { coins: { [A]: 1, [B]: 30 } })
 ok('carte Téléthon : le tireur est dernier → il reçoit', t.state.coins[A] === 3 && t.state.coins[B] === 28)
 t = await card('everyone3')
 ok('carte tournée générale : +3 pour tous', t.state.coins[A] === 13 && t.state.coins[B] === 13)
-t = await card('star_moves', { star: 13 })
-ok('carte l’étoile déménage', t.state.star_cell !== 13 && LOGES.includes(t.state.star_cell))
+t = await card('star_moves', { star: [11, 17] })
+ok('carte changement de décor : toutes les étoiles déménagent', t.state.star_cells.length === 2 && new Set(t.state.star_cells).size === 2 && t.state.star_cells.every((c) => LOGES.includes(c)) && t.state.star_cells[0] !== 11 && !t.state.star_cells.includes(17) && JSON.stringify(cev(t).stars) === JSON.stringify(t.state.star_cells), JSON.stringify(t.state.star_cells))
 t = await card('reroll', { extra: [2] })
-ok('carte rejoue un dé : 5 → 7, sans effet d’arrivée', t.state.pos[A] === 7 && t.state.coins[A] === 10 && cev(t).die === 2)
+ok('carte Bis : relance UN dé, 5 → 7, sans effet d’arrivée', t.state.pos[A] === 7 && t.state.coins[A] === 10 && cev(t).die === 2)
 t = await card('half_price')
 ok('carte demi-tarif', t.state.half_price[A] === true)
 t = await card('gift_double')
-ok('carte cadeau : +1 Double dé', t.state.double_left[A] === 2)
-t = await turn(T0, { ...NB, pos: { [A]: 0, [B]: 12 }, dice: [5, 1], cards: [] })
+ok('carte cadeau : +1 Triple dé', t.state.double_left[A] === 2 && cev(t).text.includes('Triple dé'))
+t = await turn(T0, { dice: [2, 3], cards: [] })
 ok('enveloppe sans carte imposée : pioche mélangée', cev(t) && cards.some((c) => c.id === cev(t).card) && t.server.deck.length === 11)
 
 // ----------------------------------------------------------------------------- enchaînement des phases
@@ -390,10 +452,13 @@ ok('catalogue : 11 trophées party_* actifs (slots 2 à 12)', tr.length === 11 &
 const keys = Object.keys(fr(C).stats)
 ok('trophées : toutes les stats du catalogue sont posées par le moteur', tr.filter((x) => x.rule.stat && x.rule.stat !== 'won').every((x) => keys.includes(x.rule.stat)), JSON.stringify(tr.map((x) => x.rule.stat)))
 
-// ----------------------------------------------------------------------------- parties complètes au hasard (simulation d'équilibrage)
+// ----------------------------------------------------------------------------- parties complètes (simulation d'équilibrage)
+// Deux familles : « hasard » (tout le monde joue au pif) et « niveaux » (le joueur 0 est le plus fort aux
+// mini-jeux, le dernier le plus faible) pour mesurer l'écart entre bons et mauvais joueurs.
 const rnd = (n) => Math.floor(Math.random() * n)
-function randomPayload(st, me, players) {
+function randomPayload(st) {
   const k = st.state.mg.kind
+  const players = st.state.players
   if (k === 'quiz') return { answers: [rnd(4), rnd(4), Math.random() < 0.1 ? null : rnd(4)], ms: [rnd(8000), rnd(8000), rnd(8000)] }
   if (k === 'pif') return { value: rnd(200) }
   if (k === 'majorite') return { target: players[rnd(players.length)] }
@@ -401,10 +466,28 @@ function randomPayload(st, me, players) {
   if (k === 'etoiles') return { score: rnd(31) }
   return { ms: 5000 + rnd(4000) }
 }
-async function simulate(n, rounds) {
+/** Envoi d'un joueur de niveau `lvl` (1 = très fort, 0 = très faible). */
+function skilledPayload(st, lvl) {
+  const k = st.state.mg.kind
+  const secret = st.server.mg?.secret ?? {}
+  if (k === 'quiz') {
+    return {
+      answers: [0, 1, 2].map((i) => (Math.random() < 0.3 + 0.6 * lvl ? secret.answers[i] : (secret.answers[i] + 1 + rnd(3)) % 4)),
+      ms: [0, 1, 2].map(() => Math.min(7900, Math.round(1200 + (1 - lvl) * 4000 + rnd(2000)))),
+    }
+  }
+  if (k === 'pif') return { value: Math.round(Number(secret.answer) * (1 + (Math.random() - 0.5) * 2 * (0.08 + 0.9 * (1 - lvl)))) }
+  if (k === 'majorite') return { target: st.state.players[rnd(st.state.players.length)] }
+  if (k === 'buzzer') return Math.random() < 0.08 ? { false_start: true } : { ms: Math.round(180 + (1 - lvl) * 350 + rnd(250)) }
+  if (k === 'etoiles') return { score: Math.round(5 + 15 * lvl + rnd(9)) }
+  return { ms: Math.round(7000 + (Math.random() - 0.5) * 2 * (150 + 1800 * (1 - lvl))) }
+}
+async function simulate(n, rounds, skilled = false) {
   const players = P.slice(0, n)
+  const lvl = (p) => 1 - players.indexOf(p) / (n - 1)
   let st = must(await start({ ...OPTS, rounds }, players), 'sim')
   st = must(await act(late(st), players[0], tick), 'sim intro')
+  let moveS = 0
   for (let guard = 0; guard < 400 && st.state.phase !== 'finished'; guard++) {
     const ph = st.state.phase
     if (ph === 'roll') {
@@ -415,40 +498,52 @@ async function simulate(n, rounds) {
         st = must(await act(st, p, roll(dbl)), 'sim roll')
       }
       if (st.state.phase === 'roll') st = must(await act(late(st), players[0], tick), 'sim roll tick')
+      moveS = Math.max(moveS, ...st.state.moves.map((m) => m.steps.length))
     } else if (ph === 'mg_play') {
       if (st.state.mg.kind === 'buzzer') st = patch(st, { mg: { ...st.state.mg, data: { ...st.state.mg.data, go_at: iso(-2) } } })
       for (const p of players) {
         if (st.state.phase !== 'mg_play') break
         if (Math.random() < 0.05) continue
-        st = must(await act(st, p, sub(st.state.mg.no, randomPayload(st, p, players))), 'sim sub')
+        st = must(await act(st, p, sub(st.state.mg.no, skilled ? skilledPayload(st, lvl(p)) : randomPayload(st))), 'sim sub')
       }
       if (st.state.phase === 'mg_play') st = must(await act(late(st), players[0], tick), 'sim mg tick')
     } else {
       st = must(await act(late(st), players[0], tick), 'sim tick ' + ph)
     }
   }
-  return st
+  return { st, maxSteps: moveS }
 }
 const t0 = Date.now()
+const CONFIGS = [[4, 9, false], [6, 9, false], [8, 9, false], [2, 9, false], [3, 6, false], [4, 12, false], [4, 9, true], [6, 9, true], [8, 9, true]]
 const sims = []
-for (const [n, rounds] of [[4, 9], [6, 9], [8, 9], [3, 6], [4, 12]]) {
+for (const [n, rounds, skilled] of CONFIGS) {
   for (let i = 0; i < SIMS; i++) {
-    const st = await simulate(n, rounds)
-    sims.push({ n, rounds, st })
+    const { st, maxSteps } = await simulate(n, rounds, skilled)
+    sims.push({ n, rounds, skilled, st, maxSteps })
   }
 }
 ok(`simulation : ${sims.length} parties complètes jusqu’à finished`, sims.every((x) => x.st.state.phase === 'finished' && x.st.results.length === x.n))
 ok('simulation : coins jamais négatifs, étoiles cohérentes', sims.every((x) => Object.values(x.st.state.coins).every((v) => v >= 0) && x.st.results.every((r) => r.stats.stars >= 0)))
+ok('simulation : jamais plus de 24 cases pour un pion en un tour (animation de 5 s)', sims.every((x) => x.maxSteps <= 24), String(Math.max(...sims.map((x) => x.maxSteps))))
 const pct = (a, b) => `${Math.round((100 * a) / Math.max(1, b))} %`
+const avg = (a) => (a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)).toFixed(2)
 console.log(`\n— Simulation (${SIMS} parties par config, ${((Date.now() - t0) / 1000).toFixed(1)} s) —`)
-for (const [n, rounds] of [[4, 9], [6, 9], [8, 9], [3, 6], [4, 12]]) {
-  const g = sims.filter((x) => x.n === n && x.rounds === rounds)
+for (const [n, rounds, skilled] of CONFIGS) {
+  const g = sims.filter((x) => x.n === n && x.rounds === rounds && x.skilled === skilled)
   const win = g.map((x) => Math.max(...x.st.results.map((r) => r.stats.stars)))
   const all = g.flatMap((x) => x.st.results)
   const dist = {}
   for (const w of win) dist[w] = (dist[w] ?? 0) + 1
   const trophy = (f) => pct(all.filter(f).length, all.length)
-  console.log(`  ${n} joueurs, ${rounds} tours : étoiles du vainqueur ${JSON.stringify(dist)} · sans étoile ${trophy((r) => r.stats.no_star === 1)} · pubs≥3 ${trophy((r) => r.stats.pubs >= 3)} · fauché ${trophy((r) => r.stats.broke)} · pile dessus ${trophy((r) => r.stats.star_exact)} · triplé ${trophy((r) => r.stats.mg_streak >= 3)} · 3★+ ${trophy((r) => r.stats.stars >= 3)} · carton plein ${trophy((r) => r.stats.win_mvp)} · pièces gagnées/partie ${Math.round(all.reduce((a, r) => a + r.stats.coins_earned, 0) / all.length)} · enveloppes/partie ${(all.reduce((a, r) => a + r.stats.envelopes, 0) / all.length).toFixed(1)}`)
+  const of = (i) => g.map((x) => x.st.results.find((r) => r.profile_id === P[i]))
+  let line = `  ${n} joueurs, ${rounds} tours${skilled ? ' (niveaux)' : ''} : étoiles du vainqueur ${JSON.stringify(dist)} · étoiles/joueur ${avg(all.map((r) => r.stats.stars))} · sans étoile ${trophy((r) => r.stats.no_star === 1)}`
+  if (skilled) {
+    const best = of(0), worst = of(n - 1)
+    line += ` · MEILLEUR : ${avg(best.map((r) => r.stats.stars))} ★, gagne ${pct(best.filter((r) => r.won).length, best.length)}, sans étoile ${pct(best.filter((r) => r.stats.no_star === 1).length, best.length)} · PIRE : ${avg(worst.map((r) => r.stats.stars))} ★, gagne ${pct(worst.filter((r) => r.won).length, worst.length)}, sans étoile ${pct(worst.filter((r) => r.stats.no_star === 1).length, worst.length)}`
+  } else {
+    line += ` · pubs≥3 ${trophy((r) => r.stats.pubs >= 3)} · fauché ${trophy((r) => r.stats.broke)} · pile dessus ${trophy((r) => r.stats.star_exact)} · triplé ${trophy((r) => r.stats.mg_streak >= 3)} · 3★+ ${trophy((r) => r.stats.stars >= 3)} · carton plein ${trophy((r) => r.stats.win_mvp)} · pièces gagnées/partie ${Math.round(all.reduce((a, r) => a + r.stats.coins_earned, 0) / all.length)} · enveloppes/partie ${(all.reduce((a, r) => a + r.stats.envelopes, 0) / all.length).toFixed(1)}`
+  }
+  console.log(line)
 }
 
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')

@@ -11,13 +11,14 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { TvButton } from '@/features/tv/TvButton'
 import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
-import { moverLine, useBoardView, type BoardView } from './anim'
+import { boardViewAt, moverLine, useBoardView } from './anim'
 import { Board } from './GameBoard'
+import { Stage } from './Stage'
 import { CELL_INFO, STAR_PRICE, HALF_PRICE, type CellType } from './board'
 import { dedeLine } from './dede-lines'
 import { MINIGAMES } from './minigames'
 import { Countdown, DedeHost, Die, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
-import { AwardsScreen, IntroScreen, MgIntroScreen, MgResultScreen, MoveCenter } from './Screens'
+import { AwardsScreen, Curtain, IntroScreen, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
 import { DedePartyTv } from './TvView'
 import { dpActions, type DedePartyState } from './types'
 
@@ -37,10 +38,13 @@ const PHASE_LABEL: Partial<Record<DedePartyState['phase'], string>> = {
 }
 
 function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: GamePlayProps) {
-  const s = state as unknown as DedePartyState
+  const live = state as unknown as DedePartyState
+  // Rideau de théâtre entre le plateau, les mini-jeux et la cérémonie : `s` = state affiché.
+  const { shown: s, closed } = useCurtain(live)
   const get: Get = useCallback((id: string) => playerOrPlaceholder(players, id), [players])
   const isPlayer = s.players.includes(meId)
-  const left = useDeadlineTick(s, act, isPlayer || isHost)
+  const left = useDeadlineTick(live, act, isPlayer || isHost)
+  const r = useRoll(s, meId, act)
   const view = useBoardView(s)
   const [help, setHelp] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -63,14 +67,35 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
 
   let main: React.ReactNode = null
   if (s.phase === 'intro') main = <IntroScreen s={s} get={get} />
-  else if (s.phase === 'roll') main = <RollPhase s={s} meId={meId} isPlayer={isPlayer} get={get} act={act} view={view} left={left} />
-  else if (s.phase === 'move')
+  else if (s.phase === 'roll' || s.phase === 'move') {
+    // Même scène 3D du lancer aux déplacements (pas de rechargement entre les deux).
+    const moving = s.phase === 'move'
     main = (
       <div className="flex flex-col gap-2">
-        <Board s={s} view={view} get={get} center={<MoveCenter s={s} view={view} get={get} />} />
-        <DedeHost line={moverLine(s, view, get)} size={58} expression={view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie'} />
+        {!moving && (
+          <p className="text-center font-display text-xl font-extrabold leading-tight">
+            Tour {s.round} / {s.rounds}
+            {s.round === s.rounds ? ' · 🔥 la Finale !' : isPlayer && !r.mine ? ' : lance tes dés !' : ''}
+          </p>
+        )}
+        <Stage
+          s={s}
+          view={view}
+          get={get}
+          className="aspect-[4/5] max-h-[58dvh]"
+          top={moving ? <MoveBanner s={s} view={view} get={get} /> : undefined}
+          bottom={moving ? undefined : <RollOverlay r={r} isPlayer={isPlayer} />}
+          center={moving ? <MoveCenter s={s} view={view} get={get} /> : undefined}
+        />
+        <DedeHost
+          line={moving ? moverLine(s, view, get) : dedeLine(s.round === s.rounds ? 'finale' : 'roll', String(s.round))}
+          size={58}
+          expression={moving && view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie'}
+        />
+        {!moving && <RollBelow s={s} meId={meId} isPlayer={isPlayer} get={get} left={left} r={r} />}
       </div>
     )
+  }
   else if (s.phase === 'mg_intro' && mg) main = <MgIntroScreen s={s} mg={mg} />
   else if (s.phase === 'mg_play' && mg) main = <MgPlayPhase s={s} meId={meId} isPlayer={isPlayer} get={get} act={act} left={left} />
   else if (s.phase === 'mg_result' && mg) main = <MgResultScreen mg={mg} get={get} meId={meId} />
@@ -78,6 +103,7 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
 
   return (
     <div className="flex flex-col gap-3 pb-4">
+      <Curtain closed={closed} fixed />
       <div className="flex items-center gap-2">
         {isPlayer ? (
           <div className="sticker flex min-w-0 flex-1 items-center gap-2 bg-surface px-2 py-1">
@@ -87,8 +113,8 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
                 ⭐ {snap.stars[meId] ?? 0} · 🪙 {snap.coins[meId] ?? 0}
               </span>
               <span className="text-xs font-bold text-muted">
-                {s.double_left[meId] > 0 ? `🎲🎲 Double dé : ${s.double_left[meId]}` : 'Double dé utilisé'}
-                {s.half_price[meId] ? ` · étoile à ${HALF_PRICE} 🪙 !` : ''}
+                {s.double_left[meId] > 0 ? `🎲🎲🎲 Triple dé : ${s.double_left[meId]}` : 'Triple dé utilisé'}
+                {s.half_price[meId] ? ` · ⭐ à ${HALF_PRICE} 🪙 !` : ''}
               </span>
             </span>
           </div>
@@ -139,9 +165,16 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
               </span>
             </div>
           ))}
-          <p className="mt-2 text-sm font-bold">
-            ⭐ L’étoile s’achète toute seule ({STAR_PRICE} 🪙) dès que tu passes ou t’arrêtes dessus, puis elle déménage. Mini-jeu à chaque tour : 1er 10 🪙, 2e 6, 3e 4, les autres 2 (doublé au dernier tour). À la fin, 2 étoiles bonus : Roi des mini-jeux et Prix de la poisse !
+          <p className="mt-1 text-sm font-bold">
+            ⭐ Une étoile s’achète toute seule ({STAR_PRICE} 🪙, ta première à {HALF_PRICE} 🪙) dès que tu passes ou t’arrêtes dessus, puis elle déménage dans une autre Loge.
           </p>
+          <p className="text-sm font-bold">
+            🔀 Aux deux embranchements, personne ne choisit : la flèche jaune montre la voie ouverte, et elle bascule après chaque pion. 🎭 La Scène rapporte gros, 📺 le Tunnel de la pub coûte cher !
+          </p>
+          <p className="text-sm font-bold">
+            🎮 Mini-jeu à chaque tour : 1er 10 🪙, 2e 6, 3e 4, les autres 2 (doublé au dernier tour). À la fin, 2 étoiles bonus : Roi des mini-jeux et Prix de la poisse !
+          </p>
+          <Board s={s} view={boardViewAt(s, Infinity)} get={get} portrait className="mt-1" />
         </div>
       </BottomSheet>
 
@@ -176,71 +209,76 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
   )
 }
 
-function RollPhase({ s, meId, isPlayer, get, act, view, left }: { s: DedePartyState; meId: string; isPlayer: boolean; get: Get; act: GamePlayProps['act']; view: BoardView; left: number }) {
-  const mine = s.rolls[meId]
+/** Lancer : le gros bouton est incrusté en bas du plateau 3D ; après le lancer, mes dés. */
+function useRoll(s: DedePartyState, meId: string, act: GamePlayProps['act']) {
   const [rolling, setRolling] = useState<null | boolean>(null)
-  const rolled = s.players.filter((id) => s.rolls[id])
-  const roll = async (double: boolean) => {
+  const roll = async (triple: boolean) => {
     if (rolling !== null) return
-    setRolling(double)
+    setRolling(triple)
     fx.whoosh()
     const t0 = Date.now()
-    const r = await act(dpActions.roll(double))
-    // Laisser le dé tourner un peu, pour le plaisir.
+    const r = await act(dpActions.roll(triple))
+    // Laisser les dés tourner un peu, pour le plaisir.
     await new Promise((res) => setTimeout(res, Math.max(0, 600 - (Date.now() - t0))))
     setRolling(null)
     if (r) playSound('success')
   }
+  return { rolling, roll, mine: s.rolls[meId] ?? null, canTriple: (s.double_left[meId] ?? 0) > 0 }
+}
 
-  if (isPlayer && !mine) {
-    const canDouble = (s.double_left[meId] ?? 0) > 0
+function RollOverlay({ r, isPlayer }: { r: ReturnType<typeof useRoll>; isPlayer: boolean }) {
+  if (!isPlayer) return null
+  if (!r.mine) {
     return (
-      <div className="flex flex-col items-center gap-3">
-        <p className="text-center font-display text-2xl font-extrabold">Tour {s.round} / {s.rounds} : tape ton dé !</p>
-        {s.round === s.rounds && <p className="sticker-sm bg-tomato px-2 font-display font-extrabold text-white">🔥 Dernier tour : la Finale !</p>}
-        <motion.button
-          type="button"
-          onClick={() => void roll(false)}
-          disabled={rolling !== null}
-          animate={rolling === null ? { rotate: [-4, 4, -4], y: [0, -6, 0] } : undefined}
-          transition={{ repeat: Infinity, duration: 1.2 }}
-          whileTap={{ scale: 0.9 }}
-          className="flex flex-col items-center gap-3 rounded-bubble border-4 border-ink bg-sun px-10 py-6 shadow-sticker-lg"
-          aria-label="Lancer le dé"
-        >
-          <div className="flex gap-2">
-            <Die value={null} size={rolling === true ? 96 : 130} rolling={rolling !== null} />
-            {rolling === true && <Die value={null} size={96} rolling />}
-          </div>
-          <span className="font-display text-3xl font-extrabold text-[#1f1b2e]">Lancer !</span>
-        </motion.button>
-        <Button variant="secondary" size="md" disabled={!canDouble || rolling !== null} onClick={() => void roll(true)}>
-          🎲🎲 Double dé {canDouble ? `(${s.double_left[meId]})` : '(utilisé)'}
+      <motion.button
+        type="button"
+        onClick={() => void r.roll(false)}
+        disabled={r.rolling !== null}
+        animate={r.rolling === null ? { rotate: [-3, 3, -3], y: [0, -5, 0] } : undefined}
+        transition={{ repeat: Infinity, duration: 1.2 }}
+        whileTap={{ scale: 0.9 }}
+        className="pointer-events-auto flex items-center gap-2.5 rounded-bubble border-4 border-ink bg-sun px-4 py-2 shadow-sticker-lg"
+        aria-label="Lancer les dés"
+      >
+        <span className="flex gap-1.5">
+          <Die value={null} size={46} rolling={r.rolling !== null} />
+          <Die value={null} size={46} rolling={r.rolling !== null} />
+          {r.rolling === true && <Die value={null} size={46} rolling />}
+        </span>
+        <span className="font-display text-2xl font-extrabold text-[#1f1b2e]">Lancer !</span>
+      </motion.button>
+    )
+  }
+  const total = r.mine.dice.reduce((a, b) => a + b, 0)
+  return (
+    <motion.div initial={{ scale: 0.4 }} animate={{ scale: 1 }} className="sticker flex items-center gap-2 bg-surface/95 px-3 py-2">
+      {r.mine.dice.map((d, i) => (
+        <Die key={i} value={d} size={44} />
+      ))}
+      <span className="font-display text-xl font-extrabold leading-tight">
+        = {total} case{total > 1 ? 's' : ''} !
+      </span>
+    </motion.div>
+  )
+}
+
+function RollBelow({ s, meId, isPlayer, get, left, r }: { s: DedePartyState; meId: string; isPlayer: boolean; get: Get; left: number; r: ReturnType<typeof useRoll> }) {
+  const rolled = s.players.filter((id) => s.rolls[id])
+  if (isPlayer && !r.mine) {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <Button variant="secondary" size="md" disabled={!r.canTriple || r.rolling !== null} onClick={() => void r.roll(true)}>
+          🎲🎲🎲 Triple dé {r.canTriple ? `(${s.double_left[meId]})` : '(utilisé)'}
         </Button>
-        <p className="text-center text-sm font-bold text-muted">Le Double dé additionne deux dés : une fois par partie !</p>
-        <p className="text-center text-sm font-bold text-muted">Pas lancé dans {Math.ceil(left / 1000)} s ? Dédé le lance pour toi.</p>
+        <p className="text-center text-sm font-bold text-muted">Le Triple dé ajoute un troisième dé : une fois par partie !</p>
+        <p className="text-center text-sm font-bold text-muted">Pas lancé dans {Math.ceil(left / 1000)} s ? Dédé lance pour toi.</p>
       </div>
     )
   }
-
-  const total = mine ? mine.dice.reduce((a, b) => a + b, 0) : 0
   return (
-    <div className="flex flex-col items-center gap-3">
-      {mine && (
-        <motion.div initial={{ scale: 0.4 }} animate={{ scale: 1 }} className="flex flex-col items-center gap-2">
-          <div className="flex gap-2">
-            {mine.dice.map((d, i) => (
-              <Die key={i} value={d} size={86} />
-            ))}
-          </div>
-          <p className="font-display text-2xl font-extrabold">
-            Tu avances de {total} case{total > 1 ? 's' : ''} !
-          </p>
-        </motion.div>
-      )}
-      <p className="sticker-sm bg-surface px-3 py-1 text-center font-display font-extrabold">📺 Regarde la télé ! Les autres lancent ({rolled.length}/{s.players.length})</p>
+    <div className="flex flex-col items-center gap-2">
+      <p className="sticker-sm bg-surface px-3 py-1 text-center font-display font-extrabold">Les autres lancent ({rolled.length}/{s.players.length})…</p>
       <DoneStrip ids={s.players} done={rolled} get={get} />
-      <Board s={s} view={view} get={get} center={<DedeHost line={dedeLine('roll', String(s.round))} size={52} side="top" />} />
     </div>
   )
 }
