@@ -18,7 +18,7 @@ const BAD = [
 
 const EXPR = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise pouces timide determine'.split(' ');
 // Stickers dessinés hors liste standard (planches récentes) : ils comblent, dans l'ordre, les cases vides de la planche.
-const SUBS = ['amoureux', 'cool', 'gamer', 'charmee'];
+const SUBS = ['amoureux', 'charmee', 'cool', 'gamer'];
 const art = [];
 const fill = {}; // "slug/dossier" -> { expression absente: sticker qui prend sa case }
 const portraits = [];

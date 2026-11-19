@@ -318,24 +318,6 @@ export const TENUE_PORTRAITS: readonly string[] = [
 
 // Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.
 export const TENUE_EXTRAS: Readonly<Record<string, number>> = {
-  "carole/spy": 2,
-  "carole/student": 2,
-  "carole/croupier": 2,
-  "carole/painter": 2,
-  "carole/pyro": 2,
-  "carole/philosopher": 2,
-  "carole/archer": 2,
-  "carole/actor": 2,
-  "carole/coach": 2,
-  "carole/tictactoe": 2,
-  "carole/strategist": 2,
-  "carole/bowler": 2,
-  "carole/werewolf": 2,
-  "carole/teacher": 2,
-  "carole/star": 2,
-  "carole/racer": 2,
-  "carole/tycoon": 2,
-  "carole/admiral": 2,
   "dede/painter": 3,
   "dede/werewolf": 3,
   "dede/pyro": 3,
@@ -363,7 +345,6 @@ export const TENUE_ART_BAD: readonly string[] = [
   'carole/spy/pouces',
   'carole/spy/timide',
   'carole/spy/determine',
-  'carole/cinema/surprise',
   'carole/cinema/pouces',
   'carole/cinema/timide',
   'carole/cinema/determine',
@@ -699,58 +680,99 @@ export const TENUE_ART_BAD: readonly string[] = [
 // Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
 export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "carole/spy": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "carole/cinema": {
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/student": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/croupier": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/painter": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/pyro": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/philosopher": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/archer": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/actor": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/coach": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/tictactoe": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/strategist": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/bowler": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/werewolf": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/teacher": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/star": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/racer": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/tycoon": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "carole/admiral": {
-    "pouces": "charmee"
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
   },
   "cycy/spy": {
     "pouces": "amoureux",
