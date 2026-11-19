@@ -125,7 +125,11 @@
       "teacher",
       "student",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "spy",
