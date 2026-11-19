@@ -3,16 +3,24 @@ import { Avatar } from '@/components/ui/Avatar'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { TEAM_INFO } from '@/features/teams/teams'
 import type { GameSummaryProps } from '../types'
+import { Grid } from './Grid'
+import { roundHeadline } from './RoundEnd'
 import type { NdcState } from './types'
 
 /** Bloc fin de partie : équipe(s) gagnante(s) et score des manches. */
-export default function NomDeCodeSummary({ state, players }: GameSummaryProps) {
+export default function NomDeCodeSummary({ state, players, meId }: GameSummaryProps) {
   const s = state as unknown as NdcState
   if (!s.teams?.length) return null
   const winners = s.winners ?? (s.round_winner ? [s.round_winner] : [])
   const get = (id: string) => playerOrPlaceholder(players, id)
   return (
     <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="sticker flex flex-col gap-3 bg-surface p-4">
+      {s.key && (
+        <>
+          <p className="text-center font-display text-lg font-extrabold">{roundHeadline(s)}</p>
+          <Grid s={s} secretKey={s.key} meId={meId} canVote={false} onVote={() => undefined} players={players} />
+        </>
+      )}
       {winners.map((w) => {
         const t = s.teams.find((x) => x.id === w)
         if (!t) return null

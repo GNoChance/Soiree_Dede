@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
+import { supabase } from '@/lib/supabase'
 import { fx } from '@/lib/feedback'
 import { playerOrPlaceholder } from '@/features/soiree/players'
 import { useCountdown } from '@/features/soiree/useServerClock'
@@ -12,13 +13,43 @@ import { Grid } from './Grid'
 import { myRole } from './logic'
 import { RoundEnd } from './RoundEnd'
 import { ndcActions } from './setup'
-import type { NdcSecret, NdcState } from './types'
+import type { NdcCell, NdcSecret, NdcState } from './types'
 
-export default function NomDeCodePlay({ state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
+const isSecret = (x: unknown): x is NdcSecret => !!x && typeof x === 'object' && typeof (x as NdcSecret).round === 'number'
+
+/**
+ * Clé de l'espion pour la manche : d'abord le secret reçu en temps réel ; s'il est absent ou d'une
+ * manche précédente (évènement manqué), relecture de match_secrets avec ré-essais (comme Menteur).
+ */
+function useSpyKey(matchId: string, propSecret: unknown, round: number, enabled: boolean): NdcCell[] | null {
+  const [fetched, setFetched] = useState<NdcSecret | null>(null)
+  const prop = isSecret(propSecret) ? propSecret : null
+  const best = prop?.round === round ? prop : fetched?.round === round ? fetched : null
+  const have = Boolean(best?.key)
+  useEffect(() => {
+    if (!enabled || have) return
+    let cancelled = false
+    let timer = 0
+    const load = async (attempt: number) => {
+      const { data } = await supabase.from('match_secrets').select('secret').eq('match_id', matchId).maybeSingle()
+      if (cancelled) return
+      const sec = (data?.secret ?? null) as unknown
+      if (isSecret(sec)) setFetched(sec)
+      if ((!isSecret(sec) || sec.round < round || !sec.key) && attempt < 6) timer = window.setTimeout(() => void load(attempt + 1), 400 * (attempt + 1))
+    }
+    timer = window.setTimeout(() => void load(0), 700) // d'abord une chance au Realtime
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [matchId, round, enabled, have])
+  return best?.key ?? null
+}
+
+export default function NomDeCodePlay({ matchId, state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as NdcState
   const role = myRole(s, meId)
-  const sec = secret as NdcSecret | null
-  const secretKey = sec && sec.round === s.round ? sec.key : null
+  const secretKey = useSpyKey(matchId, secret, s.round, role.spy)
   const live = s.phase === 'clue' || s.phase === 'guess'
   const left = useCountdown(live ? s.deadline : null)
   const timeUp = live && Boolean(s.deadline) && left <= 0

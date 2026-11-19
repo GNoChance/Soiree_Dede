@@ -78,7 +78,7 @@ export function Grid({
             aria-label={rev ? `${w} (dévoilé)` : `${w}${mine ? ' (ta tête)' : ''}`}
           >
             {face}
-            <span className={cn('w-full break-words font-display font-extrabold leading-tight', w.length > 7 ? 'text-[10px]' : 'text-xs')}>{w}</span>
+            <span lang="fr" className={cn('w-full hyphens-auto break-words font-display font-extrabold leading-tight', w.length <= 5 ? 'text-[15px]' : w.length <= 7 ? 'text-[13px]' : 'text-xs')}>{w}</span>
             {secret && secretKey?.[i] === 'bomb' && <span className="absolute top-0.5 right-0.5 text-xs">💣</span>}
             {heads.length > 0 && (
               <span className="absolute bottom-0.5 left-0 flex w-full justify-center -space-x-1.5">

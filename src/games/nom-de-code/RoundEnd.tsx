@@ -10,6 +10,17 @@ import { Grid } from './Grid'
 import { ndcActions } from './setup'
 import type { NdcState } from './types'
 
+/** Bandeau de fin de manche (aussi affiché dans le résumé de fin de partie). */
+export function roundHeadline(s: NdcState): string {
+  const w = s.round_winner
+  const win = w ? TEAM_INFO[w] : null
+  const bombed = s.teams.find((t) => t.eliminated && s.round_end_reason === 'bomb')
+  if (!win) return 'Fin de la manche'
+  if (s.round_end_reason === 'bomb') return `💣 Boum ! Les ${bombed ? TEAM_INFO[bombed.id].short : '…'} ont touché la bombe : les ${win.short} gagnent !`
+  if (s.round_end_reason === 'last_team') return `${win.emoji} Les ${win.short}, dernière équipe en jeu, gagnent !`
+  return `${win.emoji} Les ${win.short} ont trouvé tous leurs mots !`
+}
+
 /** Fin de manche : grille entièrement dévoilée, bandeau du vainqueur, score des manches, « Manche suivante ». */
 export function RoundEnd({
   s,
@@ -28,19 +39,11 @@ export function RoundEnd({
 }) {
   const w = s.round_winner
   const win = w ? TEAM_INFO[w] : null
-  const bombed = s.teams.find((t) => t.eliminated && s.round_end_reason === 'bomb')
+  const headline = roundHeadline(s)
   useEffect(() => {
     fx.success()
     burst({ x: 0.5, y: 0.3 }, 90)
   }, [s.round])
-
-  const headline = !win
-    ? 'Fin de la manche'
-    : s.round_end_reason === 'bomb'
-      ? `💣 Boum ! Les ${bombed ? TEAM_INFO[bombed.id].short : '…'} ont touché la bombe : les ${win.short} gagnent !`
-      : s.round_end_reason === 'last_team'
-        ? `${win.emoji} Les ${win.short}, dernière équipe en jeu, gagnent !`
-        : `${win.emoji} Les ${win.short} ont trouvé tous leurs mots !`
 
   return (
     <div className="flex flex-col gap-3">
