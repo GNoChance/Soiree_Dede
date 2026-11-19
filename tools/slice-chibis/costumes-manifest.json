@@ -7,7 +7,6 @@
       "croupier",
       "painter",
       "pyro",
-      "pirate",
       "philosopher",
       "archer",
       "actor",
@@ -48,12 +47,10 @@
   "cecile": {
     "costumes": [
       "cinema",
-      "student",
       "croupier",
       "painter",
       "werewolf",
       "pyro",
-      "pirate",
       "philosopher",
       "actor",
       "coach",
@@ -67,20 +64,7 @@
       "archer",
       "admiral"
     ],
-    "portraits": [
-      "spy",
-      "cinema",
-      "student",
-      "croupier",
-      "painter",
-      "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach"
-    ]
+    "portraits": []
   },
   "cycy": {
     "costumes": [
@@ -130,7 +114,6 @@
   },
   "dede": {
     "costumes": [
-      "spy",
       "cinema",
       "student",
       "croupier",
@@ -139,9 +122,6 @@
       "pyro",
       "pirate",
       "philosopher",
-      "archer",
-      "actor",
-      "coach",
       "bowler",
       "strategist",
       "tictactoe",
@@ -151,18 +131,6 @@
       "teacher"
     ],
     "portraits": [
-      "spy",
-      "cinema",
-      "student",
-      "croupier",
-      "painter",
-      "werewolf",
-      "pyro",
-      "pirate",
-      "philosopher",
-      "archer",
-      "actor",
-      "coach",
       "bowler",
       "strategist",
       "admiral",
