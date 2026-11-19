@@ -263,6 +263,7 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'cecile/chess',
   'cecile/host',
   'cecile/cowboy',
+  'cecile/golfer',
   'cycy/spy',
   'cycy/cinema',
   'cycy/student',
