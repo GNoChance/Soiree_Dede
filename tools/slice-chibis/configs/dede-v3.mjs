@@ -8,5 +8,5 @@ export default {
   slug: 'dede',
   src: 'assets-source/costumes/dede-v3',
   sheets: 'star spy croupier teacher student painter werewolf pyro pirate bowler philosopher cinema archer actor coach strategist tictactoe admiral racer tycoon'.split(' ').map(S),
-  portraits: [],
+  portraits: 'tycoon admiral tictactoe coach actor archer pyro pirate bowler painter cinema werewolf philosopher student spy teacher croupier star'.split(' ').map((n) => ({ file: `dede-${n}-portrait.png`, dir: n, cutout: true })),
 };

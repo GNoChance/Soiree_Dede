@@ -118,7 +118,26 @@
       "racer",
       "tycoon"
     ],
-    "portraits": []
+    "portraits": [
+      "tycoon",
+      "admiral",
+      "tictactoe",
+      "coach",
+      "actor",
+      "archer",
+      "pyro",
+      "pirate",
+      "bowler",
+      "painter",
+      "cinema",
+      "werewolf",
+      "philosopher",
+      "student",
+      "spy",
+      "teacher",
+      "croupier",
+      "star"
+    ]
   },
   "kevin": {
     "costumes": [
