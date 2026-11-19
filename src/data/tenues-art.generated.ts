@@ -428,6 +428,8 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'nini/hacker',
   'nini/cowboy',
   'nini/host',
+  'nini/chess',
+  'nini/golfer',
 ]
 
 // Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.
