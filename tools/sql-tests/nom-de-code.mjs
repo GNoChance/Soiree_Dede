@@ -255,5 +255,71 @@ const lastTeam = await reveal(elimOne, idxOf(elimOne, 'bomb'))
 const survivor = order.find((t) => t !== two.state.turn && t !== nextOf(two.state.turn))
 ok('dernière équipe en jeu → gagne (last_team)', lastTeam.state.round_winner === survivor && lastTeam.state.round_end_reason === 'last_team')
 
+// ----------------------------------------------------------------------------- manches, fin, compteurs (Task 3)
+const STAT_KEYS = ['bomb_votes', 'idle_clue', 'enemy_reveals', 'first_good', 'best_clue', 'spy_wins', 'flawless', 'comeback']
+const res = (st, pid) => st.results.find((x) => x.profile_id === pid)
+// rounds one : manche gagnée → fin de partie
+ok('rounds one : victoire → phase finished + results', win.state.phase === 'finished' && Array.isArray(win.results), win.state.phase)
+ok('results : membres d’équipe seulement, banc exclu', sameSet(win.results.map((x) => x.profile_id), win.state.players) && !win.results.some((x) => x.profile_id === BENCH))
+const winner = win.state.round_winner
+const loser = win.state.teams.find((t) => t.id !== winner).id
+ok('gagnants : won, placement 1, points 1', team(win, winner).players.every((p) => res(win, p).won === true && res(win, p).placement === 1 && res(win, p).points === 1))
+ok('perdants : pas won, placement 2, points 0', team(win, loser).players.every((p) => res(win, p).won === false && res(win, p).placement === 2 && res(win, p).points === 0))
+ok('toutes les clés de stats présentes', win.results.every((x) => STAT_KEYS.every((k) => Number.isInteger(x.stats[k]))))
+ok('bombe : fin de partie aussi (rounds one)', bmb.state.phase === 'finished' && Array.isArray(bmb.results))
+
+// compteurs
+ok('bomb_votes : chaque tête sur la bombe', guessersOf(c1).every((g) => res(bmb, g).stats.bomb_votes === 1) && res(bmb, spyOf(c1)).stats.bomb_votes === 0)
+ok('enemy_reveals : têtes sur un mot adverse', guessersOf(c1).every((g) => en.server.stats[g].enemy_reveals === 1))
+ok('first_good : premier à poser sa tête sur un bon mot', v2.server.stats[g1].first_good === 1 && v2.server.stats[g2].first_good === 0)
+ok('best_clue : mots trouvés avec un indice (fin du tour)', lim.server.stats[spyOf(G)].best_clue === 2, JSON.stringify(lim.server.stats[spyOf(G)]))
+ok('spy_wins : espion de l’équipe gagnante', res(win, spyOf(c1, winner)).stats.spy_wins === 1 && res(win, spyOf(c1, loser)).stats.spy_wins === 0)
+ok('flawless : manche gagnée sans erreur', team(win, winner).players.every((p) => res(win, p).stats.flawless === 1))
+ok('flawless : pas pour une victoire après erreur', res(gift, spyOf(c1, enemy)).stats.flawless === 1 && guessersOf(c1).every((g) => res(gift, g).stats.flawless === 0))
+// remontada : l'équipe active a 9 mots restants contre 1 pour l'adversaire, puis gagne
+const behind = { ...c1, state: { ...c1.state, teams: c1.state.teams.map((t) => (t.id === enemy ? { ...t, found: t.total - 1 } : t)) } }
+const bh1 = await reveal(behind, own)
+ok('max_deficit suivi après chaque dévoilement', bh1.server.max_deficit[c1.state.turn] >= 3, JSON.stringify(bh1.server.max_deficit))
+const comebackSt = { ...bh1, state: { ...bh1.state, teams: bh1.state.teams.map((t) => (t.id === c1.state.turn ? { ...t, found: t.total - 1 } : t)) } }
+const cb = await reveal(comebackSt, own2)
+ok('comeback : victoire après 3 mots de retard', cb.state.round_winner === c1.state.turn && team(cb, c1.state.turn).players.every((p) => res(cb, p).stats.comeback === 1))
+ok('pas de comeback sans retard', team(win, winner).players.every((p) => res(win, p).stats.comeback === 0))
+
+// rounds each : 3 manches (équipes de 3)
+let R = await giveClue(await fresh(T6, { rounds: 'each' }))
+const r1Spies = R.state.teams.map((t) => t.spy)
+R = { ...R, state: { ...R.state, teams: R.state.teams.map((t) => (t.id === R.state.turn ? { ...t, found: t.total - 1 } : t)) } }
+R = await reveal(R, idxOf(R, R.state.turn))
+ok('rounds each : manche 1 gagnée → round_end, pas de results', R.state.phase === 'round_end' && R.results === undefined && R.state.round_wins[R.state.round_winner] === 1)
+ok('next_round par un non-hôte → not_host', (await act(R, P[1], false, { type: 'next_round' })).err === 'not_host')
+ok('next_round hors fin de manche → wrong_phase', (await act(G, P[1], true, { type: 'next_round' })).err === 'wrong_phase')
+const R2 = must(await act(R, P[1], true, { type: 'next_round' }), 'next_round')
+ok('manche 2 : phase clue, revealed vide, key null, round 2', R2.state.phase === 'clue' && R2.state.round === 2 && Object.keys(R2.state.revealed).length === 0 && R2.state.key === null)
+ok('manche 2 : nouvelle grille (mots 25 à 49)', R2.state.words[0] === 'mot25' && R2.state.words[24] === 'mot49')
+ok('manche 2 : found remis à 0, aucune équipe éliminée', R2.state.teams.every((t) => t.found === 0 && !t.eliminated))
+ok('rotation : nouvel espion dans chaque équipe', R2.state.teams.every((t, i) => t.spy !== r1Spies[i]))
+ok('nouveaux espions : secret {round 2, key}', R2.state.teams.every((t) => R2.secrets[t.spy]?.round === 2 && R2.secrets[t.spy].key.length === 25))
+ok('ancien espion : secret {round: 2, key: null}', r1Spies.every((s) => R2.secrets[s]?.round === 2 && R2.secrets[s].key === null))
+ok('score des manches conservé', JSON.stringify(R2.state.round_wins) === JSON.stringify(R.state.round_wins))
+// égalité : 2 manches (équipes de 2), chaque équipe en gagne une
+let Q = await giveClue(await fresh({ red: P.slice(0, 2), blue: P.slice(2, 4) }, { rounds: 'each' }, P.slice(0, 4)))
+const winRound = async (st) => {
+  const t = st.state.turn
+  const s1 = { ...st, state: { ...st.state, teams: st.state.teams.map((x) => (x.id === t ? { ...x, found: x.total - 1 } : x)) } }
+  return reveal(s1, idxOf(s1, t))
+}
+Q = await winRound(Q)
+const firstWinner = Q.state.round_winner
+Q = must(await act(Q, P[0], true, { type: 'next_round' }), 'q2')
+if (Q.state.turn === firstWinner) Q = must(await act(Q, P[0], true, { type: 'skip' }), 'q-skip')
+Q = await winRound(await giveClue(Q))
+ok('égalité de manches → les deux équipes gagnantes', Q.state.phase === 'finished' && Q.results.every((x) => x.won && x.placement === 1 && x.points === 1), JSON.stringify(Q.state.round_wins))
+
+// catalogue
+const nTr = (await db.query(`select count(*)::int c from public.trophies where tenue_id = 'hacker' and game_id = 'nom-de-code' and active`)).rows[0].c
+const tenue = (await db.query(`select game_id, condition_type, threshold from public.tenues where id = 'hacker'`)).rows[0]
+ok('catalogue : tenue hacker (10 victoires à nom-de-code)', tenue?.game_id === 'nom-de-code' && tenue.condition_type === 'game_wins' && tenue.threshold === 10)
+ok('catalogue : 11 trophées ndc actifs (slots 2 à 12)', nTr === 11, String(nTr))
+
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)

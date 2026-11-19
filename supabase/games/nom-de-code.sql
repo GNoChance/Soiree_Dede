@@ -212,16 +212,71 @@ as $$
     else p_server end
 $$;
 
+-- best_clue (max) de l'espion de l'équipe active = mots de son équipe trouvés avec son indice.
+create or replace function public._ndc_best_clue(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_spy text := (select t->>'spy' from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_state->>'turn');
+  v_n   integer := coalesce((p_state->>'turn_found')::integer, 0);
+begin
+  if v_spy is null or not ((p_server->'stats') ? v_spy) then return p_server; end if;
+  return jsonb_set(p_server, array['stats', v_spy, 'best_clue'],
+                   to_jsonb(greatest(coalesce((p_server->'stats'->v_spy->>'best_clue')::integer, 0), v_n)));
+end $$;
+
+-- Fin de partie : équipes au maximum de manches gagnées = gagnantes ; un résultat par membre d'équipe.
+create or replace function public._ndc_finish(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_results jsonb;
+begin
+  with t as (
+    select x->>'id' as id, x->'players' as players,
+           coalesce((p_state->'round_wins'->>(x->>'id'))::integer, 0) as wins
+      from jsonb_array_elements(p_state->'teams') x
+  ), r as (
+    select t.*, dense_rank() over (order by wins desc) as rk, max(wins) over () as best from t
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'profile_id', m, 'points', r.wins, 'won', r.wins = r.best, 'placement', r.rk,
+           'stats', coalesce(p_server->'stats'->m, '{}'::jsonb))), '[]'::jsonb)
+    into v_results
+    from r, jsonb_array_elements_text(r.players) m;
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'winners',
+    (select jsonb_agg(x->>'id') from jsonb_array_elements(p_state->'teams') x
+      where coalesce((p_state->'round_wins'->>(x->>'id'))::integer, 0)
+          = (select max(coalesce((p_state->'round_wins'->>(y->>'id'))::integer, 0)) from jsonb_array_elements(p_state->'teams') y)));
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
 -- Fin de manche : victoire de p_winner (raison : words | bomb | last_team), clé rendue publique.
 create or replace function public._ndc_end_round(p_state jsonb, p_server jsonb, p_winner text, p_reason text)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
+declare
+  v_win jsonb;
+  v_m   text;
 begin
+  -- best_clue de l'espion actif si la manche s'arrête pendant ses devinettes
+  p_server := public._ndc_best_clue(p_state, p_server);
+  select t into v_win from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_winner;
+  p_server := public._ndc_bump(p_server, v_win->>'spy', 'spy_wins', 1);
+  for v_m in select jsonb_array_elements_text(v_win->'players') loop
+    if coalesce((p_server->'team_err'->>p_winner)::integer, 0) = 0 then p_server := public._ndc_bump(p_server, v_m, 'flawless', 1); end if;
+    if coalesce((p_server->'max_deficit'->>p_winner)::integer, 0) >= 3 then p_server := public._ndc_bump(p_server, v_m, 'comeback', 1); end if;
+  end loop;
   p_state := p_state || jsonb_build_object(
     'phase', 'round_end', 'round_winner', p_winner, 'round_end_reason', p_reason,
     'round_wins', (p_state->'round_wins') || jsonb_build_object(p_winner, coalesce((p_state->'round_wins'->>p_winner)::integer, 0) + 1),
     'key', p_server->'key', 'deadline', null, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb);
+  if (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
+    return public._ndc_finish(p_state, p_server);
+  end if;
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -237,6 +292,7 @@ declare
   v_next text := p_state->>'turn';
 begin
   select o - 1 into v_cur from jsonb_array_elements(p_state->'teams') with ordinality t(x, o) where x->>'id' = p_state->>'turn';
+  p_server := public._ndc_best_clue(p_state, p_server);
   for v_i in 1 .. v_n loop
     if not coalesce((p_state->'teams'->((v_cur + v_i) % v_n)->>'eliminated')::boolean, false) then
       v_next := p_state->'teams'->((v_cur + v_i) % v_n)->>'id';
@@ -290,6 +346,14 @@ begin
   else
     p_server := jsonb_set(p_server, array['team_err', v_turn], to_jsonb(coalesce((p_server->'team_err'->>v_turn)::integer, 0) + 1));
   end if;
+
+  -- retard : (mots restants de l'équipe) − (mots restants de l'équipe en jeu la plus avancée)
+  select p_server || jsonb_build_object('max_deficit', coalesce(p_server->'max_deficit', '{}'::jsonb) || coalesce(jsonb_object_agg(
+           d.id, greatest(coalesce((p_server->'max_deficit'->>d.id)::integer, 0), d.rem - d.best)), '{}'::jsonb))
+    into p_server
+    from (select t->>'id' as id, (t->>'total')::integer - (t->>'found')::integer as rem,
+                 min((t->>'total')::integer - (t->>'found')::integer) over () as best
+            from jsonb_array_elements(v_teams) t where not (t->>'eliminated')::boolean) d;
 
   -- (a) l'équipe propriétaire du mot (non éliminée) a tout trouvé → elle gagne
   select t into v_owner from jsonb_array_elements(v_teams) t where t->>'id' = v_c;
@@ -399,6 +463,14 @@ begin
     end if;
     return v_unchanged;
 
+  -- ---------------------------------------------------------------- next_round (hôte)
+  elsif v_type = 'next_round' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'round_end' or (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
+      raise exception 'wrong_phase';
+    end if;
+    return public._ndc_setup_round(p_state, p_server, (p_state->>'round')::integer + 1);
+
   -- ---------------------------------------------------------------- skip (hôte)
   elsif v_type = 'skip' then
     if not p_is_host then raise exception 'not_host'; end if;
@@ -412,6 +484,8 @@ end $$;
 
 revoke all on function public._ndc_bump(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._ndc_end_round(jsonb, jsonb, text, text) from public, anon, authenticated;
+revoke all on function public._ndc_best_clue(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._ndc_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_end_turn(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_reveal(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public.game_nom_de_code_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

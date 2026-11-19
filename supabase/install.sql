@@ -4648,7 +4648,8 @@ insert into public.tenues (id, label, emoji, game_id, condition_type, threshold,
   ('ninja',      'Ninja',         '🥷', 'morpion',        'duel_wins', 10, 170),
   ('amiral',     'Amiral',        '⚓', 'bataille-navale','duel_wins', 10, 180),
   ('magnat',     'Magnat',        '🎩', 'tour-des-potes', 'game_wins', 10, 190),
-  ('pilote',     'Pilote',        '🏎️', 'dede-kart',      'game_wins', 10, 200)
+  ('pilote',     'Pilote',        '🏎️', 'dede-kart',      'game_wins', 10, 200),
+  ('hacker',     'Hacker',        '💻', 'nom-de-code',    'game_wins', 10, 210)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -5370,6 +5371,17 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('dk_sniper', 'pilote', 10, 'Sniper', '5 touches réussies en une coupe', 'dede-kart', '{"agg":"max","stat":"hits","threshold":5}'::jsonb, true, 218),
   ('dk_echappee', 'pilote', 11, 'L''échappée', 'Gagner une course avec 5 s d''avance ou plus sur le 2e', 'dede-kart', '{"agg":"sum","stat":"big_lead","threshold":1}'::jsonb, true, 219),
   ('dk_grand_chelem', 'pilote', 12, 'Grand chelem', 'Gagner les 3 courses d''une coupe (4 karts min.)', 'dede-kart', '{"agg":"sum","stat":"grand_slam","threshold":1}'::jsonb, true, 220),
+  ('ndc_kaboum', 'hacker', 2, 'Kaboum !', 'Avoir voté pour la bombe', 'nom-de-code', '{"agg":"sum","stat":"bomb_votes","threshold":1}'::jsonb, true, 2100),
+  ('ndc_page_blanche', 'hacker', 3, 'Page blanche', 'En espion, laisser filer le chrono sans donner d''indice', 'nom-de-code', '{"agg":"sum","stat":"idle_clue","threshold":1}'::jsonb, true, 2101),
+  ('ndc_taupe', 'hacker', 4, 'Taupe malgré toi', 'Faire dévoiler 3 mots d''une autre équipe (cumul)', 'nom-de-code', '{"agg":"sum","stat":"enemy_reveals","threshold":3}'::jsonb, true, 2102),
+  ('ndc_bon_flair', 'hacker', 5, 'Bon flair', 'Être le premier à poser sa tête sur 10 mots de son équipe (cumul)', 'nom-de-code', '{"agg":"sum","stat":"first_good","threshold":10}'::jsonb, true, 2103),
+  ('ndc_agent_terrain', 'hacker', 6, 'Agent de terrain', 'Jouer 10 parties (cumul)', 'nom-de-code', '{"agg":"count","threshold":10}'::jsonb, true, 2104),
+  ('ndc_coup_double', 'hacker', 7, 'Coup double', 'En espion, faire trouver 3 mots avec un seul indice', 'nom-de-code', '{"agg":"max","stat":"best_clue","threshold":3}'::jsonb, true, 2105),
+  ('ndc_maitre_espion', 'hacker', 8, 'Maître espion', 'Gagner 3 manches en espion (cumul)', 'nom-de-code', '{"agg":"sum","stat":"spy_wins","threshold":3}'::jsonb, true, 2106),
+  ('ndc_sans_faute', 'hacker', 9, 'Sans faute', 'Gagner une manche sans aucune erreur de son équipe', 'nom-de-code', '{"agg":"sum","stat":"flawless","threshold":1}'::jsonb, true, 2107),
+  ('ndc_remontada', 'hacker', 10, 'Remontada', 'Gagner une manche après avoir eu 3 mots de retard ou plus', 'nom-de-code', '{"agg":"sum","stat":"comeback","threshold":1}'::jsonb, true, 2108),
+  ('ndc_telepathie', 'hacker', 11, 'Télépathie', 'En espion, faire trouver 4 mots ou plus avec un seul indice', 'nom-de-code', '{"agg":"max","stat":"best_clue","threshold":4}'::jsonb, true, 2109),
+  ('ndc_legende', 'hacker', 12, 'Légende du code', 'Gagner 15 parties (cumul)', 'nom-de-code', '{"agg":"sum","stat":"won","threshold":15}'::jsonb, true, 2110),
   ('gen_touche_a_tout', null, null, 'Touche-à-tout', 'Jouer à 10 jeux différents', null, '{"agg":"special","name":"distinct_games","threshold":10}'::jsonb, true, 221),
   ('gen_polyvalent', null, null, 'Polyvalent', 'Gagner dans 5 jeux différents', null, '{"agg":"special","name":"distinct_win_games","threshold":5}'::jsonb, true, 222),
   ('gen_pilier', null, null, 'Pilier de soirée', 'Participer à 20 soirées', null, '{"agg":"special","name":"soirees","threshold":20}'::jsonb, true, 223),
@@ -11570,16 +11582,71 @@ as $$
     else p_server end
 $$;
 
+-- best_clue (max) de l'espion de l'équipe active = mots de son équipe trouvés avec son indice.
+create or replace function public._ndc_best_clue(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_spy text := (select t->>'spy' from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_state->>'turn');
+  v_n   integer := coalesce((p_state->>'turn_found')::integer, 0);
+begin
+  if v_spy is null or not ((p_server->'stats') ? v_spy) then return p_server; end if;
+  return jsonb_set(p_server, array['stats', v_spy, 'best_clue'],
+                   to_jsonb(greatest(coalesce((p_server->'stats'->v_spy->>'best_clue')::integer, 0), v_n)));
+end $$;
+
+-- Fin de partie : équipes au maximum de manches gagnées = gagnantes ; un résultat par membre d'équipe.
+create or replace function public._ndc_finish(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_results jsonb;
+begin
+  with t as (
+    select x->>'id' as id, x->'players' as players,
+           coalesce((p_state->'round_wins'->>(x->>'id'))::integer, 0) as wins
+      from jsonb_array_elements(p_state->'teams') x
+  ), r as (
+    select t.*, dense_rank() over (order by wins desc) as rk, max(wins) over () as best from t
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'profile_id', m, 'points', r.wins, 'won', r.wins = r.best, 'placement', r.rk,
+           'stats', coalesce(p_server->'stats'->m, '{}'::jsonb))), '[]'::jsonb)
+    into v_results
+    from r, jsonb_array_elements_text(r.players) m;
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'winners',
+    (select jsonb_agg(x->>'id') from jsonb_array_elements(p_state->'teams') x
+      where coalesce((p_state->'round_wins'->>(x->>'id'))::integer, 0)
+          = (select max(coalesce((p_state->'round_wins'->>(y->>'id'))::integer, 0)) from jsonb_array_elements(p_state->'teams') y)));
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
 -- Fin de manche : victoire de p_winner (raison : words | bomb | last_team), clé rendue publique.
 create or replace function public._ndc_end_round(p_state jsonb, p_server jsonb, p_winner text, p_reason text)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
+declare
+  v_win jsonb;
+  v_m   text;
 begin
+  -- best_clue de l'espion actif si la manche s'arrête pendant ses devinettes
+  p_server := public._ndc_best_clue(p_state, p_server);
+  select t into v_win from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_winner;
+  p_server := public._ndc_bump(p_server, v_win->>'spy', 'spy_wins', 1);
+  for v_m in select jsonb_array_elements_text(v_win->'players') loop
+    if coalesce((p_server->'team_err'->>p_winner)::integer, 0) = 0 then p_server := public._ndc_bump(p_server, v_m, 'flawless', 1); end if;
+    if coalesce((p_server->'max_deficit'->>p_winner)::integer, 0) >= 3 then p_server := public._ndc_bump(p_server, v_m, 'comeback', 1); end if;
+  end loop;
   p_state := p_state || jsonb_build_object(
     'phase', 'round_end', 'round_winner', p_winner, 'round_end_reason', p_reason,
     'round_wins', (p_state->'round_wins') || jsonb_build_object(p_winner, coalesce((p_state->'round_wins'->>p_winner)::integer, 0) + 1),
     'key', p_server->'key', 'deadline', null, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb);
+  if (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
+    return public._ndc_finish(p_state, p_server);
+  end if;
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -11595,6 +11662,7 @@ declare
   v_next text := p_state->>'turn';
 begin
   select o - 1 into v_cur from jsonb_array_elements(p_state->'teams') with ordinality t(x, o) where x->>'id' = p_state->>'turn';
+  p_server := public._ndc_best_clue(p_state, p_server);
   for v_i in 1 .. v_n loop
     if not coalesce((p_state->'teams'->((v_cur + v_i) % v_n)->>'eliminated')::boolean, false) then
       v_next := p_state->'teams'->((v_cur + v_i) % v_n)->>'id';
@@ -11648,6 +11716,14 @@ begin
   else
     p_server := jsonb_set(p_server, array['team_err', v_turn], to_jsonb(coalesce((p_server->'team_err'->>v_turn)::integer, 0) + 1));
   end if;
+
+  -- retard : (mots restants de l'équipe) − (mots restants de l'équipe en jeu la plus avancée)
+  select p_server || jsonb_build_object('max_deficit', coalesce(p_server->'max_deficit', '{}'::jsonb) || coalesce(jsonb_object_agg(
+           d.id, greatest(coalesce((p_server->'max_deficit'->>d.id)::integer, 0), d.rem - d.best)), '{}'::jsonb))
+    into p_server
+    from (select t->>'id' as id, (t->>'total')::integer - (t->>'found')::integer as rem,
+                 min((t->>'total')::integer - (t->>'found')::integer) over () as best
+            from jsonb_array_elements(v_teams) t where not (t->>'eliminated')::boolean) d;
 
   -- (a) l'équipe propriétaire du mot (non éliminée) a tout trouvé → elle gagne
   select t into v_owner from jsonb_array_elements(v_teams) t where t->>'id' = v_c;
@@ -11757,6 +11833,14 @@ begin
     end if;
     return v_unchanged;
 
+  -- ---------------------------------------------------------------- next_round (hôte)
+  elsif v_type = 'next_round' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'round_end' or (p_state->>'round')::integer >= (p_state->>'total_rounds')::integer then
+      raise exception 'wrong_phase';
+    end if;
+    return public._ndc_setup_round(p_state, p_server, (p_state->>'round')::integer + 1);
+
   -- ---------------------------------------------------------------- skip (hôte)
   elsif v_type = 'skip' then
     if not p_is_host then raise exception 'not_host'; end if;
@@ -11770,6 +11854,8 @@ end $$;
 
 revoke all on function public._ndc_bump(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._ndc_end_round(jsonb, jsonb, text, text) from public, anon, authenticated;
+revoke all on function public._ndc_best_clue(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._ndc_finish(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_end_turn(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._ndc_reveal(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public.game_nom_de_code_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
