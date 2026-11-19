@@ -302,8 +302,31 @@
       "archer",
       "cinema",
       "tycoon",
-      "admiral"
+      "admiral",
+      "bowler",
+      "racer"
     ],
-    "portraits": []
+    "portraits": [
+      "racer",
+      "archer",
+      "actor",
+      "coach",
+      "tictactoe",
+      "admiral",
+      "tycoon",
+      "strategist",
+      "cinema",
+      "philosopher",
+      "bowler",
+      "pirate",
+      "pyro",
+      "werewolf",
+      "painter",
+      "student",
+      "teacher",
+      "croupier",
+      "spy",
+      "star"
+    ]
   }
 }
