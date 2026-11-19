@@ -183,6 +183,8 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'dede/teacher',
   'dede/croupier',
   'dede/star',
+  'dede/racer',
+  'dede/strategist',
   'kevin/spy',
   'kevin/cinema',
   'kevin/student',
