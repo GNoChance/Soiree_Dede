@@ -495,8 +495,53 @@ export const TENUE_ART_BAD: readonly string[] = [
   'dede/philosopher/clin_oeil',
   'dede/philosopher/pouces',
   'dede/philosopher/timide',
+  'kevin/student/pouces',
+  'kevin/student/timide',
+  'kevin/student/determine',
   'kevin/croupier/pleurs',
   'kevin/croupier/surprise',
+  'kevin/painter/pouces',
+  'kevin/painter/timide',
+  'kevin/painter/determine',
+  'kevin/werewolf/pouces',
+  'kevin/werewolf/timide',
+  'kevin/werewolf/determine',
+  'kevin/pyro/pouces',
+  'kevin/pyro/timide',
+  'kevin/pyro/determine',
+  'kevin/pirate/pouces',
+  'kevin/pirate/timide',
+  'kevin/pirate/determine',
+  'kevin/philosopher/pouces',
+  'kevin/philosopher/timide',
+  'kevin/philosopher/determine',
+  'kevin/archer/pouces',
+  'kevin/archer/timide',
+  'kevin/archer/determine',
+  'kevin/actor/pouces',
+  'kevin/actor/timide',
+  'kevin/actor/determine',
+  'kevin/coach/pouces',
+  'kevin/coach/timide',
+  'kevin/coach/determine',
+  'kevin/bowler/pouces',
+  'kevin/bowler/timide',
+  'kevin/bowler/determine',
+  'kevin/tictactoe/pouces',
+  'kevin/tictactoe/timide',
+  'kevin/tictactoe/determine',
+  'kevin/admiral/pouces',
+  'kevin/admiral/timide',
+  'kevin/admiral/determine',
+  'kevin/tycoon/pouces',
+  'kevin/tycoon/timide',
+  'kevin/tycoon/determine',
+  'kevin/star/pouces',
+  'kevin/star/timide',
+  'kevin/star/determine',
+  'kevin/teacher/pouces',
+  'kevin/teacher/timide',
+  'kevin/teacher/determine',
   'manon/spy/pouces',
   'manon/spy/timide',
   'manon/spy/determine',
@@ -789,6 +834,81 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cycy/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/painter": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/werewolf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/pyro": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/pirate": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/philosopher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/archer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/actor": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/coach": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/teacher": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
