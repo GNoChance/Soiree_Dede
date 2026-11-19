@@ -228,7 +228,11 @@
       "star",
       "teacher",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "spy",
@@ -251,7 +255,11 @@
       "star",
       "teacher",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ]
   },
   "manon": {
