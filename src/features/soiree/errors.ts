@@ -120,6 +120,9 @@ const MESSAGES: Record<string, string> = {
   already_ready: 'Tu es déjà prêt·e !',
   invalid_move: 'Coup impossible.',
   column_full: 'Cette colonne est pleine !',
+  // Kems
+  card_taken: 'Trop tard !',
+  not_in_hand: 'Cette carte n’est plus dans ta main.',
   // Échecs
   promotion_required: 'Choisis la pièce de ta promotion !',
   no_draw_offer: 'Personne ne t’a proposé nul.',

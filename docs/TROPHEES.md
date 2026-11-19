@@ -480,6 +480,26 @@ Compteurs de manche renvoyés par `board_move` (`game`, rangés par le socle dan
 | 11 | `ech_mat_eclair` | Mat éclair | Mater en 15 coups ou moins | `fast_mates` (somme ≥ 1) ✅ |
 | 12 | `ech_grand_maitre` | Grand Maître | Gagner 25 duels (cumul) | `duel_wins` (somme ≥ 25) ✅ |
 
+---
+
+### Cow-boy 🤠 — Kems (`kems`)
+
+Compteurs posés par le moteur (`server.pstats` → `results[].stats`). « Contre » = Contre-Kems réussi contre l'équipe ; `clean_win` = victoire sans erreur (Kems ou Contre-Kems raté) de l'équipe et sans Contre-Kems réussi contre elle. Les compteurs d'équipe (`team_kems`, `fast_kems`, `double_kems`, `countered`) sont crédités aux deux coéquipiers.
+
+| Slot | id | Nom | Condition | Compteur |
+|---|---|---|---|---|
+| 2 | `kems_faux_kems` | Faux Kems ! | Crier « Kems ! » alors que ton partenaire n'a pas de carré | `false_kems` (somme ≥ 1) ✅ |
+| 3 | `kems_grille` | Grillé ! | Ton équipe subit 3 Contre-Kems réussis (cumul) | `countered` (somme ≥ 3) ✅ |
+| 4 | `kems_parano` | Parano | Crier « Contre-Kems ! » à tort 3 fois (cumul) | `false_counters` (somme ≥ 3) ✅ |
+| 5 | `kems_collectionneur` | Collectionneur | Réunir 10 carrés (cumul, un par manche au plus) | `squares` (somme ≥ 10) ✅ |
+| 6 | `kems_pilier_de_saloon` | Pilier de saloon | Jouer 10 parties (cumul) | nombre de parties ≥ 10 ✅ |
+| 7 | `kems_complices` | Complices | Réussir 10 Kems avec son équipe (cumul) | `team_kems` (somme ≥ 10) ✅ |
+| 8 | `kems_oeil_de_lynx` | Œil de lynx | Réussir 3 Contre-Kems en étant celui qui crie (cumul) | `counters_ok` (somme ≥ 3) ✅ |
+| 9 | `kems_eclair` | Kems éclair | Réussir un Kems moins de 20 s après le début de la manche | `fast_kems` (somme ≥ 1) ✅ |
+| 10 | `kems_poker_face` | Poker face | Gagner une partie sans erreur de son équipe et sans se faire contrer | `clean_win` (somme ≥ 1) ✅ |
+| 11 | `kems_double` | Double Kems | Réussir un Double Kems (les deux coéquipiers ont un carré) | `double_kems` (somme ≥ 1) ✅ |
+| 12 | `kems_legende` | Légende du saloon | Gagner 15 parties (cumul) | `won` (somme ≥ 15) ✅ |
+
 ## 3. Trophées généraux (facultatifs)
 
 Transverses, sans sticker de planche : récompense proposée = badge sur le profil + XP. `tenue_id` et `slot` nuls dans le catalogue.

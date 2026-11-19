@@ -30,6 +30,7 @@ const OPTIONS = {
   echecs: { mode: 'duel', board: { cadence: 'rapid5' } },
   morpion: {},
   'pas-de-bol': {},
+  kems: { teams: { red: ids.slice(0, 2), blue: ids.slice(2, 4) }, target: 5, signs: ['Se gratter le nez', 'Tirer la langue', 'Clin d’œil', 'Se toucher l’oreille'] },
   'nom-de-code': { teams: { red: ids.slice(0, 3), blue: ids.slice(3, 6) }, rounds: 'one', timer: 'normal', words: n(25, (i) => 'mot' + i) },
   'petit-bac': { categories: [{ id: 'prenom', label: 'Prénom', emoji: '🙂' }, { id: 'animal', label: 'Animal', emoji: '🐶' }, { id: 'ville', label: 'Ville', emoji: '🏙️' }] },
   'quatre-a-la-suite': {},

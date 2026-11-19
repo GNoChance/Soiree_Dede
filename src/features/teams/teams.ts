@@ -25,10 +25,14 @@ export function shuffle<T>(a: readonly T[]): T[] {
   return out
 }
 
-/** Répartit `ids` au hasard dans `count` équipes équilibrées (écart d'au plus 1). */
-export function distributeTeams(ids: readonly string[], count: TeamCount): Partial<Record<TeamColor, string[]>> {
+/**
+ * Répartit `ids` au hasard dans `count` équipes équilibrées (écart d'au plus 1).
+ * Avec `teamSize` (ex. 2 pour Kems) : équipes de EXACTEMENT cette taille, les joueurs en trop restent sur le banc.
+ */
+export function distributeTeams(ids: readonly string[], count: TeamCount, teamSize?: number): Partial<Record<TeamColor, string[]>> {
   const colors = TEAM_COLORS.slice(0, count)
   const out: Partial<Record<TeamColor, string[]>> = Object.fromEntries(colors.map((c) => [c, [] as string[]]))
-  shuffle(ids).forEach((id, i) => out[colors[i % count]]!.push(id))
+  const picked = teamSize ? shuffle(ids).slice(0, count * teamSize) : shuffle(ids)
+  picked.forEach((id, i) => out[colors[teamSize ? Math.floor(i / teamSize) : i % count]]!.push(id))
   return out
 }

@@ -12,18 +12,22 @@ type Slot = TeamColor | 'bench'
 
 /**
  * Sélecteur 2 à 4 équipes + banc (réutilisable). Toucher un avatar le fait passer à l'équipe
- * suivante (… → banc → première équipe). Les joueurs absents de `playerIds` sont ignorés ;
+ * suivante (… → banc → première équipe). Avec `teamSize` (Kems : 2), une équipe pleine refuse un joueur de plus
+ * (on la saute) et la répartition automatique se fait par équipes pleines, le reste sur le banc. Les joueurs absents de `playerIds` sont ignorés ;
  * un joueur placé nulle part est sur le banc.
  */
 export function TeamsPicker({
   teamCount,
   teams,
   playerIds,
+  teamSize,
   onChange,
 }: {
   teamCount: TeamCount
   teams: Teams
   playerIds: string[]
+  /** Taille exacte imposée à chaque équipe (défaut : libre). */
+  teamSize?: number
   onChange: (teams: Teams, teamCount: TeamCount) => void
 }) {
   const { byId } = usePlayers()
@@ -34,13 +38,21 @@ export function TeamsPicker({
   ) as Record<TeamColor, string[]>
   const placed = new Set(colors.flatMap((c) => cols[c]))
   const bench = playerIds.filter((id) => !placed.has(id))
-  const counts = ([2, 3, 4] as const).filter((n) => n === 2 || playerIds.length >= n * 2)
+  const counts = ([2, 3, 4] as const).filter((n) => n === 2 || playerIds.length >= n * (teamSize ?? 2))
 
   const slotOf = (id: string): Slot => colors.find((c) => cols[c].includes(id)) ?? 'bench'
   const order: Slot[] = [...colors, 'bench']
+  const full = (c: Slot) => c !== 'bench' && teamSize !== undefined && cols[c].length >= teamSize
+  const nextSlot = (id: string): Slot => {
+    const from = order.indexOf(slotOf(id))
+    for (let k = 1; k <= order.length; k++) {
+      const to = order[(from + k) % order.length]
+      if (to === slotOf(id) || !full(to)) return to
+    }
+    return 'bench'
+  }
   const move = (id: string) => {
-    const from = slotOf(id)
-    const to = order[(order.indexOf(from) + 1) % order.length]
+    const to = nextSlot(id)
     const next: Teams = Object.fromEntries(colors.map((c) => [c, cols[c].filter((x) => x !== id)]))
     if (to !== 'bench') next[to] = [...(next[to] ?? []), id]
     fx.whoosh()
@@ -48,15 +60,15 @@ export function TeamsPicker({
   }
   const mix = (n: TeamCount) => {
     fx.pop()
-    onChange(distributeTeams(playerIds, n), n)
+    onChange(distributeTeams(playerIds, n, teamSize), n)
   }
 
   if (!playerIds.length) return <p className="text-sm text-muted">Chargement des joueurs…</p>
-  const tooSmall = colors.some((c) => cols[c].length < 2)
+  const tooSmall = colors.some((c) => (teamSize ? cols[c].length !== teamSize : cols[c].length < 2))
 
   const token = (id: string) => {
     const p = playerOrPlaceholder(byId, id)
-    const to = order[(order.indexOf(slotOf(id)) + 1) % order.length]
+    const to = nextSlot(id)
     return (
       <motion.button
         key={id}
@@ -113,7 +125,7 @@ export function TeamsPicker({
           Mélanger
         </Button>
       </div>
-      {tooSmall && <p className="text-sm font-bold text-tomato">Il faut au moins 2 joueurs par équipe (sinon on mélange au lancement).</p>}
+      {tooSmall && <p className="text-sm font-bold text-tomato">{teamSize ? `Il faut exactement ${teamSize} joueurs par équipe (sinon on mélange au lancement).` : 'Il faut au moins 2 joueurs par équipe (sinon on mélange au lancement).'}</p>}
     </div>
   )
 }
