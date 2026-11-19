@@ -40,6 +40,7 @@ export const TENUE_ART: readonly string[] = [
   'cecile/croupier',
   'cecile/spy',
   'cecile/star',
+  'cecile/racer',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
@@ -222,6 +223,8 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'cecile/teacher',
   'cecile/student',
   'cecile/painter',
+  'cecile/strategist',
+  'cecile/racer',
   'cycy/spy',
   'cycy/cinema',
   'cycy/student',
@@ -486,6 +489,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cecile/star/pouces',
   'cecile/star/timide',
   'cecile/star/determine',
+  'cecile/racer/pouces',
+  'cecile/racer/timide',
+  'cecile/racer/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -1101,6 +1107,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cecile/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/racer": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"

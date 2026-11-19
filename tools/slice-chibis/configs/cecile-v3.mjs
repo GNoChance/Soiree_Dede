@@ -13,6 +13,6 @@ const S = (name) => ({ name, file: `cecile-${name}.png`, n: 12, dir: name, map: 
 export default {
   slug: 'cecile',
   src: 'assets-source/costumes/cecile-v3',
-  sheets: 'tycoon admiral tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star'.split(' ').flatMap((n) => (['admiral', 'star'].includes(n) ? CELLS(n) : [S(n)])),
-  portraits: 'tycoon admiral tictactoe coach actor archer cinema philosopher bowler pirate pyro werewolf star spy croupier teacher student painter'.split(' ').map((n) => ({ file: `cecile-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'tycoon admiral tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer'.split(' ').flatMap((n) => (['admiral', 'star'].includes(n) ? CELLS(n) : [S(n)])),
+  portraits: 'tycoon admiral tictactoe coach actor archer cinema philosopher bowler pirate pyro werewolf star spy croupier teacher student painter strategist racer'.split(' ').map((n) => ({ file: `cecile-${n}-portrait.png`, dir: n, cutout: true })),
 };

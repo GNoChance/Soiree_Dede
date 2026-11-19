@@ -65,7 +65,8 @@
       "teacher",
       "croupier",
       "spy",
-      "star"
+      "star",
+      "racer"
     ],
     "portraits": [
       "tycoon",
@@ -85,7 +86,9 @@
       "croupier",
       "teacher",
       "student",
-      "painter"
+      "painter",
+      "strategist",
+      "racer"
     ]
   },
   "cycy": {
