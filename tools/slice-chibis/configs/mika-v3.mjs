@@ -7,6 +7,6 @@ const S = (name, dir = name) => ({ name, file: `mika-${name}.png`, n: 12, dir, m
 export default {
   slug: 'mika',
   src: 'assets-source/costumes/mika-v3',
-  sheets: 'spy star teacher croupier student painter werewolf pirate bowler pyro cinema philosopher actor strategist tictactoe coach admiral tycoon archer racer hacker'.split(' ').map((n) => S(n)),
-  portraits: 'star spy croupier teacher student painter werewolf pyro pirate cinema coach actor archer philosopher racer strategist tictactoe admiral tycoon bowler hacker'.split(' ').map((n) => ({ file: `mika-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'spy star teacher croupier student painter werewolf pirate bowler pyro cinema philosopher actor strategist tictactoe coach admiral tycoon archer racer hacker chess golfer host cowboy'.split(' ').map((n) => S(n)),
+  portraits: 'star spy croupier teacher student painter werewolf pyro pirate cinema coach actor archer philosopher racer strategist tictactoe admiral tycoon bowler hacker chess golfer host cowboy'.split(' ').map((n) => ({ file: `mika-${n}-portrait.png`, dir: n, cutout: true })),
 };

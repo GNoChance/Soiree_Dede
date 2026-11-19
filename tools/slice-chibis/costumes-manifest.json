@@ -365,7 +365,11 @@
       "admiral",
       "tycoon",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "spy",
@@ -388,7 +392,11 @@
       "tycoon",
       "racer",
       "bowler",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ]
   },
   "nini": {

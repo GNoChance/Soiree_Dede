@@ -173,6 +173,10 @@ export const TENUE_ART: readonly string[] = [
   'mika/tycoon',
   'mika/racer',
   'mika/hacker',
+  'mika/chess',
+  'mika/golfer',
+  'mika/host',
+  'mika/cowboy',
   'nini/star',
   'nini/spy',
   'nini/croupier',
@@ -374,6 +378,10 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'mika/racer',
   'mika/bowler',
   'mika/hacker',
+  'mika/chess',
+  'mika/golfer',
+  'mika/host',
+  'mika/cowboy',
   'nini/racer',
   'nini/archer',
   'nini/actor',
@@ -920,6 +928,18 @@ export const TENUE_ART_BAD: readonly string[] = [
   'mika/hacker/pouces',
   'mika/hacker/timide',
   'mika/hacker/determine',
+  'mika/chess/pouces',
+  'mika/chess/timide',
+  'mika/chess/determine',
+  'mika/golfer/pouces',
+  'mika/golfer/timide',
+  'mika/golfer/determine',
+  'mika/host/pouces',
+  'mika/host/timide',
+  'mika/host/determine',
+  'mika/cowboy/pouces',
+  'mika/cowboy/timide',
+  'mika/cowboy/determine',
   'nini/star/pouces',
   'nini/star/timide',
   'nini/star/determine',
@@ -1855,6 +1875,26 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "mika/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/chess": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/golfer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/host": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "mika/cowboy": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
