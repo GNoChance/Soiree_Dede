@@ -50,6 +50,7 @@ ok('4 équipes : 6/5/5/5 + 3 + 1', sorted(totals(s4)).join() === '5,5,5,6' && co
 ok('4 équipes : le 9e joueur est sur le banc', s4.state.bench.length === 1 && s4.state.bench[0] === P[8] && !s4.state.players.includes(P[8]))
 ok('phase clue, aucune carte dévoilée, key absente du state',
   s2.state.phase === 'clue' && Object.keys(s2.state.revealed).length === 0 && s2.state.key === null && s2.state.round === 1)
+ok('state.game = nom-de-code', s2.state.game === 'nom-de-code')
 ok('25 mots dans la grille', s2.state.words.length === 25 && s2.state.words[0] === 'mot0')
 ok('chaque équipe a un espion parmi ses membres', s2.state.teams.every((t) => t.players.includes(t.spy)))
 ok('secrets = exactement les espions', sameSet(Object.keys(s2.secrets), s2.state.teams.map((t) => t.spy)), JSON.stringify(Object.keys(s2.secrets)))

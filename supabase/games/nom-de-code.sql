@@ -195,7 +195,7 @@ begin
     from unnest(p_players) with ordinality t(p, o) where not (p::text = any(v_seen));
 
   return public._ndc_setup_round(
-    jsonb_build_object('players', v_players, 'bench', v_bench, 'rounds', v_rounds, 'timer', v_timer,
+    jsonb_build_object('game', 'nom-de-code', 'players', v_players, 'bench', v_bench, 'rounds', v_rounds, 'timer', v_timer,
                        'total_rounds', v_total, 'round_wins', v_wins, 'teams', v_teams),
     jsonb_build_object('spy_order', v_order, 'words_all', v_words, 'stats', v_stats),
     1);

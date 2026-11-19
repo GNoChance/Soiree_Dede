@@ -38,6 +38,12 @@ const MESSAGES: Record<string, string> = {
   unknown_action: 'Action inconnue.',
   wrong_phase: 'Trop tard (ou trop tôt) pour ça !',
   not_finished: 'Remplis toutes tes cases avant de crier STOP !',
+  // Nom de Code
+  invalid_clue: 'Un seul mot (sans espace) et un nombre de 1 à 9.',
+  clue_is_grid_word: 'C’est un mot de la grille !',
+  not_spy: 'Seul l’espion donne l’indice.',
+  not_guesser: 'Ce n’est pas à toi de deviner.',
+  stop_too_early: 'Trouvez au moins un mot avant de passer.',
   not_a_player: 'Tu ne joues pas cette partie.',
   not_alive: 'Tu as été éliminé·e : tu regardes la partie.',
   invalid_target: 'Ce joueur ne peut pas être choisi.',
