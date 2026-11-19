@@ -3,14 +3,18 @@ import { Avatar } from '@/components/ui/Avatar'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { TEAM_INFO } from '@/features/teams/teams'
 import type { GameSummaryProps } from '../types'
+import { useTv } from '@/features/tv/tv'
 import { Grid } from './Grid'
+import { NdcTvSummary } from './TvView'
 import { roundHeadline } from './RoundEnd'
 import type { NdcState } from './types'
 
 /** Bloc fin de partie : équipe(s) gagnante(s) et score des manches. */
 export default function NomDeCodeSummary({ state, players, meId }: GameSummaryProps) {
   const s = state as unknown as NdcState
+  const tv = useTv()
   if (!s.teams?.length) return null
+  if (tv) return <NdcTvSummary s={s} players={players} />
   const winners = s.winners ?? (s.round_winner ? [s.round_winner] : [])
   const get = (id: string) => playerOrPlaceholder(players, id)
   return (

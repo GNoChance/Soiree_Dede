@@ -6,11 +6,11 @@ import { TEAM_INFO } from '@/features/teams/teams'
 import type { PlayerInfo } from '../types'
 import type { NdcCell, NdcState } from './types'
 
-const NEUTRAL = '#eadfc8'
-const BOMB = '#1f1b2e'
+export const NEUTRAL = '#eadfc8'
+export const BOMB = '#1f1b2e'
 
 /** Fond léger (couleur secrète) d'une carte non dévoilée, vue par l'espion ou en fin de manche. */
-function tint(c: NdcCell): { background: string; color: string } {
+export function tint(c: NdcCell): { background: string; color: string } {
   if (c === 'neutral') return { background: '#f6efe0', color: '#1f1b2e' }
   if (c === 'bomb') return { background: '#4a4458', color: '#ffffff' }
   return { background: TEAM_INFO[c].soft, color: '#1f1b2e' }

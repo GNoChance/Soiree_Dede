@@ -5,6 +5,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { pickExpression } from '@/features/soiree/players'
 import { fx } from '@/lib/feedback'
+import { useViewport } from '@/features/tv/tv'
 import { cn } from '@/lib/cn'
 import type { PlayerInfo } from '@/games/types'
 import type { DuelPlayProps } from './DuelPlay'
@@ -18,22 +19,6 @@ import type { DuelInfo, DuelSession, DuelState } from './types'
 
 type Get = (id: string) => PlayerInfo
 const noop = () => {}
-
-/** Taille de la fenêtre (px), mise à jour au redimensionnement / à la rotation. */
-export function useViewport() {
-  const read = () => ({ w: window.innerWidth, h: window.innerHeight })
-  const [vp, setVp] = useState(read)
-  useEffect(() => {
-    const on = () => setVp(read())
-    window.addEventListener('resize', on)
-    window.addEventListener('orientationchange', on)
-    return () => {
-      window.removeEventListener('resize', on)
-      window.removeEventListener('orientationchange', on)
-    }
-  }, [])
-  return vp
-}
 
 /* -------------------------------------------------------------------------- */
 /* Plateau mis à l'échelle de la place disponible                              */

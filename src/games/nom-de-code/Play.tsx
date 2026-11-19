@@ -7,12 +7,15 @@ import { fx } from '@/lib/feedback'
 import { playerOrPlaceholder } from '@/features/soiree/players'
 import { useCountdown } from '@/features/soiree/useServerClock'
 import { TEAM_INFO } from '@/features/teams/teams'
+import { TvButton } from '@/features/tv/TvButton'
+import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
 import { CluePanel } from './CluePanel'
 import { Grid } from './Grid'
 import { myRole } from './logic'
 import { RoundEnd } from './RoundEnd'
 import { ndcActions } from './setup'
+import { NdcTv } from './TvView'
 import type { NdcCell, NdcSecret, NdcState } from './types'
 
 const isSecret = (x: unknown): x is NdcSecret => !!x && typeof x === 'object' && typeof (x as NdcSecret).round === 'number'
@@ -46,7 +49,12 @@ function useSpyKey(matchId: string, propSecret: unknown, round: number, enabled:
   return best?.key ?? null
 }
 
-export default function NomDeCodePlay({ matchId, state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
+/** Sous TvContext (route /soiree/:id/tele) : vue télé en lecture seule. */
+export default function NomDeCodePlay(props: GamePlayProps) {
+  return useTv() ? <NdcTv {...props} /> : <NdcPlayScreen {...props} />
+}
+
+function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as NdcState
   const role = myRole(s, meId)
   const secretKey = useSpyKey(matchId, secret, s.round, role.spy)
@@ -139,6 +147,8 @@ export default function NomDeCodePlay({ matchId, state, secret, meId, isHost, pl
       )}
       {live && role.spy && <p className="text-center text-xs text-muted">🕵️ Tu vois les couleurs secrètes : chut !</p>}
       {(s.phase === 'round_end' || s.phase === 'finished') && <RoundEnd s={s} meId={meId} isHost={isHost} act={act} pending={pending} players={players} />}
+
+      {(isHost || !role.team) && <TvButton soireeId={soireeId} />}
 
       <AnimatePresence>
         {roleRound === s.round && (

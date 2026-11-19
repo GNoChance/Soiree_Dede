@@ -11,7 +11,8 @@ import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
 import { useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
 import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
-import { DuelTvContext, TV_VIEWER_ID, isDuelState, readOnlyAct } from '@/features/duel/tv'
+import { TvContext, TV_VIEWER_ID, readOnlyAct } from '@/features/tv/tv'
+import { isDuelState } from '@/features/duel/tv'
 import { useWakeLock } from '@/lib/wakeLock'
 import { cn } from '@/lib/cn'
 
@@ -43,8 +44,8 @@ function useFullscreen() {
 /**
  * Mode télé (`/soiree/:id/tele`) : vue spectateur plein écran qui suit la
  * partie en cours de la soirée (Realtime, comme MatchPage). Pour un jeu en
- * duel, le `Play` du jeu est rendu sous DuelTvContext -> DuelTv (lecture
- * seule : id fictif, pas de secret, seuls les ticks sont envoyés). À la fin
+ * duel ou un jeu qui déclare `tv: true`, le `Play` du jeu est rendu sous TvContext
+ * (duel : DuelTv ; Nom de Code : vue grand écran ; lecture seule : id fictif, pas de secret, seuls les ticks sont envoyés). À la fin
  * de la session : le résumé (sacre du champion), jusqu'à la partie suivante.
  */
 export function TvPage() {
@@ -72,7 +73,7 @@ export function TvPage() {
   const soireeEnded = soireeData?.soiree.status === 'ended'
   const game = match ? getGame(match.game_id) : undefined
   const state = match && match.id === shownId ? (match.state as unknown as BaseGameState) : undefined
-  const duelGame = !!state && isDuelState(state)
+  const tvGame = !!state && (isDuelState(state) || Boolean(game?.tv))
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
   const roundLabel = state && !finished && game?.roundLabel ? game.roundLabel(state) : null
@@ -119,12 +120,12 @@ export function TvPage() {
   let body: React.ReactNode
   if (notFound) body = waiting('Soirée introuvable', 'Ce lien ne correspond à aucune soirée.', '🤷')
   else if (soireeEnded && !state) body = waiting('La soirée est terminée', 'Merci d’avoir regardé ! À la prochaine soirée.', '🌙')
-  else if (!shownId) body = loaded ? waiting('En attente du prochain duel…', 'Le mode télé s’allume tout seul dès que l’hôte lance un jeu en duel (Morpion, 4 à la suite, Bataille navale…).') : <TvSkeleton />
+  else if (!shownId) body = loaded ? waiting('En attente du prochain jeu…', 'Le mode télé s’allume tout seul dès que l’hôte lance un jeu compatible : un duel (Morpion, 4 à la suite, Bataille navale…) ou Nom de Code.') : <TvSkeleton />
   else if (!state || !match) body = <TvSkeleton />
-  else if (!duelGame)
+  else if (!tvGame)
     body = waiting(
       `En ce moment : ${game?.name ?? 'un autre jeu'}`,
-      'Le mode télé suit les jeux en duel. Il reprendra automatiquement au prochain duel.',
+      'Le mode télé suit les duels et Nom de Code. Il reprendra automatiquement au prochain jeu compatible.',
       game?.emoji ?? '🎲',
     )
   else if (finished && aborted) body = waiting('Partie annulée', 'L’hôte a annulé la session. On attend la suivante…', '🚫')
@@ -132,13 +133,15 @@ export function TvPage() {
     const Summary = game?.Summary
     body = (
       <div className="h-full overflow-y-auto px-3 py-4">
-        <div className="mx-auto flex max-w-2xl flex-col gap-3">
+        <div className={cn('mx-auto flex flex-col gap-3', game?.tv ? 'max-w-6xl' : 'max-w-2xl')}>
           {Summary ? (
             <Suspense fallback={<TvSkeleton />}>
-              <Summary state={state} meId={TV_VIEWER_ID} players={byId} />
+              <TvContext.Provider value>
+                <Summary state={state} meId={TV_VIEWER_ID} players={byId} />
+              </TvContext.Provider>
             </Suspense>
           ) : null}
-          <p className="text-center text-sm font-bold text-muted">Le mode télé reprendra automatiquement au prochain duel 📺</p>
+          <p className="text-center text-sm font-bold text-muted">Le mode télé reprendra automatiquement au prochain jeu compatible 📺</p>
         </div>
       </div>
     )
@@ -146,7 +149,7 @@ export function TvPage() {
     const Play = game?.Play
     body =
       Play && soireeId ? (
-        <DuelTvContext.Provider value>
+        <TvContext.Provider value>
           <Suspense fallback={<TvSkeleton />}>
             <Play
               matchId={match.id}
@@ -160,7 +163,7 @@ export function TvPage() {
               pending={false}
             />
           </Suspense>
-        </DuelTvContext.Provider>
+        </TvContext.Provider>
       ) : (
         waiting('Jeu indisponible', 'Ce jeu n’est pas disponible dans cette version de l’app.', '🤷')
       )
@@ -169,16 +172,16 @@ export function TvPage() {
   return (
     <div className="pt-safe pb-safe pl-safe pr-safe fixed inset-0 z-30 flex flex-col bg-paper">
       <header className="flex shrink-0 items-center gap-2 border-b-[3px] border-ink bg-surface px-3 py-1.5">
-        <span className="text-2xl">{state && duelGame ? (game?.emoji ?? '📺') : '📺'}</span>
+        <span className="text-2xl">{state && tvGame ? (game?.emoji ?? '📺') : '📺'}</span>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="truncate font-display text-xl font-extrabold">{state && duelGame ? (game?.name ?? 'Mode télé') : 'Mode télé'}</span>
-          {roundLabel && duelGame && (
+          <span className="truncate font-display text-xl font-extrabold">{state && tvGame ? (game?.name ?? 'Mode télé') : 'Mode télé'}</span>
+          {roundLabel && tvGame && (
             <Badge tone="sky" tilted={false}>
               {roundLabel}
             </Badge>
           )}
         </div>
-        {state && duelGame && !finished && (
+        {state && tvGame && !finished && (
           <motion.span
             className="flex shrink-0 items-center gap-1 rounded-full border-2 border-ink bg-tomato px-2 text-xs font-extrabold text-white uppercase"
             animate={reduce ? undefined : { opacity: [1, 0.55, 1] }}

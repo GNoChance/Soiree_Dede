@@ -19,6 +19,7 @@ export const definition: GameDefinition = {
   rules:
     'En équipes, l’espion voit quels mots sont les vôtres et donne un indice d’un seul mot avec un nombre. L’équipe pose ses têtes sur les mots : la majorité dévoile. Trouvez tous vos mots avant les autres… et gare à la bombe 💣 !',
   Play,
+  tv: true,
   Options: NdcOptionsPanel,
   Summary,
   defaultOptions: { ...NDC_DEFAULT_OPTIONS },

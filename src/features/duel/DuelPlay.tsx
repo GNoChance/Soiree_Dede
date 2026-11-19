@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useNavigate } from 'react-router'
-import { ChevronDown, Flag, Tv } from 'lucide-react'
+import { ChevronDown, Flag } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/features/soiree/components'
@@ -13,6 +12,7 @@ import { BetPanel } from './BetPanel'
 import { DuelResultBanner } from './DuelResult'
 import { DuelStage } from './DuelStage'
 import { DuelTransition } from './DuelTransition'
+import { TvButton } from '@/features/tv/TvButton'
 import { DuelTv } from './DuelTv'
 import { useDuelTv } from './tv'
 import { SessionBoard } from './SessionBoard'
@@ -43,7 +43,6 @@ export function DuelPlay<B, M>(props: DuelPlayProps<B, M>) {
 
 function DuelPlayScreen<B, M>({ soireeId, state, secret, meId, isHost, players, act, pending, Board, sideColors, myTurnHint, setupHint }: DuelPlayProps<B, M>) {
   const reduce = useReducedMotion()
-  const navigate = useNavigate()
   const v = useDuel<B, M>(state, meId, players)
   const { s, duel, session, phase, get } = v
   const [confirmStop, setConfirmStop] = useState(false)
@@ -204,9 +203,7 @@ function DuelPlayScreen<B, M>({ soireeId, state, secret, meId, isHost, players, 
       </div>
 
       {(!v.isDuelist || isHost) && (
-        <Button variant="secondary" size="sm" icon={<Tv className="size-4" />} onClick={() => navigate(`/soiree/${soireeId}/tele`)}>
-          📺 Mode télé
-        </Button>
+        <TvButton soireeId={soireeId} />
       )}
 
       {isHost && (

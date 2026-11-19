@@ -96,6 +96,13 @@ export interface GameDefinition {
   /** Règles en 2-3 phrases (salon). */
   rules?: string
   Play: ComponentType<GamePlayProps>
+  /**
+   * Le jeu a une vue télé (route /soiree/:id/tele). TvPage rend alors son `Play` sous
+   * TvContext (`useTv()` de @/features/tv/tv) avec `meId = TV_VIEWER_ID`, `secret = null`,
+   * `act` limité aux ticks : le Play affiche sa vue grand écran, lecture seule. Les duels
+   * l'obtiennent via DuelPlay (DuelTv). Ajouter aussi <TvButton/> dans l'écran de jeu.
+   */
+  tv?: boolean
   Options?: ComponentType<GameOptionsProps>
   Summary?: ComponentType<GameSummaryProps>
   defaultOptions?: Record<string, unknown>
