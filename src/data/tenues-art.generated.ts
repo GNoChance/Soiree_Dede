@@ -341,7 +341,6 @@ export const TENUE_EXTRAS: Readonly<Record<string, number>> = {
   "dede/pyro": 3,
   "dede/pirate": 4,
   "dede/philosopher": 6,
-  "kevin/croupier": 2,
   "marius/admiral": 2,
   "marius/tycoon": 2,
   "marius/star": 2,
@@ -497,11 +496,18 @@ export const TENUE_ART_BAD: readonly string[] = [
   'dede/philosopher/clin_oeil',
   'dede/philosopher/pouces',
   'dede/philosopher/timide',
+  'kevin/spy/pouces',
+  'kevin/spy/timide',
+  'kevin/spy/determine',
+  'kevin/cinema/pouces',
+  'kevin/cinema/timide',
+  'kevin/cinema/determine',
   'kevin/student/pouces',
   'kevin/student/timide',
   'kevin/student/determine',
-  'kevin/croupier/pleurs',
-  'kevin/croupier/surprise',
+  'kevin/croupier/pouces',
+  'kevin/croupier/timide',
+  'kevin/croupier/determine',
   'kevin/painter/pouces',
   'kevin/painter/timide',
   'kevin/painter/determine',
@@ -529,6 +535,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'kevin/bowler/pouces',
   'kevin/bowler/timide',
   'kevin/bowler/determine',
+  'kevin/strategist/pouces',
+  'kevin/strategist/timide',
+  'kevin/strategist/determine',
   'kevin/tictactoe/pouces',
   'kevin/tictactoe/timide',
   'kevin/tictactoe/determine',
@@ -843,7 +852,22 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "kevin/spy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/cinema": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "kevin/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/croupier": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -889,6 +913,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "kevin/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "kevin/strategist": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"

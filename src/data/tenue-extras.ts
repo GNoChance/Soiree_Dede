@@ -13,7 +13,6 @@ export interface TenueExtra {
 }
 
 const LABELS: Record<string, { label: string; emoji: string }[]> = {
-  'kevin/croupier': [{ label: 'Pluie de jetons', emoji: '🎰' }, { label: 'Bienvenue au casino', emoji: '🙌' }],
   'marius/admiral': [{ label: 'Victoire en mer', emoji: '🎉' }, { label: 'Jumelles !', emoji: '🔭' }],
   'marius/tycoon': [{ label: 'Jackpot', emoji: '💰' }, { label: 'Bonne main', emoji: '🃏' }],
   'marius/star': [{ label: 'Yeux étoilés', emoji: '🤩' }, { label: 'Sous les projecteurs', emoji: '🎤' }],
