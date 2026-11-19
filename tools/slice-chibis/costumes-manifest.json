@@ -172,7 +172,11 @@
       "admiral",
       "racer",
       "tycoon",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "tycoon",
@@ -195,7 +199,11 @@
       "star",
       "racer",
       "strategist",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ]
   },
   "kevin": {
