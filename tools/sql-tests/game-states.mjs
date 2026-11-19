@@ -29,6 +29,7 @@ const OPTIONS = {
   menteur: {},
   morpion: {},
   'pas-de-bol': {},
+  'nom-de-code': { teams: { red: ids.slice(0, 3), blue: ids.slice(3, 6) }, rounds: 'one', timer: 'normal', words: n(25, (i) => 'mot' + i) },
   'petit-bac': { categories: [{ id: 'prenom', label: 'Prénom', emoji: '🙂' }, { id: 'animal', label: 'Animal', emoji: '🐶' }, { id: 'ville', label: 'Ville', emoji: '🏙️' }] },
   'quatre-a-la-suite': {},
   'qui-de-nous': { questions: n(5, (i) => 'Qui de nous le plus drôle ? ' + i), rounds: 5 },
