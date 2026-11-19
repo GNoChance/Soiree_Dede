@@ -20,6 +20,7 @@ export const TENUE_ART: readonly string[] = [
   'carole/racer',
   'carole/tycoon',
   'carole/admiral',
+  'carole/pirate',
   'cecile/cinema',
   'cecile/croupier',
   'cecile/painter',
@@ -398,6 +399,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'carole/admiral/pouces',
   'carole/admiral/timide',
   'carole/admiral/determine',
+  'carole/pirate/pouces',
+  'carole/pirate/timide',
+  'carole/pirate/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -770,6 +774,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "carole/admiral": {
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "carole/pirate": {
     "pouces": "charmee",
     "timide": "cool",
     "determine": "gamer"
