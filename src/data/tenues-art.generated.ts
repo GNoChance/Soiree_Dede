@@ -60,6 +60,7 @@ export const TENUE_ART: readonly string[] = [
   'dede/tictactoe',
   'dede/admiral',
   'dede/racer',
+  'dede/tycoon',
   'kevin/spy',
   'kevin/cinema',
   'kevin/student',
@@ -408,6 +409,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'dede/racer/pouces',
   'dede/racer/timide',
   'dede/racer/determine',
+  'dede/tycoon/pouces',
+  'dede/tycoon/timide',
+  'dede/tycoon/determine',
   'kevin/spy/pouces',
   'kevin/spy/timide',
   'kevin/spy/determine',
@@ -883,6 +887,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "dede/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/tycoon": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"

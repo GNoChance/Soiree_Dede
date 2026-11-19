@@ -7,6 +7,6 @@ const S = (name) => ({ name, file: `dede-${name}.png`, n: 12, dir: name, map: MA
 export default {
   slug: 'dede',
   src: 'assets-source/costumes/dede-v3',
-  sheets: 'star spy croupier teacher student painter werewolf pyro pirate bowler philosopher cinema archer actor coach strategist tictactoe admiral racer'.split(' ').map(S),
+  sheets: 'star spy croupier teacher student painter werewolf pyro pirate bowler philosopher cinema archer actor coach strategist tictactoe admiral racer tycoon'.split(' ').map(S),
   portraits: [],
 };
