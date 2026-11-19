@@ -253,7 +253,8 @@
       "teacher",
       "croupier",
       "spy",
-      "star"
+      "star",
+      "racer"
     ],
     "portraits": [
       "painter",
@@ -262,7 +263,8 @@
       "croupier",
       "spy",
       "star",
-      "strategist"
+      "strategist",
+      "racer"
     ]
   },
   "mika": {

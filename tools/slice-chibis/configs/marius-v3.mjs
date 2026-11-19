@@ -10,6 +10,6 @@ const S = (name) => ({ name, file: `marius-${name}.png`, n: 12, dir: name, map: 
 export default {
   slug: 'marius',
   src: 'assets-source/costumes/marius-v3',
-  sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star'.split(' ').map(S),
-  portraits: 'painter student teacher croupier spy star strategist'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer'.split(' ').map(S),
+  portraits: 'painter student teacher croupier spy star strategist racer'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
 };

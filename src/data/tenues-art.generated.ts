@@ -120,6 +120,7 @@ export const TENUE_ART: readonly string[] = [
   'marius/croupier',
   'marius/spy',
   'marius/star',
+  'marius/racer',
   'mika/spy',
   'mika/cinema',
   'mika/student',
@@ -271,6 +272,7 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'marius/spy',
   'marius/star',
   'marius/strategist',
+  'marius/racer',
   'mika/spy',
   'mika/cinema',
   'mika/student',
@@ -675,6 +677,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'marius/star/pouces',
   'marius/star/timide',
   'marius/star/determine',
+  'marius/racer/pouces',
+  'marius/racer/timide',
+  'marius/racer/determine',
   'mika/spy/pouces',
   'mika/spy/timide',
   'mika/spy/determine',
@@ -1390,6 +1395,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "marius/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "marius/racer": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
