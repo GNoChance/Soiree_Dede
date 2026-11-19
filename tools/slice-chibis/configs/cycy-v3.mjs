@@ -5,10 +5,11 @@ const MAP = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise am
 const S = (name, dir = name) => ({ name, file: `cycy-${name}.png`, n: 12, dir, map: MAP, white: name === 'racer', split: name === 'racer' ? false : 'grid', pockets: name !== 'racer' });
 // tycoon : noyaux plus grands (le liseré du sticker voisin le coupait)
 const OV = { tycoon: { split: 0.32 } };
-const NAMES = 'star spy croupier teacher pyro pirate bowler philosopher cinema archer actor coach strategist tycoon tictactoe admiral werewolf painter student racer'.split(' ');
+const NAMES = 'star spy croupier teacher pyro pirate bowler philosopher cinema archer actor coach strategist tycoon tictactoe admiral werewolf painter student racer hacker'.split(' ');
 export default {
   slug: 'cycy',
   src: 'assets-source/costumes/cycy-v3',
   sheets: NAMES.map((n) => ({ ...S(n), ...(OV[n] ?? {}) })),
-  portraits: NAMES.map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
+  // portraits : seulement les tenues dont le portrait a été livré
+  portraits: NAMES.filter((n) => !['hacker'].includes(n)).map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
 };

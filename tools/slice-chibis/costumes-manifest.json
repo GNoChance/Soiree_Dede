@@ -66,7 +66,8 @@
       "croupier",
       "spy",
       "star",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "tycoon",
@@ -112,7 +113,8 @@
       "star",
       "teacher",
       "student",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "spy",
@@ -204,7 +206,8 @@
       "tycoon",
       "star",
       "teacher",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "spy",
@@ -250,7 +253,8 @@
       "bowler",
       "teacher",
       "star",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "spy",
@@ -296,7 +300,8 @@
       "croupier",
       "spy",
       "star",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "painter",
@@ -342,7 +347,8 @@
       "tictactoe",
       "admiral",
       "tycoon",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "spy",
@@ -388,7 +394,8 @@
       "tycoon",
       "admiral",
       "bowler",
-      "racer"
+      "racer",
+      "hacker"
     ],
     "portraits": [
       "racer",

@@ -7,6 +7,6 @@ const OVERRIDE = { cinema: { split: 0.36, pockets: false }, racer: { tol: 40, op
 export default {
   slug: 'manon',
   src: 'assets-source/costumes/manon-v3',
-  sheets: 'tycoon admiral tictactoe strategist coach actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer'.split(' ').map((n) => ({ ...S(n), ...(OVERRIDE[n] ?? {}) })),
+  sheets: 'tycoon admiral tictactoe strategist coach actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker'.split(' ').map((n) => ({ ...S(n), ...(OVERRIDE[n] ?? {}) })),
   portraits: 'tycoon admiral tictactoe strategist coach actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer'.split(' ').map((n) => ({ file: `manon-${n}-portrait.png`, dir: n, cutout: true })),
 };

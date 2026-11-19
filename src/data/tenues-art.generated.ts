@@ -41,6 +41,7 @@ export const TENUE_ART: readonly string[] = [
   'cecile/spy',
   'cecile/star',
   'cecile/racer',
+  'cecile/hacker',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
@@ -61,6 +62,7 @@ export const TENUE_ART: readonly string[] = [
   'cycy/teacher',
   'cycy/student',
   'cycy/racer',
+  'cycy/hacker',
   'dede/star',
   'dede/spy',
   'dede/croupier',
@@ -101,6 +103,7 @@ export const TENUE_ART: readonly string[] = [
   'kevin/star',
   'kevin/teacher',
   'kevin/racer',
+  'kevin/hacker',
   'manon/spy',
   'manon/cinema',
   'manon/student',
@@ -121,6 +124,7 @@ export const TENUE_ART: readonly string[] = [
   'manon/teacher',
   'manon/star',
   'manon/racer',
+  'manon/hacker',
   'marius/admiral',
   'marius/tycoon',
   'marius/tictactoe',
@@ -141,6 +145,7 @@ export const TENUE_ART: readonly string[] = [
   'marius/spy',
   'marius/star',
   'marius/racer',
+  'marius/hacker',
   'mika/spy',
   'mika/cinema',
   'mika/student',
@@ -161,6 +166,7 @@ export const TENUE_ART: readonly string[] = [
   'mika/admiral',
   'mika/tycoon',
   'mika/racer',
+  'mika/hacker',
   'nini/star',
   'nini/spy',
   'nini/croupier',
@@ -181,6 +187,7 @@ export const TENUE_ART: readonly string[] = [
   'nini/admiral',
   'nini/bowler',
   'nini/racer',
+  'nini/hacker',
 ]
 
 // "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).
@@ -492,6 +499,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cecile/racer/pouces',
   'cecile/racer/timide',
   'cecile/racer/determine',
+  'cecile/hacker/pouces',
+  'cecile/hacker/timide',
+  'cecile/hacker/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -552,6 +562,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cycy/racer/pouces',
   'cycy/racer/timide',
   'cycy/racer/determine',
+  'cycy/hacker/pouces',
+  'cycy/hacker/timide',
+  'cycy/hacker/determine',
   'dede/star/pouces',
   'dede/star/timide',
   'dede/star/determine',
@@ -672,6 +685,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'kevin/racer/pouces',
   'kevin/racer/timide',
   'kevin/racer/determine',
+  'kevin/hacker/pouces',
+  'kevin/hacker/timide',
+  'kevin/hacker/determine',
   'manon/spy/pouces',
   'manon/spy/timide',
   'manon/spy/determine',
@@ -732,6 +748,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'manon/racer/pouces',
   'manon/racer/timide',
   'manon/racer/determine',
+  'manon/hacker/pouces',
+  'manon/hacker/timide',
+  'manon/hacker/determine',
   'marius/admiral/pouces',
   'marius/admiral/timide',
   'marius/admiral/determine',
@@ -792,6 +811,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'marius/racer/pouces',
   'marius/racer/timide',
   'marius/racer/determine',
+  'marius/hacker/pouces',
+  'marius/hacker/timide',
+  'marius/hacker/determine',
   'mika/spy/pouces',
   'mika/spy/timide',
   'mika/spy/determine',
@@ -852,6 +874,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'mika/racer/pouces',
   'mika/racer/timide',
   'mika/racer/determine',
+  'mika/hacker/pouces',
+  'mika/hacker/timide',
+  'mika/hacker/determine',
   'nini/star/pouces',
   'nini/star/timide',
   'nini/star/determine',
@@ -912,6 +937,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'nini/racer/pouces',
   'nini/racer/timide',
   'nini/racer/determine',
+  'nini/hacker/pouces',
+  'nini/hacker/timide',
+  'nini/hacker/determine',
 ]
 
 // Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
@@ -1116,6 +1144,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "cecile/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "cycy/spy": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1212,6 +1245,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cycy/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy/hacker": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -1416,6 +1454,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "kevin/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "manon/spy": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1512,6 +1555,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "manon/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/hacker": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -1616,6 +1664,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "marius/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "mika/spy": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1716,6 +1769,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "mika/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "nini/star": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1812,6 +1870,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "nini/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/hacker": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
