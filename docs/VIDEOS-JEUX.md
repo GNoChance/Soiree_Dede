@@ -1,6 +1,6 @@
 # Vidéos « Comment on joue ? » — scripts par jeu
 
-Vidéos d'explication de 34 à 37 s, une par jeu (les 21 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
+Vidéos d'explication de 34 à 37 s, une par jeu (les 22 jeux sont faits), affichées dans l'appli par le bouton **« ❓ Comment on joue ? »**.
 
 - **Format** : mp4 portrait 720 × 1280, 30 FPS, h264 CRF 30 (préréglage veryslow ; CRF 33 si > 3 Mo, comme Nom de Code), < 3 Mo (2,3 à 2,7 Mo en pratique : rester sous ~37 s). Pas de voix off : textes courts à l'écran + bruitages légers.
 - **Ton** : « sticker book » (contours épais, ombres décalées, couleurs vives, gros rebonds), chibis de la bande, maquettes simplifiées des écrans (jamais de captures).
@@ -281,3 +281,20 @@ Barème réel : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 points. En 1 course ou en 
 Grille d’exemple (mots réels de `words.ts`) : chat, pizza, lune, piano, pirate / fusée, lion, clé, volcan, tarte / robot, vélo, requin, roi, neige / plage, épée, citron, hibou, train / lampe, micro, gâteau, phare, golf. Rouges : chat, lion, requin (+ 6 autres) ; « hibou » neutre (le piège de l’indice « ANIMAL ») ; bombe : volcan. Majorité = plus de la moitié des devineurs (3 devineurs rouges → 2 têtes).
 
 Non montré : essais = nombre de l’indice + 1 (le « HIBOU » de l’étape 4 est ce 4ᵉ essai) ; bouton « ✋ Stop, on passe » (à la majorité, après un mot dévoilé) ; un mot d’une autre équipe dévoilé compte pour elle et termine le tour ; l’indice ne peut pas être un mot de la grille ; à 3-4 équipes la partie continue sans l’équipe éliminée (la dernière en lice gagne), à 2 équipes la bombe fait gagner l’adversaire ; option « chacun son tour d’espion » (plusieurs manches) ; banc 👀 ; mode télé.
+
+## ✅ Échecs ♟️ — 2 à 9 joueurs (duel) — 35,4 s
+**But** : « Mets le roi adverse échec et mat ! » · Chibis : Nini (⚪ Blancs), Keke (⚫ Noirs), Dédé, Mika, Manon. **Tenues : Nini porte la tenue Grand Maître ♟️ (dossier d’art `chess`) dans toute la vidéo (titre et scène finale compris) ; Keke et les spectateurs restent en tenue par défaut (les autres planches Grand Maître ne sont pas encore livrées).**
+
+| # | Durée | Texte à l’écran | Image |
+| --- | --- | --- | --- |
+| 1 | 4,6 s | Un duel ! Les Blancs commencent, chacun a sa pendule | Scène VS du Morpion (`makeVersus`) : Nini (tenue Grand Maître) contre Keke, une pendule « 5:00 » sous chacun ; celle de Nini se met à descendre ; pastille « ⚪ Nini a les Blancs » |
+| 2 | 6 s | Touche une pièce, ses cases s’allument : touche la case ! | Échiquier 8 × 8 (cases crème / turquoise), position de départ : le doigt touche le pion e2, il se soulève, deux points s’allument (e3, e4), le doigt touche e4, le pion glisse ; puis le cavalier g1 : points en f3 et h3, il saute en f3. Sous le plateau, le bouton « ❓ Les pièces » rebondit ; pastille « ❓ Perdu ? La fiche des pièces » |
+| 3 | 5,8 s | Roi attaqué : échec ! Sans issue : échec et mat ! | Mat du berger : le doigt touche la dame blanche h5, un anneau rouge entoure le pion f7 (« ⭕ = prise »), elle le prend ; la case du roi noir passe au rouge, bandeau « Échec ! », le roi se couche, « Échec et mat ! », confettis ; Nini (tenue Grand Maître, joie) dans un coin, Keke en pleurs |
+| 4 | 5,2 s | Les autres regardent… et parient sur le vainqueur ! | Scène de paris du Morpion (`makeBetting`) : Dédé, Mika et Manon lancent leurs jetons 🪙 sur Nini (tenue Grand Maître) ou Keke |
+| 🏆 | 4,2 s | Échec et mat : tu gagnes le duel ! — *Pendule à zéro : perdu ! 3, 5 ou 10 min, ou sans pendule.* | Nini (tenue Grand Maître, joie) saute |
+
+Total : 3 + 3,6 + 21,6 + 4,2 + 3 = 35,4 s. La vidéo montre l’appli, pas les règles des échecs : la fiche « ❓ Les pièces » (`Aide.tsx`) s’en charge. Position de l’étape 3 (réelle, 1. e4 e5 2. Dh5 Cc6 3. Fc4 Cf6 4. Dxf7#) : la dame en f7 est protégée par le fou c4. Dans l’appli le bandeau « Échec ! » et la raison de fin « Échec et mat ! » sont deux affichages distincts : la vidéo les enchaîne pour expliquer les deux mots.
+
+Expressions de Nini en tenue `chess` (`public/chibis/nini/chess/`) : joie, colere, pleurs, boude, reflexion, dodo, bisou, clin_oeil, surprise, cool, amoureux, gamer — pas de `pouces`, `timide` ni `determine`. `cool` existe dans cette tenue (Nini côté gauche de `makeVersus` et dans `makeBetting` : OK, à condition de leur passer la tenue ; Nini n’a pas `cool` en tenue par défaut). Copier `public/chibis/nini/chess/` dans `promo-video/public/chibis/nini/chess/`.
+
+Non montré : promotion (4 gros boutons, dame en premier), roque, prise en passant ; nuls (pat, 3 fois la même position, 50 coups, plus assez de pièces, commun accord via « 🤝 Proposer nul ») ; « 🏳️ Abandonner » ; pièce bloquée qui tremble ; dernier coup surligné, pièces prises et avance de matériel ; sans pendule : 60 s par coup puis coup légal au hasard ; pendule à zéro face à un roi seul = nul ; formats Roi de la table / Tournoi (Duel par défaut) ; mode télé.

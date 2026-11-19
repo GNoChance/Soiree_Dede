@@ -30,8 +30,8 @@ export const Chibi: React.FC<{ slug: Slug; expression?: string; size: number; th
 
 /** Disque sticker (couleur du perso) + chibi. */
 export const Avatar: React.FC<{
-  slug: Slug; expression?: string; size?: number; badge?: React.ReactNode; ring?: boolean; style?: React.CSSProperties
-}> = ({ slug, expression = 'joie', size = 56, badge, ring, style }) => (
+  slug: Slug; expression?: string; size?: number; badge?: React.ReactNode; ring?: boolean; outfit?: string; style?: React.CSSProperties
+}> = ({ slug, expression = 'joie', size = 56, badge, ring, outfit, style }) => (
   <div style={{ position: 'relative', width: size, height: size, flexShrink: 0, ...style }}>
     <div
       style={{
@@ -40,7 +40,7 @@ export const Avatar: React.FC<{
         background: bySlug(slug).color, display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
     >
-      <Chibi slug={slug} expression={expression} size={size * 0.92} style={{ marginTop: '6%' }} />
+      <Chibi slug={slug} expression={expression} size={size * 0.92} outfit={outfit} style={{ marginTop: '6%' }} />
     </div>
     {badge && (
       <span

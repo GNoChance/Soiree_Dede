@@ -71,7 +71,7 @@ export const ScoreRows: React.FC<{ f: number; rows: ScoreRow[]; top?: number; ro
 // ---------------------------------------------------------------------------
 // Jeux en duel : scène « VS » et scène des paris (mêmes que le Morpion, paramétrables).
 // ---------------------------------------------------------------------------
-type Side = { slug: Slug; name: string; tint: string }
+type Side = { slug: Slug; name: string; tint: string; outfit?: string }
 export type DuelCast = { a: Side; b: Side; tokenA?: React.ReactNode; tokenB?: React.ReactNode }
 
 export const makeVersus = (d: DuelCast, pill: string): MockScene => ({ f }) => {
@@ -81,11 +81,11 @@ export const makeVersus = (d: DuelCast, pill: string): MockScene => ({ f }) => {
   return (
     <>
       <div style={{ position: 'absolute', left: 20 - (1 - a) * 400, top: 120 + bob(f, 0, 12, 26) }}>
-        <Chibi slug={d.a.slug} expression="cool" size={310} />
+        <Chibi slug={d.a.slug} expression="cool" size={310} outfit={d.a.outfit} />
         {d.tokenA && <div style={{ position: 'absolute', left: -10, top: -30, transform: `rotate(-10deg) scale(${sp(f, 26)})` }}>{d.tokenA}</div>}
       </div>
       <div style={{ position: 'absolute', right: 20 - (1 - b) * 400, top: 300 + bob(f, 13, 12, 26) }}>
-        <Chibi slug={d.b.slug} expression="clin_oeil" size={310} />
+        <Chibi slug={d.b.slug} expression="clin_oeil" size={310} outfit={d.b.outfit} />
         {d.tokenB && <div style={{ position: 'absolute', right: -10, top: -30, transform: `rotate(10deg) scale(${sp(f, 32)})` }}>{d.tokenB}</div>}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 290, display: 'flex', justifyContent: 'center', transform: `scale(${vs * (1 + 0.05 * Math.sin(f / 5))}) rotate(-8deg)` }}>
@@ -114,7 +114,7 @@ export const makeBetting = (d: DuelCast, bets: Bet[] = DEFAULT_BETS): MockScene 
       return (
         <Pop key={k} f={f} at={2 + k * 5} style={{ position: 'absolute', left: k ? 380 : 40, top: 20 }}>
           <Panel bg={side.tint} radius={36} style={{ width: 300, height: 330, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-            <Avatar slug={side.slug} expression="cool" size={150} />
+            <Avatar slug={side.slug} expression="cool" size={150} outfit={side.outfit} />
             <div style={{ fontSize: 44, lineHeight: 1 }}>{side.name}</div>
             <Pill bg={C.sun} size={34} style={{ transform: `scale(${1 + 0.25 * Math.max(0, ...bets.filter((b) => b.on === k).map((b) => 1 - Math.abs(f - b.at - 16) / 6))})` }}>🪙 × {n}</Pill>
           </Panel>
