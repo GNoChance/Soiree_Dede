@@ -234,8 +234,36 @@
     ]
   },
   "marius": {
-    "costumes": [],
-    "portraits": []
+    "costumes": [
+      "admiral",
+      "tycoon",
+      "tictactoe",
+      "coach",
+      "strategist",
+      "actor",
+      "archer",
+      "cinema",
+      "philosopher",
+      "bowler",
+      "pirate",
+      "pyro",
+      "werewolf",
+      "painter",
+      "student",
+      "teacher",
+      "croupier",
+      "spy",
+      "star"
+    ],
+    "portraits": [
+      "painter",
+      "student",
+      "teacher",
+      "croupier",
+      "spy",
+      "star",
+      "strategist"
+    ]
   },
   "mika": {
     "costumes": [
