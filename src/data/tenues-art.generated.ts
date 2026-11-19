@@ -121,6 +121,24 @@ export const TENUE_ART: readonly string[] = [
   'mika/admiral',
   'mika/tycoon',
   'mika/racer',
+  'nini/star',
+  'nini/spy',
+  'nini/croupier',
+  'nini/teacher',
+  'nini/student',
+  'nini/painter',
+  'nini/werewolf',
+  'nini/pyro',
+  'nini/pirate',
+  'nini/philosopher',
+  'nini/tictactoe',
+  'nini/coach',
+  'nini/strategist',
+  'nini/actor',
+  'nini/archer',
+  'nini/cinema',
+  'nini/tycoon',
+  'nini/admiral',
 ]
 
 // "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).
@@ -612,6 +630,60 @@ export const TENUE_ART_BAD: readonly string[] = [
   'mika/racer/pouces',
   'mika/racer/timide',
   'mika/racer/determine',
+  'nini/star/pouces',
+  'nini/star/timide',
+  'nini/star/determine',
+  'nini/spy/pouces',
+  'nini/spy/timide',
+  'nini/spy/determine',
+  'nini/croupier/pouces',
+  'nini/croupier/timide',
+  'nini/croupier/determine',
+  'nini/teacher/pouces',
+  'nini/teacher/timide',
+  'nini/teacher/determine',
+  'nini/student/pouces',
+  'nini/student/timide',
+  'nini/student/determine',
+  'nini/painter/pouces',
+  'nini/painter/timide',
+  'nini/painter/determine',
+  'nini/werewolf/pouces',
+  'nini/werewolf/timide',
+  'nini/werewolf/determine',
+  'nini/pyro/pouces',
+  'nini/pyro/timide',
+  'nini/pyro/determine',
+  'nini/pirate/pouces',
+  'nini/pirate/timide',
+  'nini/pirate/determine',
+  'nini/philosopher/pouces',
+  'nini/philosopher/timide',
+  'nini/philosopher/determine',
+  'nini/tictactoe/pouces',
+  'nini/tictactoe/timide',
+  'nini/tictactoe/determine',
+  'nini/coach/pouces',
+  'nini/coach/timide',
+  'nini/coach/determine',
+  'nini/strategist/pouces',
+  'nini/strategist/timide',
+  'nini/strategist/determine',
+  'nini/actor/pouces',
+  'nini/actor/timide',
+  'nini/actor/determine',
+  'nini/archer/pouces',
+  'nini/archer/timide',
+  'nini/archer/determine',
+  'nini/cinema/pouces',
+  'nini/cinema/timide',
+  'nini/cinema/determine',
+  'nini/tycoon/pouces',
+  'nini/tycoon/timide',
+  'nini/tycoon/determine',
+  'nini/admiral/pouces',
+  'nini/admiral/timide',
+  'nini/admiral/determine',
 ]
 
 // Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
@@ -1212,6 +1284,96 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "mika/racer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/spy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/croupier": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/painter": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/werewolf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/pyro": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/pirate": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/philosopher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/coach": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/actor": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/archer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/cinema": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/admiral": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"

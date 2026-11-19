@@ -284,7 +284,26 @@
     ]
   },
   "nini": {
-    "costumes": [],
+    "costumes": [
+      "star",
+      "spy",
+      "croupier",
+      "teacher",
+      "student",
+      "painter",
+      "werewolf",
+      "pyro",
+      "pirate",
+      "philosopher",
+      "tictactoe",
+      "coach",
+      "strategist",
+      "actor",
+      "archer",
+      "cinema",
+      "tycoon",
+      "admiral"
+    ],
     "portraits": []
   }
 }
