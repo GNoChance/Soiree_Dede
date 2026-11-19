@@ -1,16 +1,135 @@
-import type { GamePlayProps } from '../types'
+import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
+import { Avatar } from '@/components/ui/Avatar'
+import { cn } from '@/lib/cn'
+import { fx } from '@/lib/feedback'
+import { playerOrPlaceholder } from '@/features/soiree/players'
+import { useCountdown } from '@/features/soiree/useServerClock'
 import { TEAM_INFO } from '@/features/teams/teams'
+import type { GamePlayProps } from '../types'
+import { CluePanel } from './CluePanel'
+import { Grid } from './Grid'
 import { myRole } from './logic'
-import type { NdcState } from './types'
+import { RoundEnd } from './RoundEnd'
+import { ndcActions } from './setup'
+import type { NdcSecret, NdcState } from './types'
 
-/** Squelette (Task 5) : remplacé par les écrans de jeu (Task 6). */
-export default function NomDeCodePlay({ state, meId }: GamePlayProps) {
+export default function NomDeCodePlay({ state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as NdcState
   const role = myRole(s, meId)
+  const sec = secret as NdcSecret | null
+  const secretKey = sec && sec.round === s.round ? sec.key : null
+  const live = s.phase === 'clue' || s.phase === 'guess'
+  const left = useCountdown(live ? s.deadline : null)
+  const timeUp = live && Boolean(s.deadline) && left <= 0
+
+  // Échéance : un tick (idempotent), avec un petit délai aléatoire et ré-essai (horloge en avance).
+  useEffect(() => {
+    if (!timeUp || !(role.team || isHost)) return
+    let t = 0
+    let cancelled = false
+    const send = async () => {
+      if (cancelled) return
+      await act(ndcActions.tick())
+      if (!cancelled) t = window.setTimeout(() => void send(), 2500)
+    }
+    t = window.setTimeout(() => void send(), 150 + Math.random() * 500)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [timeUp, act, role.team, isHost])
+
+  // Rôle affiché 3 s au début de chaque manche (front uniquement).
+  const [roleRound, setRoleRound] = useState<number | null>(null)
+  const shown = useRef(new Set<number>())
+  useEffect(() => {
+    if (!live || shown.current.has(s.round)) return
+    shown.current.add(s.round)
+    setRoleRound(s.round)
+    const t = window.setTimeout(() => setRoleRound(null), 3000)
+    return () => clearTimeout(t)
+  }, [s.round, live])
+
+  // Bruitages et secousse à chaque carte dévoilée (diff des clés : jsonb ne garde pas l'ordre d'insertion).
+  const seen = useRef<Set<string> | null>(null)
+  const controls = useAnimationControls()
+  useEffect(() => {
+    const keys = Object.keys(s.revealed)
+    const prev = seen.current
+    seen.current = new Set(keys)
+    if (!prev) return
+    const fresh = keys.filter((k) => !prev.has(k)).map((k) => s.revealed[k])
+    if (!fresh.length) return
+    if (fresh.some((c) => c.color === 'bomb')) {
+      fx.fail()
+      void controls.start({ x: [0, -14, 14, -10, 10, 0], transition: { duration: 0.5 } })
+    } else if (fresh.some((c) => c.color === c.by)) fx.success()
+    else fx.whoosh()
+  }, [s.revealed, controls])
+
+  const secs = Math.ceil(left / 1000)
   return (
-    <div className="sticker flex flex-col gap-2 bg-surface p-4 text-center">
-      <p className="font-display text-xl font-extrabold">Phase : {s.phase}</p>
-      <p>{role.team ? `${role.spy ? '🕵️ Espion' : '🔎 Devineur'} · ${TEAM_INFO[role.team].emoji} ${TEAM_INFO[role.team].short}` : '👀 Tu regardes'}</p>
-    </div>
+    <motion.div animate={controls} className="flex flex-col gap-3 pb-6">
+      {/* Pastilles d'équipe : mots restants, équipe active, éliminées grisées */}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {s.teams.map((t) => {
+          const meta = TEAM_INFO[t.id]
+          const activeTeam = live && s.turn === t.id
+          return (
+            <motion.span
+              key={t.id}
+              animate={activeTeam ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+              transition={activeTeam ? { repeat: Infinity, duration: 1.4 } : undefined}
+              className={cn('sticker-sm flex items-center gap-1 rounded-full px-3 py-1 font-display text-lg font-extrabold', t.eliminated && 'opacity-40 grayscale')}
+              style={{ backgroundColor: activeTeam ? meta.color : meta.soft, color: activeTeam ? meta.text : '#1f1b2e' }}
+            >
+              {t.eliminated ? '💀' : meta.emoji} {t.total - t.found}
+            </motion.span>
+          )
+        })}
+        {live && s.deadline && (
+          <span className={cn('sticker-sm rounded-full bg-surface px-3 py-1 font-display text-lg font-extrabold', secs <= 10 && 'text-tomato')}>
+            ⏱️ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
+          </span>
+        )}
+      </div>
+
+      {live && <CluePanel s={s} meId={meId} isHost={isHost} act={act} pending={pending} />}
+      {live && (
+        <Grid
+          s={s}
+          secretKey={secretKey}
+          meId={meId}
+          canVote={s.phase === 'guess' && role.team === s.turn && !role.spy && !pending}
+          onVote={(i) => void act(ndcActions.vote(i))}
+          players={players}
+        />
+      )}
+      {live && role.spy && <p className="text-center text-xs text-muted">🕵️ Tu vois les couleurs secrètes : chut !</p>}
+      {(s.phase === 'round_end' || s.phase === 'finished') && <RoundEnd s={s} meId={meId} isHost={isHost} act={act} pending={pending} players={players} />}
+
+      <AnimatePresence>
+        {roleRound === s.round && (
+          <motion.div
+            key={`role-${s.round}`}
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            onClick={() => setRoleRound(null)}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#07050f]/75 p-6 text-center"
+          >
+            <Avatar slug={playerOrPlaceholder(players, meId).slug} tenue={playerOrPlaceholder(players, meId).equippedTenue} size={120} />
+            <p className="sticker rounded-card bg-surface p-4 font-display text-2xl font-extrabold">
+              {role.team
+                ? role.spy
+                  ? `🕵️ Tu es l’espion des ${TEAM_INFO[role.team].short} !`
+                  : `🔎 Tu devines pour les ${TEAM_INFO[role.team].short} !`
+                : '👀 Tu regardes la partie'}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }
