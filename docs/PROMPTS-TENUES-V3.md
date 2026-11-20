@@ -93,3 +93,16 @@ Style sticker : contour noir épais autour du personnage, y compris sur les cart
 ```
 Illustration portrait du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), en cow-boy joueur de cartes de saloon : chapeau de cow-boy marron avec une carte d'as dans le ruban, bandana rouge, gilet en cuir marron, chemise à carreaux, bottes. Pose : debout, jambes écartées, un éventail de quatre as dans une main, l'autre main touchant le bord du chapeau, clin d'œil malicieux. Décor : table de saloon ronde avec des cartes à jouer étalées, portes battantes de saloon, cartes qui volent, un cactus et un fer à cheval. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, y compris sur les cartes blanches, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
 ```
+
+---
+
+## 🔮 Madame Irma — succès secret « Madame Irma » (3 bons pronostics d'affilée)
+
+Planche seulement : **pas de portrait** (la récompense reste une surprise). Dossier : `irma`.
+
+### Planche
+```
+Planche de 12 stickers chibi du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), grille 4 colonnes × 3 lignes, 12 cases bien séparées, BUSTES uniquement (tête, épaules, haut du torse), en voyante extralucide de fête foraine : foulard violet noué sur la tête avec sequins dorés et petite pierre rouge au milieu du front, grandes créoles dorées, châle violet nuit brodé d'étoiles et de lunes dorées, bracelets dorés aux poignets. Chaque sticker a une pose différente. Ordre de gauche à droite, ligne par ligne :
+1 joie : bras levés, la boule de cristal brille d'une lumière dorée · 2 colère : secoue une boule de cristal embrumée, éclair rouge · 3 pleurs : pleure à chaudes larmes sur une boule de cristal fissurée · 4 boude : bras croisés, dos tourné à la boule de cristal, petit nuage noir · 5 réflexion : mains en éventail au-dessus de la boule de cristal, bulle de pensée avec un point d'interrogation violet · 6 dodo : endormi la joue posée sur la boule de cristal, « Zzz » · 7 bisou : envoie un bisou à la boule de cristal, petit cœur · 8 clin d'œil : clin d'œil malicieux, tient une carte de tarot face cachée · 9 surprise : yeux écarquillés, la boule de cristal lance des étincelles · 10 amoureux : cœurs dans les yeux, la boule de cristal montre un cœur rose · 11 cool : lunettes de soleil étoilées, fait tourner une carte de tarot entre deux doigts · 12 champion : lève un trophée doré en forme de boule de cristal sur un socle doré.
+Style sticker : contour noir épais autour du personnage, y compris sur le châle sombre et la boule de cristal, couleurs vives et flat, GROSSE BORDURE BLANCHE épaisse autour de chaque buste. Fond noir uni #000000, sans dégradé ni ombre. Pas de texte.
+```
