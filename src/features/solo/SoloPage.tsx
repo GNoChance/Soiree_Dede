@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
 import { Navigate, useNavigate, useParams } from 'react-router'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { burst, victoryConfetti } from '@/components/ui/confetti'
-import { CHARACTERS, getCharacter, type Character } from '@/data/characters'
+import { CHARACTERS, getCharacter, type Character, type CharacterSlug } from '@/data/characters'
 import { pickSideColors } from '@/features/duel/logic'
 import { pickExpression } from '@/features/soiree/players'
 import { BnMatchContext } from '@/games/bataille-navale/context'
@@ -14,10 +14,14 @@ import type { PlayerInfo } from '@/games/types'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/store/session'
+import { LearnedCard } from './LearnedCard'
 import { LevelGauge } from './LevelGauge'
-import { SOLO_LOADERS, isSoloGame, type SoloGameModule } from './games'
+import { SOLO_LOADERS, isSoloGame, type SoloGameModule, type WhyKit } from './games'
 import { nextLevel, readLevel, starsText, writeLevel } from './level'
+import { forgetMem, learn, learnRate, newInsight, noteWhy, readMem, writeMem, type MemBase } from './memory'
 import { useSoloMatch, type SoloOutcome } from './useSoloMatch'
+import { explain, learnedLine, type Explanation } from './why/voice'
+import { WhyCard, WhyPanel } from './why/WhyPanel'
 
 const BOT_KEY = 'solo:bot'
 const readBot = (): Character => {
@@ -53,10 +57,16 @@ export default function SoloPage() {
   const { gameId } = useParams()
   const navigate = useNavigate()
   const profile = useSession((s) => s.profile)
+  // Niveau et mémoire du bot rangés par profil (téléphone partagé).
+  const pid = profile?.id ?? 'local'
   const game = gameId ? getGame(gameId) : undefined
   const [mod, setMod] = useState<SoloGameModule | null>(null)
   const [bot, setBot] = useState<Character>(readBot)
-  const [level, setLevel] = useState(() => (gameId ? readLevel(gameId) : 3))
+  const [levels, setLevels] = useState<Record<string, number>>({})
+  const level = levels[`${gameId}:${pid}`] ?? (gameId ? readLevel(gameId, pid) : 3)
+  // Mémoire relue après chaque écriture (memVersion) : objet stable entre deux rendus.
+  const [memVersion, setMemVersion] = useState(0)
+  const mem = useMemo(() => (memVersion >= 0 && mod && gameId ? readMem(mod.learner, gameId, pid) : null), [mod, gameId, pid, memVersion])
   const [playing, setPlaying] = useState(false)
   const [round, setRound] = useState(0)
 
@@ -68,6 +78,8 @@ export default function SoloPage() {
       alive = false
     }
   }, [gameId])
+
+  const insights = useMemo(() => (mod && mem ? mod.learner.insights(mem) : []), [mod, mem])
 
   const me = useMemo<PlayerInfo | null>(
     () =>
@@ -99,6 +111,20 @@ export default function SoloPage() {
         bot={bot}
         level={level}
         loading={!mod}
+        learned={
+          mod && mem ? (
+            <LearnedCard
+              bot={bot}
+              insights={insights}
+              rate={learnRate(level, mem.streak)}
+              known={mem.n > 0}
+              onForget={() => {
+                forgetMem(gameId, pid)
+                setMemVersion((v) => v + 1)
+              }}
+            />
+          ) : null
+        }
         onPick={(c) => {
           fx.pop()
           setBot(c)
@@ -122,11 +148,16 @@ export default function SoloPage() {
       me={me}
       bot={botInfo(bot)}
       level={level}
+      mem={mem}
       // le joueur commence la 1re partie, puis on alterne
       first={round % 2 === 1 ? me.id : botInfo(bot).id}
       onLevel={(l) => {
-        setLevel(l)
-        writeLevel(gameId, l)
+        setLevels((v) => ({ ...v, [`${gameId}:${pid}`]: l }))
+        writeLevel(gameId, l, pid)
+      }}
+      onMem={(m) => {
+        writeMem(gameId, pid, m)
+        setMemVersion((v) => v + 1)
       }}
       onReplay={() => setRound((r) => r + 1)}
       onChangeBot={() => setPlaying(false)}
@@ -143,11 +174,13 @@ function SoloPick(props: {
   bot: Character
   level: number
   loading: boolean
+  /** 2b : « Ce que {Perso} sait de toi ». */
+  learned: ReactNode
   onPick: (c: Character) => void
   onStart: () => void
   onBack: () => void
 }) {
-  const { title, color, bot, level, loading, onPick, onStart, onBack } = props
+  const { title, color, bot, level, loading, learned, onPick, onStart, onBack } = props
   return (
     <div className="flex flex-col gap-4 pb-8">
       <button type="button" onClick={onBack} className="flex min-h-12 items-center gap-2 self-start font-extrabold">
@@ -187,6 +220,8 @@ function SoloPick(props: {
         <p className="text-sm font-bold text-muted">Il monte quand tu gagnes, il baisse quand tu perds.</p>
       </div>
 
+      {learned}
+
       <Button size="lg" fullWidth loading={loading} onClick={onStart}>
         C’est parti contre {bot.nickname} !
       </Button>
@@ -200,7 +235,9 @@ function SoloPick(props: {
 const BOT_SAYS: Record<string, string> = {
   joie: 'Hé hé ! 😏',
   surprise: 'Oh ?! 😮',
+  appris: 'Je te connais ! 💡',
 }
+const MOOD_FACE: Record<string, string[]> = { joie: ['joie'], surprise: ['surprise'], appris: ['clin_oeil', 'cool'] }
 
 function SoloGame(props: {
   gameId: string
@@ -209,17 +246,66 @@ function SoloGame(props: {
   me: PlayerInfo
   bot: PlayerInfo
   level: number
+  /** 2b : mémoire du bot (lue au début de la partie). */
+  mem: MemBase | null
   first: string
   onLevel: (l: number) => void
+  onMem: (m: MemBase) => void
   onReplay: () => void
   onChangeBot: () => void
   onBack: () => void
 }) {
-  const { gameId, title, mod, me, bot, level, first, onLevel, onReplay, onChangeBot, onBack } = props
+  const { gameId, title, mod, me, bot, level, first, onLevel, onMem, onReplay, onChangeBot, onBack } = props
   const reduce = useReducedMotion()
-  const { state: s, secret, act, thinking, mood, outcome } = useSoloMatch({ mod, gameId, meId: me.id, botId: bot.id, level, first })
+  const slug = bot.slug as CharacterSlug
+  // Mémoire figée au début de la partie (le bot ne lit rien de la partie en cours).
+  const [mem] = useState(props.mem)
+  const rate = mem ? learnRate(level, mem.streak) : 0
+  const { state: s, secret, act, thinking, mood, outcome, log } = useSoloMatch({ mod, gameId, meId: me.id, botId: bot.id, level, first, perso: slug, mem, rate })
   const [endLevel, setEndLevel] = useState<{ from: number; to: number } | null>(null)
   const topRef = useRef<HTMLDivElement>(null)
+  // 2a : explication (ou compliment) ; 2b : habitude repérée à cette partie.
+  const [ex, setEx] = useState<Explanation | null>(null)
+  const [kit, setKit] = useState<WhyKit | null>(null)
+  const [fresh, setFresh] = useState<string | null>(null)
+  const [panel, setPanel] = useState(false)
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+
+  /** Fin de partie : le bot apprend (une fois), puis prépare son explication. */
+  const debrief = useCallback(
+    (res: SoloOutcome) => {
+      let learned: MemBase | null = null
+      if (mem) {
+        try {
+          const r = newInsight(mod.learner, learn(mod.learner, mem, log))
+          learned = r.mem
+          if (r.insight) setFresh(learnedLine(slug, r.insight.text))
+          onMem(learned)
+        } catch (e) {
+          console.warn('[solo] apprentissage', e)
+        }
+      }
+      void (async () => {
+        try {
+          const [k, moments] = await Promise.all([mod.loadWhy(), mod.findMoments(log, res === 'win' ? 'bot' : 'me')])
+          const e = explain({ slug, why: k.why, outcome: res, moments, lastWhy: mem?.lastWhy, seed: log.id })
+          if (!alive.current) return
+          setKit(k)
+          setEx(e)
+          if (learned && res === 'loss' && e.moment) onMem(noteWhy(learned, e.moment.type))
+        } catch (e) {
+          console.warn('[solo] explication', e)
+        }
+      })()
+    },
+    [mem, mod, log, slug, onMem],
+  )
 
   // Fin de partie : niveau qui s'adapte (une seule fois), fête ou consolation.
   const ended = useRef(false)
@@ -230,6 +316,7 @@ function SoloGame(props: {
       ended.current = true
       setEndLevel({ from: level, to })
       onLevel(to)
+      debrief(outcome)
       if (outcome === 'win') {
         victoryConfetti()
         fx.fanfare()
@@ -238,7 +325,7 @@ function SoloGame(props: {
       topRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
     }, 900)
     return () => window.clearTimeout(t)
-  }, [outcome, level, onLevel, reduce])
+  }, [outcome, level, onLevel, reduce, debrief])
 
   const colors = useMemo(() => pickSideColors(me.color, bot.color), [me.color, bot.color])
   const get = useMemo(() => (id: string) => (id === bot.id ? bot : me), [me, bot])
@@ -251,7 +338,7 @@ function SoloGame(props: {
   const botExpr = endLevel
     ? pickExpression(bot, ...(outcome === 'win' ? ['pleurs', 'boude'] : outcome === 'loss' ? ['joie', 'cool'] : ['clin_oeil', 'surprise']))
     : mood
-      ? pickExpression(bot, mood)
+      ? pickExpression(bot, ...(MOOD_FACE[mood] ?? [mood]))
       : thinking
         ? pickExpression(bot, 'reflexion')
         : pickExpression(bot, 'cool', 'clin_oeil')
@@ -322,9 +409,23 @@ function SoloGame(props: {
       {/* Fin de partie */}
       <AnimatePresence>
         {endLevel && outcome && (
-          <SoloEnd outcome={outcome} from={endLevel.from} to={endLevel.to} bot={bot} onReplay={onReplay} onChangeBot={onChangeBot} onBack={onBack} />
+          <SoloEnd
+            outcome={outcome}
+            from={endLevel.from}
+            to={endLevel.to}
+            bot={bot}
+            ex={ex}
+            fresh={fresh}
+            onShow={() => setPanel(true)}
+            onReplay={onReplay}
+            onChangeBot={onChangeBot}
+            onBack={onBack}
+          />
         )}
       </AnimatePresence>
+      {panel && ex && kit && (
+        <WhyPanel ex={ex} kit={kit} local={mod.local} log={log} me={me} bot={bot} colors={colors} onClose={() => setPanel(false)} />
+      )}
 
       {/* Consigne */}
       {!outcome && (s.phase === 'playing' || s.phase === 'setup') && (
@@ -372,6 +473,9 @@ function SoloEnd({
   from,
   to,
   bot,
+  ex,
+  fresh,
+  onShow,
   onReplay,
   onChangeBot,
   onBack,
@@ -380,6 +484,11 @@ function SoloEnd({
   from: number
   to: number
   bot: PlayerInfo
+  /** 2a : explication / compliment (null pendant l'analyse). */
+  ex: Explanation | null
+  /** 2b : habitude repérée à cette partie (« 🧠 J'ai capté un truc : … »). */
+  fresh: string | null
+  onShow: () => void
   onReplay: () => void
   onChangeBot: () => void
   onBack: () => void
@@ -401,6 +510,17 @@ function SoloEnd({
         <LevelGauge level={to} size={30} onColor />
         <p className="font-extrabold">{move}</p>
       </div>
+      <WhyCard ex={ex} bot={bot} onShow={onShow} />
+      {fresh && (
+        <motion.p
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="w-full rounded-bubble border-[3px] border-ink bg-white px-3 py-2 text-left text-base leading-snug font-bold text-[#1f1b2e] shadow-sticker-sm"
+        >
+          <span className="mr-1 inline-block -rotate-3 rounded-chip border-2 border-ink bg-sun px-1.5 text-xs font-extrabold uppercase">nouveau</span> 🧠 {fresh}
+        </motion.p>
+      )}
       <div className="flex w-full flex-col gap-2">
         <Button size="lg" fullWidth onClick={onReplay}>
           Rejouer contre {bot.nickname.replace(' 🤖', '')}

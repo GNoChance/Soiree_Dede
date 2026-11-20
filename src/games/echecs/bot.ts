@@ -5,7 +5,7 @@
  * itératif plafonné en temps (~1 s). Bruit aux niveaux bas : coup pris parmi ceux à moins
  * de X centipions du meilleur, et quelques gaffes aux niveaux 1-3. Tourne dans le Web Worker.
  */
-import type { Chess } from 'chess.js'
+import type { Chess, Square } from 'chess.js'
 import { chessOf, idx, raw, type InternalMove } from './chessCore'
 import type { ChessBoard, ChessMove, ChessSide, Promo } from './types'
 
@@ -94,22 +94,60 @@ const marginFor = (level: number) => (10 - level) * 40
 
 const toMove = (m: InternalMove): ChessMove => ({ from: idx(m.from), to: idx(m.to), ...(m.promotion ? { promo: m.promotion as Promo } : {}) })
 
-const boardChess = (b: ChessBoard) => chessOf({ sq: b.sq, side: b.side, castle: b.castle ?? '', ep: b.ep ?? null, half: b.half ?? 0, full: b.full ?? 1 })
+export const boardChess = (b: ChessBoard) => chessOf({ sq: b.sq, side: b.side, castle: b.castle ?? '', ep: b.ep ?? null, half: b.half ?? 0, full: b.full ?? 1 })
 
 /** Le bot accepte une nulle proposée s'il n'est pas mieux (évaluation ≤ +0,5 pion). */
 export function acceptsDraw(b: ChessBoard): boolean {
   return evaluate(boardChess(b)) <= 50
 }
 
-export function chooseMove(b: ChessBoard, me: string, level: number, rng: Rng = Math.random, budgetMs = 900): ChessMove {
+/**
+ * Indices de la mémoire du bot (2b), calculés sur le fil principal (learn.ts) :
+ * next = bilan [V, N, D] du bot après chaque coup possible ("from-to"), d'après le livre
+ * d'ouvertures appris des parties contre ce joueur (E1) ; hang = types de pièces que le
+ * joueur laisse souvent sans protection (E2).
+ */
+export interface ChessHints {
+  rate: number
+  next?: Record<string, [number, number, number]>
+  hang?: string[]
+}
+
+export interface ChessChoice {
+  move: ChessMove
+  learned?: string
+}
+
+const sqName = (i: number) => `${'abcdefgh'[i % 8]}${8 - Math.floor(i / 8)}` as Square
+
+/** Cases des pièces de `side` d'un type de `types` attaquées par l'autre camp. */
+function attackedTargets(c: Chess, side: ChessSide, types: readonly string[]): Set<number> {
+  const out = new Set<number>()
+  const r = raw(c)
+  const opp: ChessSide = side === 'w' ? 'b' : 'w'
+  for (let sq = 0; sq < 128; sq++) {
+    if (sq & 0x88) {
+      sq += 7
+      continue
+    }
+    const p = r._board[sq]
+    if (!p || p.color !== side || !types.includes(p.type)) continue
+    const i = idx(sq)
+    if (c.isAttacked(sqName(i), opp)) out.add(i)
+  }
+  return out
+}
+
+/** Coup du bot + habitude apprise utilisée. Sans `hints` (ou rate 0) : exactement le jeu de l'étape 1. */
+export function decide(b: ChessBoard, me: string, level: number, rng: Rng = Math.random, budgetMs = 900, hints?: ChessHints): ChessChoice {
   const side: ChessSide = b.white === me ? 'w' : 'b'
-  if (b.draw_offer && b.draw_offer !== me && b.side === side && acceptsDraw(b)) return { type: 'accept_draw' }
+  if (b.draw_offer && b.draw_offer !== me && b.side === side && acceptsDraw(b)) return { move: { type: 'accept_draw' } }
   const c = boardChess(b)
   const r = raw(c)
   const L = Math.min(10, Math.max(1, level))
   const root = order(r._moves({ legal: true }))
-  if (!root.length) return { type: 'resign' }
-  if (L <= 3 && rng() < 0.15 * (4 - L)) return toMove(root[Math.floor(rng() * root.length)])
+  if (!root.length) return { move: { type: 'resign' } }
+  if (L <= 3 && rng() < 0.15 * (4 - L)) return { move: toMove(root[Math.floor(rng() * root.length)]) }
 
   const ctx: Ctx = { nodes: 0, deadline: performance.now() + budgetMs, quiet: L >= 6 }
   const margin = marginFor(L)
@@ -136,9 +174,82 @@ export function chooseMove(b: ChessBoard, me: string, level: number, rng: Rng = 
     scores = perm.map((x) => x.s)
     if (scores[0] >= MATE - 100) break
   }
-  const top = Math.max(...scores)
-  const pool = root.filter((_, i) => scores[i] >= top - margin)
-  return toMove(pool[Math.floor(rng() * pool.length)] ?? root[0])
+  const rate = hints?.rate ?? 0
+  if (!hints || rate <= 0) {
+    const top = Math.max(...scores)
+    const pool = root.filter((_, i) => scores[i] >= top - margin)
+    return { move: toMove(pool[Math.floor(rng() * pool.length)] ?? root[0]) }
+  }
+
+  // E2 : bonus aux coups qui créent une nouvelle attaque sur une pièce que le joueur garde mal.
+  let bonus = root.map(() => 0)
+  if (hints.hang?.length) {
+    const fresh = boardChess(b) // `c` peut être resté au milieu d'une recherche interrompue
+    const fr = raw(fresh)
+    const opp: ChessSide = side === 'w' ? 'b' : 'w'
+    const before = attackedTargets(fresh, opp, hints.hang)
+    const moves = fr._moves({ legal: true })
+    bonus = root.map((m) => {
+      const same = moves.find((x) => x.from === m.from && x.to === m.to && x.promotion === m.promotion)
+      if (!same) return 0
+      fr._makeMove(same)
+      const after = attackedTargets(fresh, opp, hints.hang!)
+      fr._undoMove()
+      for (const q of after) if (!before.has(q)) return Math.round(20 * rate)
+      return 0
+    })
+  }
+  const sc = scores.map((v, i) => v + bonus[i])
+  const top = Math.max(...sc)
+
+  // E1 : début de partie connu -> meilleur bilan, et jamais un coup après lequel il a déjà perdu.
+  if (hints.next && Object.keys(hints.next).length) {
+    const near = root.map((m, i) => ({ m, s: sc[i], st: hints.next![`${idx(m.from)}-${idx(m.to)}`] })).filter((x) => x.s >= top - Math.max(margin, 25))
+    const bilan = (st?: [number, number, number]) => (st ? (st[0] - st[2]) / (st[0] + st[1] + st[2] + 1) : 0)
+    const lost = near.filter((x) => x.st && x.st[2] >= 0.5)
+    const safe = near.filter((x) => !(x.st && x.st[2] >= 0.5))
+    let choice: (typeof near)[number] | null = null
+    if (lost.length && safe.length) choice = [...safe].sort((p, q) => bilan(q.st) - bilan(p.st) || q.s - p.s)[0]
+    else {
+      const good = near.filter((x) => bilan(x.st) > 0).sort((p, q) => bilan(q.st) - bilan(p.st) || q.s - p.s)
+      if (good.length) choice = good[0]
+    }
+    if (choice && rng() < rate) return { move: toMove(choice.m), learned: 'e1' }
+  }
+
+  const pool = root.filter((_, i) => sc[i] >= top - margin)
+  const pick = pool[Math.floor(rng() * pool.length)] ?? root[0]
+  const k = root.indexOf(pick)
+  const plainTop = Math.max(...scores)
+  const learned = bonus[k] > 0 && scores[k] < plainTop - margin ? 'e2' : undefined
+  return learned ? { move: toMove(pick), learned } : { move: toMove(pick) }
+}
+
+export function chooseMove(b: ChessBoard, me: string, level: number, rng: Rng = Math.random, budgetMs = 900, hints?: ChessHints): ChessMove {
+  return decide(b, me, level, rng, budgetMs, hints).move
+}
+
+/**
+ * Analyse (explication de fin de partie) : score de chaque coup légal de la position, recherche
+ * du bot à profondeur `depth` (prises au calme comprises), du point de vue du camp au trait.
+ * null si le temps est dépassé.
+ */
+export function analyseRoot(c: Chess, depth: number, budgetMs: number): Array<{ m: InternalMove; s: number }> | null {
+  const r = raw(c)
+  const ctx: Ctx = { nodes: 0, deadline: performance.now() + budgetMs, quiet: true }
+  const out: Array<{ m: InternalMove; s: number }> = []
+  try {
+    for (const m of order(r._moves({ legal: true }))) {
+      r._makeMove(m)
+      const s = -search(c, depth - 1, -Infinity, Infinity, 1, ctx)
+      r._undoMove()
+      out.push({ m, s })
+    }
+  } catch (e) {
+    if (!(e instanceof Timeout)) throw e
+    return null
+  }
+  return out.sort((p, q) => q.s - p.s)
 }
 
 const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 }
