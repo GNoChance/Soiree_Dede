@@ -1,0 +1,1 @@
+export default { slug: 'marius', src: 'assets-source/costumes/marius-v3', sheets: [{ name: 'irma', file: 'marius-irma.png', n: 12, dir: 'irma', map: 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise amoureux cool gamer'.split(' '), white: false, split: 'grid', pockets: true }], portraits: [] };

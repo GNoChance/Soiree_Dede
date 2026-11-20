@@ -1,0 +1,1 @@
+export default { slug: 'cecile', src: 'assets-source/costumes/cecile-v3', sheets: [{ name: 'irma', file: 'cecile-irma.png', n: 12, dir: 'irma', map: 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise amoureux cool gamer'.split(' '), white: false, split: 'grid', pockets: true }], portraits: [] };
