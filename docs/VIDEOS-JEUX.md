@@ -254,18 +254,18 @@ Non montré : variante « Pile ! » (option), règles d’enchère sur les 1 («
 
 Écart : l’ordre des étapes 3 et 4 du script initial a été inversé (construire, puis loyer) pour montrer un loyer d’hôtel réel plutôt que le loyer nu de 6 €. Prix et loyers = ceux de `board.ts` (case 8).
 
-## ✅ Dédé Kart 🏎️ — 2 à 12 joueurs — 35,2 s
+## ✅ Dédé Kart 🏎️ — 2 à 12 joueurs — 37 s
 **But** : « Franchis la ligne d’arrivée avant les autres ! » · Chibis : Keke, Manon, Mika, Dédé.
 
 | # | Durée | Texte à l’écran | Image |
 | --- | --- | --- | --- |
-| 1 | 5,6 s | Pose le doigt à gauche ou à droite pour tourner | Téléphone à l’horizontale, route en fausse 3D : zones ◀ / ▶ qui s’allument sous le doigt, le kart vire à gauche puis à droite ; « 🚀 Ça accélère tout seul ! » |
-| 2 | 5,8 s | Dans un grand virage, redresse pour le mini-turbo ! | Le kart penche dans un grand virage (« ça dérape tout seul »), étincelles et jauge bleu → orange → violet, puis redressement : flammes, « Mini-turbo ! » |
-| 3 | 5,4 s | Roule sur les boîtes « ? » et touche OBJET pour l’utiliser | Une boîte « ? » arrive sur la route, la case OBJET fait défiler les objets puis affiche 🚀 ; le doigt touche OBJET : coup de turbo |
-| 4 | 4,6 s | Des points à chaque course | Arrivée de la course 1/3 : Manon +15, Keke +12, Mika +10, Dédé +8 |
-| 🏆 | 4,2 s | Le meilleur total gagne la coupe ! — *En 1 course ou en coupe de 3 courses.* | Manon saute |
+| 1 | 6 s | Pose le doigt à gauche ou à droite pour tourner | Téléphone à l’horizontale, route en fausse 3D : zones ◀ / ▶ qui s’allument sous le doigt, Keke vire à gauche puis à droite jusqu’au bord de la piste ; « 🚀 Ça accélère tout seul ! » ; puis étiquette « ✋ Écran lâché » : le kart revient tout seul au milieu, « ✋ Tu lâches l’écran ? Il se remet droit tout seul ! » |
+| 2 | 6,2 s | Roule sur les boîtes « ? » et touche OBJET pour l’utiliser | Écran de Manon : une boîte « ? » arrive, la case OBJET (en bas à gauche, comme dans l’appli) fait défiler 🧲 🧈 🚀 📯 🍯 🎳 puis affiche 🐔 avec son nom « Poule en vadrouille » ; le doigt touche OBJET, la poule tombe derrière le kart. Changement d’écran « 📱 Dédé, juste derrière… » : la poule traverse la piste en zigzag, Dédé la percute : plumes, le kart tournoie, « Tête-à-queue ! » |
+| 3 | 5,6 s | Portique violet = raccourci : plus court, mais risqué ! | Circuit du Salon : le portique violet « RACCOURCI » (damier au-dessus) approche à gauche avec son petit chemin, Keke y tourne ; puis chemin étroit bordé de violet « ⚡ Sous le canapé », bas-côtés « 🐌 très lent ». Dessous, mini-carte : Keke coupe par les pointillés pendant que Mika fait le grand tour et ressort derrière. « ⚡ Plus court… », « …mais très étroit ! », « ⚠️ Gare à la sortie de route ! » |
+| 4 | 5,4 s | Six circuits, chacun avec ses pièges et son raccourci | Défilé (≈ 0,8 s par circuit) : la route change de couleurs et de décor, l’obstacle mobile du circuit traverse la piste ; dessous, les 6 fiches s’empilent : 🛋️ Circuit du Salon (🤖 aspirateurs robots), 🏖️ Plage Tongs-Palace (🦀 crabes), 🏔️ Montagne Raclette (🧀 meules de fromage), 🥕 Potager Turbo-Carotte (🎃 citrouilles), 🛒 Hyper Dédé Promo (🛒 caddies fous), 🏰 Château Saint-Glinglin (🛢️ tonneaux) |
+| 🏆 | 4,2 s | Le meilleur total gagne la coupe ! — *Des points à chaque course. En 1 course ou en coupe de 3.* | Classement d’une course : Manon 🥇 +15, Keke 🥈 +12, Mika 🥉 +10, Dédé 4e +8 ; Manon saute |
 
-Barème réel : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 points. En 1 course ou en coupe de 3 courses.
+Total : 3 + 3,6 + 23,2 + 4,2 + 3 = 37 s (rendu CRF 30, 2,85 Mo). Version du 2026-11-20 (6 circuits, raccourcis, nouveaux objets, aide à la conduite). Barème réel : 15, 12, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0 points. Noms repris du code : objets de `engine/items.ts`, circuits, raccourci « Sous le canapé » et couleurs de `tracks.ts`, obstacles mobiles tels que dans le tableau d’ARCHITECTURE.md. Écarts : le mini-turbo (dérapage bleu → orange → violet) n’a plus sa propre étape, ni le classement (passé dans la scène finale, sans la mention « course 1/3 ») ; tremplins, bosses, flaques, aspiration et les objets 🧲 🧈 📯 ne sont pas montrés en action (seulement dans la roulette) ; téléphone dessiné à l’horizontale et route en fausse 3D (maquette CSS/SVG, pas le rendu three) ; obstacles et décors en emoji (🤖 pour l’aspirateur robot) ; l’étape 2 enchaîne deux écrans (Manon puis Dédé) pour montrer l’effet de la poule ; la mini-carte de l’étape 3 est un schéma, pas le tracé réel du Salon.
 
 ## ✅ Nom de Code 🔐 — 4 à 9 joueurs — 35,4 s
 **But** : « Fais deviner tous tes mots à ton équipe… sans toucher la bombe ! » · Chibis : Rouges : Dédé (espion), Keke, Manon, Mika · Bleus : Cycy (espionne), Marius, Cécile. **Tenues : les deux espions, Dédé et Cycy, portent la tenue Hacker 💻 dans toute la vidéo (titre et scène finale compris) ; tous les autres restent en tenue par défaut.**
