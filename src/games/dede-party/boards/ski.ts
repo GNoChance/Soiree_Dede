@@ -5,6 +5,7 @@
  * CELLS / NEXT / PREV / EXTRA = `_dp_board('ski')` / `_dp_next` / `_dp_prev` / `_dp_map` (synchro testée).
  */
 import { range, sizeBoards, type BaseBoard } from './build'
+import { skiAlt } from './ski-relief'
 import type { CellType } from './types'
 
 export const CELLS: CellType[] = ['start', 'clap', 'clap', 'lift', 'loge', 'pub', 'lift', 'env', 'clap', 'loge', 'pub', 'clap', 'lift', 'clap', 'env', 'lift', 'loge', 'pub', 'clap', 'env', 'clap', 'lift', 'loge', 'pub', 'clap', 'env', 'clap', 'pub', 'loge', 'clap', 'env', 'clap', 'pub', 'loge', 'clap', 'env', 'ice', 'clap', 'pub', 'loge', 'clap', 'env', 'clap', 'ice', 'pub', 'clap', 'ice', 'clap', 'loge']
@@ -65,16 +66,6 @@ const base: BaseBoard = {
   },
 }
 
-/** Relief (spec grands plateaux §3.5) : la Station à plat, chaque lacet sur sa terrasse, les raccords à mi-hauteur. */
-const TERRACE = [0, 0.6, 1.2, 1.9, 2.6, 3.3, 4.0]
-export const altOfRow = (row: number) => {
-  if (row >= 0) return 0
-  const k = -row / 2
-  const lo = Math.floor(k)
-  const hi = Math.min(TERRACE.length - 1, Math.ceil(k))
-  return TERRACE[Math.min(lo, TERRACE.length - 1)] + (TERRACE[hi] - TERRACE[Math.min(lo, TERRACE.length - 1)]) * (k - lo)
-}
-
 /** Les tailles (spec grands plateaux §3.5) : M « Dédé 2500 », L « Dédé 3000 » — on monte à pied, on redescend en glissant. */
 export const boards = sizeBoards(
   base,
@@ -130,7 +121,8 @@ export const boards = sizeBoards(
       199: 'Verglas du Vertige',
     },
     cellNames: { 49: 'Gare des Chamois', 77: 'Gare des Alpages', 105: 'Gare du Glacier', 155: 'Gare des Aigles', 154: 'La Loge du Pic' },
-    alt: (xy) => xy.map(([, r]) => altOfRow(r)),
+    // Relief (rendu seulement) : chaque case sur sa terrasse de la montagne (ski-relief.ts).
+    alt: (xy) => xy.map(([c, r]) => skiAlt(c, r)),
   },
 )
 export const board = boards.s

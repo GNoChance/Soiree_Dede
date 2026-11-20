@@ -21,7 +21,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import type { BoardView, Leap } from '../anim'
 import { DICE_MS } from '../anim'
 import { boardOf, CELL_INFO, isJump, linksOf, quarterOf, transportOf, zoneOf, type BoardDef, type CellType, type GateLook, type Quarter } from '../board'
-import { altOfRow } from '../boards/ski'
+import { PIC, skiTerrain } from '../boards/ski-relief'
 import type { DpEvent } from '../types'
 import { makeBeam, makeCarpet, makeCellTop, makeDieFace, makeFloor, makeGlow, makeLabel, makePlate, makeSparkle, shade } from './textures'
 import { THEMES } from './themes'
@@ -168,6 +168,12 @@ export class PartyScene {
   private xWall: number
   /** Grande taille (M / L) : géométrie allégée, ombres et décor au loin gérés par zone. */
   private big: boolean
+  /** Dédé 2500 / 3000 : la grande montagne en relief (sol, caméra, pistes). */
+  private mountain: boolean
+  private pisteKey = ''
+  /** Cible de la vue d'ensemble de la montagne (recentrée par fitDistance). */
+  private ovT: THREE.Vector3 | null = null
+  private piste: { pts: THREE.Vector3[]; lens: number[]; len: number } = { pts: [], lens: [], len: 0 }
   /** Emprise des cases ouvertes en coordonnées monde (taille S : ±halfX, ±halfZ) et son centre. */
   private ext: { minX: number; maxX: number; minZ: number; maxZ: number }
   private center = new THREE.Vector3()
@@ -297,6 +303,7 @@ export class PartyScene {
     this.halfX = ((base.cols - 1) / 2) * S
     this.halfZ = ((base.rows - 1) / 2) * S
     this.big = this.board.size !== 's'
+    this.mountain = this.big && this.board.id === 'ski'
     const c0 = Math.min(0, this.board.col0)
     const r0 = Math.min(0, this.board.row0)
     this.ext = {
@@ -309,7 +316,8 @@ export class PartyScene {
     this.zWall = this.ext.minZ - 6.3
     this.xWall = this.ext.maxX + 6.3
     // Dédé 2500 / 3000 : la toile du fond passe derrière toute la montagne (jusqu'au Pic, ligne −13).
-    if (this.big && this.board.id === 'ski') this.zWall = Math.min(this.zWall, -14 * S - this.halfZ - 2)
+    // Le massif (et ses sommets, jusqu'à la ligne −21) est tout entier devant la toile.
+    if (this.mountain) this.zWall = Math.min(this.zWall, -23 * S - this.halfZ)
     this.dark = document.documentElement.classList.contains('dark')
     this.pal = this.dark ? this.theme.palette.dark : this.theme.palette.light
     const cores = navigator.hardwareConcurrency || 4
@@ -409,6 +417,44 @@ export class PartyScene {
     const k = ((i % n) + n) % n
     const [col, row] = this.board.xy[k]
     return this.grid(col, row, this.board.alt?.[k] ?? 0, out)
+  }
+
+  /** Hauteur du sol en (x, z) monde : la neige du massif sur Dédé 2500 / 3000, 0 ailleurs. */
+  private groundY(x: number, z: number): number {
+    return this.mountain ? skiTerrain((x + this.halfX) / S, (z + this.halfZ) / S) : 0
+  }
+
+  /** Montagne : points du trajet d'une piste / de la Grande Descente (on rejoint le Grand Couloir, colonne 5). */
+  private pistePts(from: number, to: number): THREE.Vector3[] {
+    const [ca, ra] = this.board.xy[from]
+    const [cb, rb] = this.board.xy[to]
+    const g: Array<[number, number]> = [[ca, ra]]
+    if (ca !== 5) g.push([5, ra])
+    g.push([5, -0.6], [cb, rb])
+    return g.map(([c, r]) => this.grid(c, r))
+  }
+
+  /** Point d'un trajet de piste à la fraction e (au ras de la neige) ; renvoie le cap et l'avancée dans le dernier tronçon. */
+  private pisteAt(from: number, to: number, e: number, out: THREE.Vector3): { heading: number; last: number } {
+    const key = `${from}-${to}`
+    if (key !== this.pisteKey) {
+      this.pisteKey = key
+      const pts = this.pistePts(from, to)
+      const lens = pts.slice(1).map((p, i) => p.distanceTo(pts[i]))
+      this.piste = { pts, lens, len: lens.reduce((a, b) => a + b, 0) }
+    }
+    const { pts, lens, len } = this.piste
+    let d = clamp(e, 0, 1) * len
+    for (let k = 0; k < lens.length; k++) {
+      if (d <= lens[k] || k === lens.length - 1) {
+        const f = lens[k] > 0 ? clamp(d / lens[k], 0, 1) : 1
+        out.lerpVectors(pts[k], pts[k + 1], f)
+        out.y = this.groundY(out.x, out.z)
+        return { heading: -Math.atan2(pts[k + 1].z - pts[k].z, pts[k + 1].x - pts[k].x), last: k === lens.length - 1 ? f : -1 }
+      }
+      d -= lens[k]
+    }
+    return { heading: 0, last: -1 }
   }
 
   /** Ce que les thèmes peuvent utiliser. */
@@ -747,8 +793,9 @@ export class PartyScene {
       this.gateStatic.add(cable)
       for (const k of [0.25, 0.5, 0.75]) {
         const p = bottom.clone().lerp(top, k)
-        const pylon = ink(new THREE.CylinderGeometry(0.06, 0.09, p.y, 6), '#9aa0a6', 1.2)
-        pylon.position.set(p.x, p.y / 2, p.z)
+        const g0 = this.groundY(p.x, p.z)
+        const pylon = ink(new THREE.CylinderGeometry(0.06, 0.09, p.y - g0 + 0.2, 6), '#9aa0a6', 1.2)
+        pylon.position.set(p.x, (p.y + g0 - 0.2) / 2, p.z)
         this.gateStatic.add(pylon)
       }
       const cabin = new THREE.Group()
@@ -824,7 +871,7 @@ export class PartyScene {
     const n = Math.max(2, Math.round(len / 0.55))
     for (let k = 0; k < n; k++) {
       const p = from.clone().lerp(to, (k + 0.5) / n)
-      p.y = Math.max(from.y, to.y) * ((k + 0.5) / n) + 0.12
+      p.y = (this.mountain ? Math.max(lerp(from.y, to.y, (k + 0.5) / n), this.groundY(p.x, p.z)) : Math.max(from.y, to.y) * ((k + 0.5) / n)) + 0.12
       this.dots.push({ p, color, r })
     }
   }
@@ -880,6 +927,11 @@ export class PartyScene {
           roof.rotation.y = Math.PI / 4
           this.gateStatic.add(st, roof)
         }
+      }
+      if (this.mountain && kind === 'slide') {
+        const pts = this.pistePts(from, to)
+        pts.slice(1).forEach((p, k) => this.dotted(pts[k], p, '#EF476F', 0.08))
+        continue
       }
       this.dotted(this.cellPos(from), this.cellPos(to), kind === 'boat' ? '#FFD166' : kind === 'cabin' ? '#2b2545' : '#EF476F', kind === 'cabin' ? 0.05 : 0.08)
     }
@@ -1279,6 +1331,8 @@ export class PartyScene {
   }
 
   private overviewEl() {
+    // La montagne : caméra plus basse, la pente et les étages se lisent en perspective.
+    if (this.mountain) return this.portrait ? 0.78 : 0.5
     return this.portrait ? 1.0 : 0.93
   }
 
@@ -1289,11 +1343,16 @@ export class PartyScene {
 
   /** Distance à laquelle un rectangle du sol (monde) tient dans le cadre, vu depuis `target`. */
   private fitRect(x0: number, x1: number, z0: number, z1: number, top: number, target: THREE.Vector3, az: number, el: number, hiMax = 200): number {
+    const pts: THREE.Vector3[] = []
+    for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [0, top]) pts.push(new THREE.Vector3(x, y, z))
+    return this.fitPts(pts, target, az, el, hiMax)
+  }
+
+  /** Distance à laquelle des points (monde) tiennent dans le cadre, vus depuis `target`. */
+  private fitPts(pts: THREE.Vector3[], target: THREE.Vector3, az: number, el: number, hiMax = 200): number {
     const cam = this.fitCam
     cam.aspect = this.camera.aspect
     cam.updateProjectionMatrix()
-    const pts: THREE.Vector3[] = []
-    for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [0, top]) pts.push(new THREE.Vector3(x, y, z))
     const fits = (d: number) => {
       this.place(cam, target, az, el, d)
       cam.updateMatrixWorld()
@@ -1315,14 +1374,54 @@ export class PartyScene {
 
   /** Distance de la vue d'ensemble : toutes les cases ouvertes tiennent dans le cadre (marge en haut pour le décor). */
   private fitDistance(): number {
-    const top = 1.7 + Math.max(0, ...(this.board.alt ?? [0]))
     const { minX, maxX, minZ, maxZ } = this.ext
+    if (this.mountain) {
+      // Toutes les cases à leur altitude (+ la tête des pions).
+      const pts: THREE.Vector3[] = []
+      for (let i = 0; i < this.board.cells.length; i++) {
+        const p = this.cellPos(i)
+        pts.push(p.clone().add(this.tmp.set(0, 0, 0.9)), p.clone().setY(p.y + 1.9))
+      }
+      // L : le Pic et son drapeau ; M : la montagne jusqu'à mi-hauteur (le haut, fermé, file dans les nuages).
+      if (this.board.size === 'l') pts.push(this.grid(PIC.c, PIC.r, skiTerrain(PIC.c, PIC.r) + PIC.h + 1.4))
+      else pts.push(this.grid(5, -9, skiTerrain(5, -9) + 1))
+      // La cible est recentrée sur ce que l'on cadre (la Station devant, le Pic en haut) : pas de sol vide.
+      const T = this.grid(0, 0).set(this.center.x, Math.max(...this.board.alt!) * 0.45, this.center.z - S)
+      const cam = this.fitCam
+      const up = new THREE.Vector3()
+      const right = new THREE.Vector3()
+      let d: number
+      for (let it = 0; it < 4; it++) {
+        d = this.fitPts(pts, T, this.baseAz(), this.overviewEl())
+        this.place(cam, T, this.baseAz(), this.overviewEl(), d)
+        cam.updateMatrixWorld()
+        let y0 = 1
+        let y1 = -1
+        let x0 = 1
+        let x1 = -1
+        for (const p of pts) {
+          const v = this.tmp.copy(p).project(cam)
+          y0 = Math.min(y0, v.y)
+          y1 = Math.max(y1, v.y)
+          x0 = Math.min(x0, v.x)
+          x1 = Math.max(x1, v.x)
+        }
+        const hh = Math.tan((FOV * Math.PI) / 360) * d
+        up.set(0, 1, 0).applyQuaternion(cam.quaternion)
+        right.set(1, 0, 0).applyQuaternion(cam.quaternion)
+        T.addScaledVector(up, ((y0 + y1) / 2 - (this.portrait ? -0.115 : -0.075)) * hh).addScaledVector(right, ((x0 + x1) / 2) * hh * cam.aspect)
+      }
+      this.ovT = T
+      return this.fitPts(pts, T, this.baseAz(), this.overviewEl())
+    }
+    const top = 1.7 + Math.max(0, ...(this.board.alt ?? [0]))
     return this.fitRect(minX - 1.25, maxX + 1.25, minZ - 1.25, maxZ + 1.25, top, this.overviewTarget(), this.baseAz(), this.overviewEl())
   }
 
   /** Cible de la vue d'ensemble : le centre de l'emprise (et de la montagne). */
   private overviewTarget(out = new THREE.Vector3()) {
     const alt = this.board.alt
+    if (this.mountain && this.ovT) return out.copy(this.ovT)
     return out.set(this.center.x, 0.3 + (alt ? Math.max(...alt) * 0.35 : 0), this.center.z)
   }
 
@@ -1483,8 +1582,9 @@ export class PartyScene {
     if (this.shadowAt.distanceTo(at) > 2 || (moving && this.time - this.shadowT > 0.25)) {
       this.shadowAt.copy(at)
       this.shadowT = this.time
-      this.sun.target.position.set(at.x, 0, at.z)
-      this.sun.position.set(at.x - 7, 15, at.z + 9)
+      const y0 = this.mountain ? at.y : 0
+      this.sun.target.position.set(at.x, y0, at.z)
+      this.sun.position.set(at.x - 7, y0 + 15, at.z + 9)
       this.sun.target.updateMatrixWorld()
       this.sun.updateMatrixWorld()
       this.renderer.shadowMap.needsUpdate = true
@@ -1506,7 +1606,7 @@ export class PartyScene {
   private updateFrameRect() {
     if (!this.big || ++this.frameTick % 6 !== 0) return
     const ray = new THREE.Raycaster()
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), this.mountain ? -this.camT.y : 0)
     const hit = new THREE.Vector3()
     let c0 = Infinity
     let c1 = -Infinity
@@ -1570,7 +1670,10 @@ export class PartyScene {
       // La palissade est posée un peu en retrait, côté quartier (elle ne cache pas la rangée de cases voisine).
       edge.add(new THREE.Vector3(cx, 0, cz).sub(edge).setY(0).normalize().multiplyScalar(0.6))
       // Montagne : le voile se pose sur la neige, à l'altitude du secteur.
-      if (this.board.id === 'ski') g.position.y = altOfRow(q.box.r0)
+      if (this.board.id === 'ski') {
+        g.position.y = skiTerrain((q.box.c0 + q.box.c1) / 2, (q.box.r0 + q.box.r1) / 2)
+        if (this.big) base.visible = false
+      }
       if (q.veil === 'curtain') {
         const geo = this.track(new THREE.PlaneGeometry(span, 3.2, Math.round(span * 4), 1))
         const p = geo.getAttribute('position')
@@ -1912,6 +2015,15 @@ export class PartyScene {
             if (vehicle) {
               ride = this.rideOf(leap)
               heading = -Math.atan2(b.z - a.z, b.x - a.x)
+            }
+            // Montagne : la piste et la Grande Descente dévalent la neige par le Grand Couloir (saut final pour la Descente).
+            if (this.mountain && (leap === 'slide' || (leap === 'luge' && m.cell !== 48))) {
+              const at = this.pisteAt(m.cell, m.next, e, this.tmp2)
+              x = this.tmp2.x
+              z = this.tmp2.z
+              ground = this.tmp2.y
+              heading = at.heading
+              y = at.last >= 0 ? Math.sin(at.last * Math.PI) * (leap === 'luge' ? 3.4 : 0.6) : 0.05 + Math.abs(Math.sin(g * 40)) * 0.08
             }
             if (leap && this.time - this.trailT > (leap === 'boat' ? 0.06 : 0.035)) {
               this.trailT = this.time
@@ -2349,13 +2461,13 @@ export class PartyScene {
       routeN = ahead.length
       const tgt = this.cellPos(ahead[2] ?? pos, new THREE.Vector3()).lerp(me.cur, 0.35)
       az += Math.sin(this.time * 0.4) * 0.04
-      el = this.portrait ? 0.92 : 0.86
+      el = (this.portrait ? 0.92 : 0.86) - (this.mountain && tgt.y > 0.5 ? 0.16 : 0)
       dist = 20
       goalT.set(tgt.x, tgt.y + 0.9, tgt.z)
     } else if (mode === 'follow' && (mover || focus)) {
       const at = mover ? mover.cur : focus!
       az += Math.sin(this.time * 0.4) * 0.06
-      el = this.portrait ? 0.9 : 0.84
+      el = (this.portrait ? 0.9 : 0.84) - (this.mountain && (mover ? mover.cur : focus!).y > 0.5 ? 0.16 : 0)
       dist = clamp(this.overviewDist * (this.portrait ? 0.5 : 0.68), 11, 26)
       // On vise un peu au-delà du pion (il reste sous le bandeau) et un peu vers le centre de SA zone
       // (l'île, le quartier ou le plateau de base restent dans le champ, pas seulement les gradins).

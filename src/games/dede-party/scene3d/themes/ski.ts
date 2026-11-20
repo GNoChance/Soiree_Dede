@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { PIC, skiTerrain as snowH } from '../../boards/ski-relief'
 import { makePlate } from '../textures'
 import { Batch, freeze, instInked, rnd, tr } from './kit'
 import type { ThemeCtx, ThemeDef } from './types'
@@ -16,25 +17,12 @@ const rand = (i: number) => {
   const x = Math.sin(i * 53.3 + 7.1) * 43758.5453
   return x - Math.floor(x)
 }
-
-/** Terrasses des lacets (ligne −2k → TER[k]), spec §3.5 ; au-delà de la ligne −12, l'arête remonte vers le Pic. */
-const TER = [0, 0.6, 1.2, 1.9, 2.6, 3.3, 4.0, 4.6]
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
   return t * t * (3 - 2 * t)
 }
-/** Hauteur de la neige en (colonne, ligne) : terrasses plates sous les lacets, pente dans les couloirs, flancs relevés. */
-export function snowH(c: number, r: number): number {
-  if (r >= -0.5) return 0
-  const k = -r / 2
-  const lo = Math.min(Math.floor(k), TER.length - 2)
-  let h = TER[lo] + (TER[lo + 1] - TER[lo]) * smooth(0.25, 0.75, k - lo)
-  if (k > 7) h += (k - 7) * 1.2
-  // Flancs : la neige se relève hors des lacets, avec quelques bosses douces.
-  const out = Math.max(0, -9.7 - c, c - 19.7)
-  if (out > 0) h += out * 0.38 + Math.sin(c * 1.7 + r) * Math.cos(r * 2.3) * Math.min(1, out) * 0.12
-  return h
-}
+/** Inclinaison (autour de x) d'un objet posé sur la pente de la neige en (colonne, ligne). */
+const tiltAt = (S: number, c: number, r: number) => -Math.atan((snowH(c, r + 0.15) - snowH(c, r - 0.15)) / (0.3 * S))
 
 const JACKETS = ['#EF476F', '#FFD166', '#06D6A0', '#4CC9F0', '#8B5CF6', '#FF8FA3', '#FF8C42']
 
@@ -134,11 +122,21 @@ export const skiTheme: ThemeDef = {
         scene.add(trail)
         continue
       }
-      // Grande taille : la traînée suit la pente (case de départ et d'arrivée à des altitudes différentes).
-      trail.position.y = (A.y + B.y) / 2 + 0.04
-      trail.rotation.z = Math.atan2(B.y - A.y, Math.hypot(B.x - A.x, B.z - A.z))
-      trail.updateMatrix()
-      iceParts.push(iceGeo.clone().applyMatrix4(trail.matrix))
+      // Grande taille : la traînée épouse la neige entre les deux étages (bande subdivisée, posée sur le relief).
+      const strip = new THREE.PlaneGeometry(1, 0.55, 12, 1)
+      strip.rotateX(-Math.PI / 2)
+      const sp = strip.getAttribute('position')
+      const dirv = B.clone().sub(A).setY(0)
+      const side = new THREE.Vector3(-dirv.z, 0, dirv.x).normalize()
+      for (let v = 0; v < sp.count; v++) {
+        const u = sp.getX(v) + 0.5
+        const w = sp.getZ(v)
+        const x = A.x + (B.x - A.x) * u + side.x * w
+        const z = A.z + (B.z - A.z) * u + side.z * w
+        const y = Math.max(A.y + (B.y - A.y) * u, snowH((x + ctx.halfX) / S, (z + ctx.halfZ) / S)) + 0.07
+        sp.setXYZ(v, x, y, z)
+      }
+      iceParts.push(strip)
     }
     if (iceParts.length) {
       const ice = new THREE.Mesh(ctx.track(mergeGeometries(iceParts)!), iceMat)
@@ -181,8 +179,20 @@ export const skiTheme: ThemeDef = {
       [-1.3, 0.6], [-1.3, 3.2], [11.1, 7.6], [2.4, -1.3], [7.8, -1.3],
     ]
     if (big) {
-      spots.push([-8, -1.1], [-6.2, -0.9], [-1.6, -1.1], [12, -1.1], [16.4, -0.9], [18.6, -1.2], [-11.4, -2.2], [-12, -4.3], [21.4, -2.4], [22, -4.1], [-7.6, -3], [12.3, -3.1])
-      if (board.size === 'l') spots.push([-11.6, -7], [-12.2, -9.6], [21.6, -7.2], [22.2, -10.1], [-10.6, -11.4], [20.4, -11.8])
+      spots.push([-8, -0.9], [-6.2, -0.8], [-1.6, -0.9], [12, -0.9], [16.4, -0.8], [18.6, -1])
+      // Forêt des flancs : dense au pied, de plus en plus rare en altitude (aucun sapin au-dessus de ~5 unités),
+      // jamais sur une piste ni sous un téléski.
+      const lanes = [-10.5, -12.3, 20.5, 22.3]
+      const topRow = board.size === 'l' ? -13 : -7
+      for (let i = 0; spots.length < (board.size === 'l' ? 90 : 64) && i < 900; i++) {
+        const west = rand(i + 300) < 0.5
+        const c = west ? -10 - rand(i + 301) * 9 : 20 + rand(i + 302) * 9
+        const r = -0.9 + (topRow + 0.9) * rand(i + 303) ** 1.6
+        if (lanes.some((x) => Math.abs(c - x) < 0.75)) continue
+        const h = snowH(c, r)
+        if (h > 5.5 || rand(i + 304) > 1.15 - h * 0.2) continue
+        spots.push([c, r])
+      }
     }
     const trunkGeo = ctx.track(new THREE.CylinderGeometry(0.07, 0.09, 0.4, 6))
     trunkGeo.translate(0, 0.2, 0)
@@ -199,7 +209,7 @@ export const skiTheme: ThemeDef = {
     spots.forEach(([c, r], i) => {
       ctx.grid(c, r, big ? snowH(c, r) : 0, pos)
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand(i) * 6.28)
-      const s = 0.8 + rand(i + 5) * 0.35
+      const s = (0.8 + rand(i + 5) * 0.35) * (big ? 1 - Math.min(0.4, pos.y * 0.07) : 1)
       m4.compose(pos, q, scl.set(s, s, s))
       trunks.setMatrixAt(i, m4)
       firs.setMatrixAt(i, m4)
@@ -331,32 +341,42 @@ function buildMountain(ctx: ThemeCtx) {
   }
 
   // --- La neige : un plan subdivisé 60 × 30, hauteurs lissées, teinte bleutée dans les pentes.
-  const c0 = -14.5
-  const c1 = 24.5
-  const r0 = -13.6
-  const r1 = big ? -0.9 : -5.2
+  // Le massif : un seul maillage bas-poly (≈ 12 k triangles), de la ligne −0,4 au revers des sommets (ligne −21),
+  // flancs compris ; neige blanche à plat, bleutée dans les pentes, roche grise dans les à-pics.
+  const c0 = -20
+  const c1 = 30
+  const r0 = -21
+  const r1 = big ? -0.4 : -5.2
   const a = ctx.grid(c0, r0)
   const b = ctx.grid(c1, r1)
-  const segW = 60
-  const segH = big ? 30 : 20
+  const segW = 84
+  const segH = big ? 70 : 52
   const geo = ctx.track(new THREE.PlaneGeometry(b.x - a.x, b.z - a.z, segW, segH))
   geo.rotateX(-Math.PI / 2)
   geo.translate((a.x + b.x) / 2, 0, (a.z + b.z) / 2)
   const p = geo.getAttribute('position')
   const col = new Float32Array(p.count * 3)
   const snow = new THREE.Color('#ffffff')
-  const blue = new THREE.Color('#D2E6F7')
+  const blue = new THREE.Color('#A9C8EC')
+  const stone = new THREE.Color('#7E8899')
   const cc = new THREE.Color()
+  const e = 0.18
   for (let i = 0; i < p.count; i++) {
     const c = (p.getX(i) + ctx.halfX) / S
     const r = (p.getZ(i) + ctx.halfZ) / S
     const h = snowH(c, r)
-    // Bords (devant et côtés) rabattus jusqu'au sol : pas de tranche visible.
+    // Bords rabattus jusqu'au sol : pas de tranche visible.
     const ix = i % (segW + 1)
     const iy = Math.floor(i / (segW + 1))
-    p.setY(i, ix === 0 || ix === segW || iy === segH ? -0.2 : h - 0.03)
-    const slope = Math.abs(snowH(c, r - 0.2) - snowH(c, r + 0.2)) / 0.26
-    cc.copy(snow).lerp(blue, Math.min(1, slope * 1.4))
+    p.setY(i, ix === 0 || ix === segW || iy === 0 || iy === segH ? -0.2 : h - 0.03)
+    const gx = (snowH(c + e, r) - snowH(c - e, r)) / (2 * e * S)
+    const gz = (snowH(c, r + e) - snowH(c, r - e)) / (2 * e * S)
+    const slope = Math.hypot(gx, gz)
+    cc.copy(snow).lerp(blue, smooth(0.3, 0.9, slope))
+    // Roche : à-pics hors des terrasses, bandes sombres sous les crêtes (pas sur les sommets, enneigés).
+    const face = c > -9.8 && c < 19.8 && r > -12.6 ? 0.3 : 1
+    const rock = smooth(1.2, 1.9, slope) * (1 - smooth(13, 16, h)) * (Math.sin(c * 2.3 + r * 1.1) * 0.25 + 0.85) * face
+    cc.lerp(stone, Math.min(1, rock))
     col.set([cc.r, cc.g, cc.b], i * 3)
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3))
@@ -407,8 +427,12 @@ function buildMountain(ctx: ThemeCtx) {
   // 🐄 Les Alpages : chalet d'alpage, 5 vaches à cloche, barrière.
   if (has('alpages')) {
     const det = detailOf(15, -3)
-    const ch = at(10.6, -3)
+    // Posé sur la pente : plancher au niveau du haut, soubassement de pierre jusqu'à la neige du bas.
+    const fl = snowH(10.6, -3.4)
+    const drop = fl - snowH(10.6, -2.6) + 0.1
+    const ch = ctx.grid(10.6, -3, fl)
     rep.add(box(1.3, 0.75, 0.9), '#A47148', tr(ch.clone().setY(ch.y + 0.38)))
+    rep.add(box(1.4, drop, 1.0), '#8d939a', tr(ch.clone().setY(ch.y - drop / 2)))
     rep.add(ctx.track(new THREE.ConeGeometry(1.05, 0.6, 4)), '#ffffff', tr(ch.clone().setY(ch.y + 1.05), 0, Math.PI / 4, 0, 1.15, 1, 0.85))
     det.add(box(0.28, 0.4, 0.02), '#5b4030', tr(ch.clone().add(new THREE.Vector3(0, 0.2, 0.46))), 0)
     det.add(box(0.24, 0.18, 0.02), '#FFD166', tr(ch.clone().add(new THREE.Vector3(0.4, 0.45, 0.46))), 0)
@@ -419,8 +443,9 @@ function buildMountain(ctx: ThemeCtx) {
     const leg = box(0.05, 0.18, 0.05)
     ;([15.2, 16.0, 16.9, 17.6, 18.4] as const).forEach((c, i) => {
       const o = new THREE.Object3D()
-      o.position.copy(at(c, -3 + (i % 2 ? 0.25 : -0.2)))
-      o.rotation.y = rnd(i, 61) * 6
+      const cr = -3 + (i % 2 ? 0.25 : -0.2)
+      o.position.copy(at(c, cr))
+      o.rotation.set(tiltAt(S, c, cr), rnd(i, 61) * 6, 0)
       o.updateMatrix()
       const part = (g: THREE.BufferGeometry, color: string, x: number, y: number, z: number, grow = 1.1) =>
         det.add(g, color, new THREE.Matrix4().multiplyMatrices(o.matrix, new THREE.Matrix4().makeTranslation(x, y, z)), grow)
@@ -445,7 +470,7 @@ function buildMountain(ctx: ThemeCtx) {
     const plates: THREE.BufferGeometry[] = []
     ;([[-6.4, -7], [0.6, -7], [-1.6, -9], [-6.8, -9.1], [-5, -11], [1.2, -11]] as const).forEach(([c, r], i) => {
       const g = new THREE.CylinderGeometry(0.9, 1.0, 0.08, 7)
-      g.applyMatrix4(tr(at(c, r, 0.02), 0, rnd(i, 71) * 3, 0, 1.2 + rnd(i, 72) * 0.6, 1, 0.5))
+      g.applyMatrix4(tr(at(c, r, 0.02), tiltAt(S, c, r), rnd(i, 71) * 3, 0, 1.2 + rnd(i, 72) * 0.6, 1, 0.5))
       plates.push(g)
     })
     const iceMat = ctx.toon('#8FD3FF', { transparent: true, opacity: 0.72, emissive: '#3aa0ff', emissiveIntensity: 0.15 })
@@ -453,7 +478,7 @@ function buildMountain(ctx: ThemeCtx) {
     plates.forEach((g) => g.dispose())
     ice.renderOrder = 1
     scene.add(ice)
-    ;([[-4.6, -7.1, 0.4], [-0.6, -9, -0.3], [-7.4, -11, 0.2], [2.2, -9.1, 0.6]] as const).forEach(([c, r, ry]) => det.add(box(1.4, 0.06, 0.16), '#1d3557', tr(at(c, r, 0.01), 0, ry, 0), 0))
+    ;([[-4.6, -7.1, 0.4], [-0.6, -9, -0.3], [-7.4, -11, 0.2], [2.2, -9.1, 0.6]] as const).forEach(([c, r, ry]) => det.add(box(1.4, 0.06, 0.16), '#1d3557', tr(at(c, r, 0.01), tiltAt(S, c, r), ry, 0), 0))
   }
 
   // 🦅 La Crête des Aigles : rochers sombres, 3 aigles qui planent en cercle.
@@ -486,11 +511,28 @@ function buildMountain(ctx: ThemeCtx) {
 
   // 🚩 Le Pic du Dédé (L), derrière la case 154 : cône blanc à arêtes bleutées, drapeau rouge.
   let flag: THREE.Mesh | null = null
-  if (board.size === 'l') {
-    const pk = at(5, -13.4, -0.4)
-    rep.add(ctx.track(new THREE.ConeGeometry(1.9, 3.4, 6)), '#ffffff', tr(pk.clone().setY(pk.y + 1.7), 0, 0.3, 0), 1.05)
-    rep.add(ctx.track(new THREE.ConeGeometry(1.92, 1.2, 6)), '#BFE3FF', tr(pk.clone().setY(pk.y + 0.6), 0, 0.3, 0), 0)
-    rep.add(cyl(0.03, 0.03, 1.0, 5), '#2b2545', tr(pk.clone().setY(pk.y + 3.85)), 0)
+  if (big) {
+    // Le Pic (visible dès Dédé 2500, au-dessus des nuages) : cône enneigé à pied rocheux bleuté, drapeau rouge.
+    const pk = at(PIC.c, PIC.r, -0.8)
+    const H = PIC.h + 0.8
+    const pic = ctx.track(new THREE.ConeGeometry(PIC.base, H, 6).toNonIndexed())
+    pic.computeVertexNormals()
+    rep.add(pic, '#ffffff', tr(pk.clone().setY(pk.y + H / 2), 0, 0.3, 0), 1.04)
+    rep.add(ctx.track(new THREE.ConeGeometry(PIC.base * 1.01, H * 0.42, 6)), '#9FB8D6', tr(pk.clone().setY(pk.y + H * 0.21), 0, 0.3, 0), 0)
+    rep.add(cyl(0.04, 0.04, 1.2, 5), '#2b2545', tr(pk.clone().setY(pk.y + H + 0.5)), 0)
+    // Rochers : sur les flancs raides et au pied des sommets (fusionnés avec le reste du décor fixe).
+    for (let i = 0, n = 0; n < (board.size === 'l' ? 34 : 22) && i < 600; i++) {
+      const c = -19 + rand(i + 700) * 48
+      const r = -1.5 - rand(i + 701) * (board.size === 'l' ? 18 : 15)
+      const inFace = c > -9.9 && c < 19.9 && r > -12.7
+      if (inFace) continue
+      const h = snowH(c, r)
+      if (h < 0.6) continue
+      n++
+      const s = 0.5 + rand(i + 702) * 0.9
+      rep.add(rock, rand(i + 703) < 0.5 ? '#7E8899' : '#9AA3B0', tr(at(c, r, 0.05), rand(i + 704), rand(i + 705) * 3, 0, s * 1.3, s * 0.8, s))
+    }
+    pk.y += H + 1.08 - 4.32
     const tri = new THREE.Shape()
     tri.moveTo(0, 0)
     tri.lineTo(0.55, -0.16)
@@ -498,6 +540,7 @@ function buildMountain(ctx: ThemeCtx) {
     tri.closePath()
     flag = new THREE.Mesh(ctx.track(new THREE.ShapeGeometry(tri)), ctx.toon('#EF476F', { side: THREE.DoubleSide }))
     flag.position.copy(pk).setY(pk.y + 4.32)
+    flag.scale.setScalar(1.7)
     scene.add(flag)
   }
 
@@ -544,49 +587,111 @@ interface Skier {
   s: number
   speed: number
   wait: number
+  /** Sur le téléski (remontée), pas sur la piste. */
+  up: boolean
   board: boolean
   faller: boolean
   fallAt: number
   ph: number
 }
 
+interface Line {
+  v: THREE.Vector3[]
+  lens: number[]
+  len: number
+}
+
 /**
- * Les skieurs (décor permanent, spec §3.5) : 3 maillages instanciés (corps, tête + bonnet, skis), sur des pistes
- * en coordonnées de grille qui ne croisent aucune case ; slalom, sauts des pistes à bosses par-dessus les lacets.
+ * Les skieurs (décor permanent, spec §3.5) : corps (avec contour encre), tête + bonnet, skis — 4 maillages
+ * instanciés ; sur des pistes en coordonnées de grille qui ne croisent aucune case, au ras du relief ; slalom,
+ * sauts des pistes à bosses par-dessus les lacets. En grande taille, ceux des flancs remontent par deux téléskis
+ * (câble et pylônes instanciés : 2 appels de plus).
  */
 function buildSkiers(ctx: ThemeCtx) {
   const { scene, board, S } = ctx
   const size = board.size
   const bottom = size === 's' ? -5.2 : -1
   const top = (r: number) => (size === 'm' ? Math.max(r, -5) : r)
+  const line = (pts: Array<[number, number]>): Line => {
+    const v = pts.map(([c, r]) => ctx.grid(c, r))
+    const lens = v.slice(1).map((p, i) => p.distanceTo(v[i]))
+    return { v, lens, len: lens.reduce((x, y) => x + y, 0) }
+  }
   // Pistes (du haut vers le bas) : le Grand Couloir, les flancs, les deux pistes à bosses.
-  const raw: Array<{ pts: Array<[number, number]>; bumps: boolean }> = [
+  const raw: Array<{ pts: Array<[number, number]>; bumps: boolean; up?: Array<[number, number]> }> = [
     { pts: [[5, top(-11)], [5, bottom]], bumps: false },
     { pts: size === 'm' ? [[-10.5, -5], [-10.5, bottom]] : [[-9.5, -9], [-10.5, -5], [-10.5, bottom]], bumps: false },
   ]
   if (size !== 's') {
-    raw.push({ pts: size === 'm' ? [[20.5, -5], [20.5, bottom]] : [[19.5, -9], [20.5, -5], [20.5, bottom]], bumps: false })
+    const hi = size === 'm' ? -5 : -9
+    raw[1].up = [[-10.5, bottom], [-12.3, -1.6], [-12.3, hi], [size === 'm' ? -10.5 : -9.5, hi]]
+    raw.push({ pts: size === 'm' ? [[20.5, -5], [20.5, bottom]] : [[19.5, -9], [20.5, -5], [20.5, bottom]], bumps: false, up: [[20.5, bottom], [22.3, -1.6], [22.3, hi], [size === 'm' ? 20.5 : 19.5, hi]] })
     raw.push({ pts: [[-3.5, top(-11)], [-3.5, bottom]], bumps: true }, { pts: [[13.5, top(-11)], [13.5, bottom]], bumps: true })
   }
-  const pistes = raw.map(({ pts, bumps }) => {
-    const v = pts.map(([c, r]) => ctx.grid(c, r))
-    const lens = v.slice(1).map((p, i) => p.distanceTo(v[i]))
-    return { v, lens, len: lens.reduce((x, y) => x + y, 0), bumps }
-  })
+  const pistes = raw.map(({ pts, bumps, up }) => ({ ...line(pts), bumps, up: up ? line(up) : null }))
   const count = size === 's' ? 8 : size === 'm' ? (ctx.tv ? 16 : 12) : ctx.tv ? 32 : 16
   const skiers: Skier[] = Array.from({ length: count }, (_, i) => ({
     piste: i % 2 === 0 ? 0 : 1 + (((i - 1) / 2) % (pistes.length - 1)),
-    s: rnd(i, 91) * pistes[0].len,
+    s: 0,
     speed: 2.2 + rnd(i, 92) * 1.2,
     wait: 0,
+    up: false,
     board: i % 12 === 5,
     faller: ctx.tv && i % 30 === 7,
     fallAt: -10,
     ph: rnd(i, 93) * 6.28,
   }))
-  for (const k of skiers) k.s = rnd(k.ph, 94) * pistes[k.piste].len
+  for (const k of skiers) {
+    const p = pistes[k.piste]
+    k.s = rnd(k.ph, 94) * p.len
+    // Un sur deux des flancs commence sur le téléski : il y a toujours du monde qui remonte.
+    if (p.up && rnd(k.ph, 95) < 0.5) {
+      k.up = true
+      k.s = rnd(k.ph, 96) * p.up.len
+    }
+  }
 
-  // Maillages : corps (capsule), tête + bonnet (couleurs par sommet), skis (2 boîtes fines). Échelle 0,55 d'un pion.
+  // Téléskis (grande taille) : pylônes et câble le long de la remontée, à 1,3 au-dessus de la neige.
+  const ups = pistes.filter((p) => p.up).map((p) => p.up!)
+  if (ups.length) {
+    const tops: THREE.Vector3[][] = ups.map((u) => {
+      const out: THREE.Vector3[] = []
+      u.v.forEach((a, k) => {
+        if (k === u.v.length - 1) return out.push(a.clone())
+        const n = Math.max(1, Math.round(u.lens[k] / 2.6))
+        for (let j = 0; j < n; j++) out.push(a.clone().lerp(u.v[k + 1], j / n))
+      })
+      for (const p of out) p.y = snowH((p.x + ctx.halfX) / S, (p.z + ctx.halfZ) / S) + 1.3
+      return out
+    })
+    const nP = tops.reduce((n, t) => n + t.length, 0)
+    const poleGeo = ctx.track(new THREE.CylinderGeometry(0.05, 0.07, 1, 6))
+    poleGeo.translate(0, -0.5, 0)
+    const poles = new THREE.InstancedMesh(poleGeo, ctx.toon('#6C757D'), nP)
+    const wire = new THREE.InstancedMesh(ctx.track(new THREE.BoxGeometry(1, 0.035, 0.035)), ctx.inkFront, nP)
+    const m4 = new THREE.Matrix4()
+    const X = new THREE.Vector3(1, 0, 0)
+    const q = new THREE.Quaternion()
+    const d = new THREE.Vector3()
+    let i = 0
+    let w = 0
+    for (const t of tops) {
+      t.forEach((p, k) => {
+        m4.compose(p, q.identity(), d.set(1, 1.3 + 0.2, 1))
+        poles.setMatrixAt(i++, m4)
+        if (k === t.length - 1) return
+        d.subVectors(t[k + 1], p)
+        q.setFromUnitVectors(X, d.clone().normalize())
+        m4.compose(p.clone().add(t[k + 1]).multiplyScalar(0.5), q, new THREE.Vector3(d.length(), 1, 1))
+        wire.setMatrixAt(w++, m4)
+      })
+    }
+    wire.count = w
+    poles.castShadow = true
+    scene.add(poles, wire)
+  }
+
+  // Maillages : corps (capsule, contour encre), tête + bonnet (couleurs par sommet), skis (2 boîtes fines).
   const bodyGeo = ctx.track(new THREE.CapsuleGeometry(0.12, 0.2, 3, 7))
   bodyGeo.translate(0, 0.25, 0)
   const head = new THREE.SphereGeometry(0.1, 7, 5).translate(0, 0.5, 0).toNonIndexed()
@@ -607,18 +712,16 @@ function buildSkiers(ctx: ThemeCtx) {
   const skiR = new THREE.BoxGeometry(0.05, 0.02, 0.5).translate(0.06, 0.01, 0)
   const skisGeo = ctx.track(mergeGeometries([skiL, skiR])!)
   ;[skiL, skiR].forEach((g) => g.dispose())
-  const bodies = new THREE.InstancedMesh(bodyGeo, ctx.toon('#ffffff'), count)
+  const bodies = instInked(ctx, bodyGeo, ctx.toon('#ffffff'), count, 1.22)
   const heads = new THREE.InstancedMesh(headGeo, ctx.toon('#ffffff', { vertexColors: true }), count)
   const skis = new THREE.InstancedMesh(skisGeo, ctx.toon('#ffffff'), count)
   skiers.forEach((k, i) => {
-    bodies.setColorAt(i, new THREE.Color(JACKETS[i % JACKETS.length]))
+    bodies.color(i, JACKETS[i % JACKETS.length])
     skis.setColorAt(i, new THREE.Color(k.board ? '#8B5CF6' : '#2b2545'))
   })
-  for (const m of [bodies, heads, skis]) {
-    m.frustumCulled = false
-    m.castShadow = true
-  }
-  scene.add(bodies, heads, skis)
+  for (const m of [bodies.mesh, heads, skis]) m.castShadow = true
+  for (const m of [...bodies.group.children, heads, skis]) m.frustumCulled = false
+  scene.add(bodies.group, heads, skis)
 
   const P = new THREE.Vector3()
   const D = new THREE.Vector3()
@@ -629,9 +732,13 @@ function buildSkiers(ctx: ThemeCtx) {
   const SC = new THREE.Vector3()
   const zero = new THREE.Matrix4().makeScale(0, 0, 0)
   const bumpRows = [-2, -4, -6, -8, -10]
-  /** Point d'une piste à l'abscisse curviligne s (et sa direction). */
-  const sample = (pi: number, s: number) => {
-    const p = pistes[pi]
+  const hide = (i: number) => {
+    bodies.set(i, zero)
+    heads.setMatrixAt(i, zero)
+    skis.setMatrixAt(i, zero)
+  }
+  /** Point d'une polyligne à l'abscisse curviligne s (et sa direction). */
+  const sample = (p: Line, s: number) => {
     let d = Math.max(0, Math.min(p.len, s))
     for (let k = 0; k < p.lens.length; k++) {
       if (d <= p.lens[k] || k === p.lens.length - 1) {
@@ -643,6 +750,8 @@ function buildSkiers(ctx: ThemeCtx) {
       d -= p.lens[k]
     }
   }
+  // Échelle : un peu plus petit qu'un pion, mais lisible de loin (contour encre).
+  const SCALE = 1.55
   return {
     update(t: number, dt0: number) {
       const dt = Math.max(0, dt0)
@@ -651,26 +760,40 @@ function buildSkiers(ctx: ThemeCtx) {
         if (k.wait > 0) {
           k.wait -= dt
           if (k.wait <= 0) k.s = 0
-          bodies.setMatrixAt(i, zero)
-          heads.setMatrixAt(i, zero)
-          skis.setMatrixAt(i, zero)
+          return hide(i)
+        }
+        // Remontée au téléski : debout, tiré par la perche, sans slalom.
+        if (k.up && p.up) {
+          k.s += 1.6 * dt
+          if (k.s >= p.up.len) {
+            k.up = false
+            k.s = 0
+          }
+          sample(p.up, k.s)
+          P.y = snowH((P.x + ctx.halfX) / S, (P.z + ctx.halfZ) / S)
+          Q.setFromEuler(E.set(-0.15, Math.atan2(D.x, D.z), Math.sin(t * 3 + k.ph) * 0.05))
+          M.compose(P, Q, SC.set(SCALE, SCALE, SCALE))
+          bodies.set(i, M)
+          heads.setMatrixAt(i, M)
+          skis.setMatrixAt(i, M)
           return
         }
-        // En bas : il freine (gerbe de neige), rétrécit et disparaît, puis repart d'en haut après 0,5 à 3 s.
+        // En bas : il freine (gerbe de neige) ; aux flancs il file au téléski, ailleurs il disparaît et repart d'en haut.
         const left = p.len - k.s
         const brake = Math.min(1, Math.max(0, left / 1.6))
         k.s += k.speed * dt * (0.25 + 0.75 * brake)
         if (k.s >= p.len) {
-          k.wait = 0.5 + rnd(t, i) * 2.5
+          if (p.up) {
+            k.up = true
+            k.s = 0
+          } else k.wait = 0.5 + rnd(t, i) * 2.5
           if (ctx.tv && rnd(i, t) < 0.3) {
-            sample(k.piste, p.len)
-            const c = (P.x + ctx.halfX) / S
-            const r = (P.z + ctx.halfZ) / S
-            ctx.puff(P.clone().setY(snowH(c, r) + 0.2), '#ffffff')
+            sample(p, p.len)
+            ctx.puff(P.clone().setY(snowH((P.x + ctx.halfX) / S, (P.z + ctx.halfZ) / S) + 0.2), '#ffffff')
           }
-          return
+          return hide(i)
         }
-        sample(k.piste, k.s)
+        sample(p, k.s)
         // Slalom : écart latéral 0,35 × sin (plus large en planche), penché dans les virages.
         const amp = (k.board ? 0.6 : 0.35) * brake
         const w = 2.2
@@ -705,16 +828,16 @@ function buildSkiers(ctx: ThemeCtx) {
             k.s -= k.speed * dt * 0.7
           }
         }
-        const sc = 0.55 * (left < 0.5 ? Math.max(0.05, left / 0.5) : 1) * 1.8
+        const sc = SCALE * (left < 0.5 ? Math.max(0.05, left / 0.5) : 1)
         Q.setFromEuler(E.set(pitchX, yaw, roll))
         P.y = y
         M.compose(P, Q, SC.set(sc, sc, sc))
-        bodies.setMatrixAt(i, M)
+        bodies.set(i, M)
         heads.setMatrixAt(i, M)
         Mski.compose(P, Q, SC.set(sc * (k.board ? 2.6 : 1), sc, sc * (k.board ? 0.7 : 1)))
         skis.setMatrixAt(i, Mski)
       })
-      bodies.instanceMatrix.needsUpdate = true
+      bodies.dirty()
       heads.instanceMatrix.needsUpdate = true
       skis.instanceMatrix.needsUpdate = true
     },

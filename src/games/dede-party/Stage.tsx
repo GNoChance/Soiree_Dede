@@ -197,9 +197,9 @@ export function Stage({ s, view, get, big, top, bottom, center, className, meId,
         )}
       </AnimatePresence>
       {ready && top && <div className={cn('pointer-events-none absolute inset-x-0 top-0 flex justify-center', big ? 'p-4' : 'p-2')}>{top}</div>}
-      {ready && bottom && <div className={cn('pointer-events-none absolute inset-x-0 bottom-0 flex justify-center', big ? 'p-4' : 'p-2', tvMap && 'pl-[332px]')}>{bottom}</div>}
+      {ready && bottom && <div className={cn('pointer-events-none absolute inset-x-0 bottom-0 flex justify-center', big ? 'p-4' : 'p-2', tvMap && 'pl-[min(240px,28%)]')}>{bottom}</div>}
       {ready && tvMap && (
-        <div className="pointer-events-none absolute bottom-4 left-4 h-[190px] w-[300px]">
+        <div className="pointer-events-none absolute bottom-3 left-3 h-[min(130px,22%)] w-[min(210px,24%)] opacity-90">
           <MiniMap board={board} snap={view.snap} order={s.order} get={get} highlight={view.mover?.id ?? null} frame={frame} fit className="size-full" />
         </div>
       )}
