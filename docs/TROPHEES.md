@@ -433,7 +433,7 @@ La variante (`classic` / `giant` / `ultimate`) est dans `session.board_options`.
 | 4 | `dk_panne` | En panne | Ne pas franchir la ligne avant la fin d'une course | FIN (`places[].time` nul) ✅ |
 | 5 | `dk_podium` | Sur le podium | 10 podiums (4 karts min., cumul) | FIN (`standings`) ✅ |
 | 6 | `dk_tireur` | Fine gâchette | Toucher 10 karts avec une boule ou une glue (cumul) | FIN (`hits`) ✅ |
-| 7 | `dk_touriste` | Tour du monde | Gagner une course sur chacun des 3 circuits (cumul) | FIN (3 drapeaux `win_track_1..3`) ✅ |
+| 7 | `dk_touriste` | Tour du monde | Gagner une course sur chacun des 6 circuits (cumul) | FIN (6 drapeaux `win_track_1..6`) ✅ |
 | 8 | `dk_coup_bas` | Coups bas | Utiliser au moins une fois le nuage, les confettis et le demi-tour (cumul) | PHASE 2 (`used_cloud`, `used_confetti`, `used_reverse`, sur l'action `use`) ✅ |
 | 9 | `dk_remontada` | Remontada | En coupe, gagner une course après avoir fini hors du podium à la précédente | FIN (`standings`) ✅ |
 | 10 | `dk_sniper` | Sniper | 5 touches réussies en une coupe | FIN (`hits`) ✅ |
@@ -534,7 +534,7 @@ Tenue débloquée à **5 victoires** (partie longue). Compteurs posés par le se
 | 7 | `party_chouchou` | Chouchou de Dédé | Ouvrir 10 enveloppes surprise (cumul) | `envelopes` (somme ≥ 10) ✅ |
 | 8 | `party_pile_dessus` | Pile dessus | Acheter une étoile en s'arrêtant exactement sur sa case | `star_exact` (somme ≥ 1) ✅ |
 | 9 | `party_triple` | Le triplé | Gagner 3 mini-jeux d'affilée | `mg_streak` (max ≥ 3) ✅ |
-| 10 | `party_constellation` | Constellation | Finir une partie avec 3 étoiles ou plus | `stars` (max ≥ 3) ✅ |
+| 10 | `party_constellation` | Constellation | Finir une partie avec 4 étoiles ou plus | `stars` (max ≥ 4) ✅ |
 | 11 | `party_carton_plein` | Carton plein | Gagner la partie en étant aussi Roi des mini-jeux | `win_mvp` (somme ≥ 1) ✅ |
 | 12 | `party_star_ecran` | Star du petit écran | Gagner 10 parties (cumul) | `won` (somme ≥ 10) ✅ |
 

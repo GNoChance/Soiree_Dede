@@ -109,7 +109,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
   return (
     <>
       {/* bulle flottante + aperçus des messages reçus */}
-      <div className="pointer-events-none fixed right-2 top-[42%] z-[45] flex flex-col items-end gap-2">
+      <div className="pointer-events-none fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-[calc(0.5rem+env(safe-area-inset-left))] z-[45] flex flex-col items-start gap-2">
         <AnimatePresence>
           {!open &&
             previews.map((m) => {
@@ -118,9 +118,9 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
                 <motion.button
                   key={m.id}
                   type="button"
-                  initial={{ opacity: 0, x: 40, scale: 0.8 }}
+                  initial={{ opacity: 0, x: -40, scale: 0.8 }}
                   animate={{ opacity: 1, x: 0, scale: 1 }}
-                  exit={{ opacity: 0, x: 40, scale: 0.8 }}
+                  exit={{ opacity: 0, x: -40, scale: 0.8 }}
                   onClick={() => setOpen(true)}
                   className="pointer-events-auto flex max-w-[70vw] items-center gap-2 rounded-chip border-[3px] border-ink bg-surface px-2 py-1 text-left text-text shadow-sticker-sm"
                 >
@@ -145,7 +145,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
         >
           <MessageCircle className="size-6" />
           {unread > 0 && (
-            <span className="absolute -left-2 -top-2 grid min-w-6 place-items-center rounded-full border-2 border-ink bg-tomato px-1 text-xs font-extrabold text-white">
+            <span className="absolute -right-2 -top-2 grid min-w-6 place-items-center rounded-full border-2 border-ink bg-tomato px-1 text-xs font-extrabold text-white">
               {unread > 9 ? '9+' : unread}
             </span>
           )}
