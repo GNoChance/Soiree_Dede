@@ -2,11 +2,17 @@ import { TENUE_ART_VERSION } from '@/data/characters'
 import { DEFAULT_TENUE } from '@/data/tenues'
 import { hasTenueArt, tenueArtDir } from '@/components/ui/tenueArt'
 import type { PlayerInfo } from '../types'
-import { holeById, type HoleDef } from './holes'
+import { holeById, pickedUp, type HoleDef } from './holes'
 import type { MiniGolfState } from './types'
 
 /** Définition du trou n° idx (index dans le parcours). */
 export const holeAt = (s: MiniGolfState, idx: number): HoleDef => holeById(s.holes?.[idx] ?? 1)
+
+/** Nom du parcours (résumé). Anciennes parties sans `course` : 9 trous = La Kermesse, 5 = express. */
+export function courseLabel(s: MiniGolfState): string {
+  const c = s.course ?? (s.holes.length === 9 ? 'kermesse' : 'express')
+  return c === 'kermesse' ? 'La Kermesse du village' : c === 'express' ? 'Parcours express' : c === 'defi' ? 'Parcours Défi' : 'Parcours aléatoire'
+}
 
 /** Total après les `upTo` premiers trous (défaut : tous ceux joués). */
 export function totalOf(s: MiniGolfState, id: string, upTo?: number) {
@@ -32,9 +38,9 @@ export const MARK_CLASS: Record<Mark, string> = {
   over: 'bg-tomato/80 text-white',
 }
 
-/** « 3 coups (par 3) » ; 7 = balle ramassée. */
+/** « 3 coups (par 3) » ; pickedUp(par) (7 sur un par 2 à 4) = balle ramassée. */
 export function scoreLabel(score: number, par: number) {
-  if (score >= 7) return `Ramassée : 7 (par ${par})`
+  if (score >= pickedUp(par)) return `Ramassée : ${score} (par ${par})`
   return `${score} coup${score > 1 ? 's' : ''} (par ${par})`
 }
 

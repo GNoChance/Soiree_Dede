@@ -504,7 +504,7 @@ Compteurs posés par le moteur (`server.pstats` → `results[].stats`). « Contr
 
 ### Golfeur ⛳ — Mini-golf (`mini-golf`)
 
-Compteurs dans `results[].stats` (`_mg_tstats`). Calculés par le serveur depuis la carte : `pars` (trous ≤ par), `birdies` (trous sous le par), `aces` (trous en 1), `under_par` / `clean_card` (parcours de **9 trous** uniquement). `picked_up` = trous déclarés « non rentrée en 6 coups » (le ramassage par le chrono ou la fin forcée ne compte pas). Déclarés par le client et bornés par le serveur (`server.tstats`) : `water` (≤ coups du trou), `mill_hits` (coups touchés par une pale, ≤ coups du trou), `bank_shot` (balle rentrée après 3 rebonds ou plus dans le même coup).
+Compteurs dans `results[].stats` (`_mg_tstats`). Calculés par le serveur depuis la carte : `pars` (trous ≤ par), `birdies` (trous sous le par), `aces` (trous en 1), `under_par` / `clean_card` (parcours de **9 trous** uniquement : aléatoire ou La Kermesse, pas l'express). `picked_up` = trous déclarés « non rentrée en 6 coups » (le ramassage par le chrono ou la fin forcée ne compte pas). Déclarés par le client et bornés par le serveur (`server.tstats`) : `water` (≤ coups du trou), `mill_hits` (coups touchés par une pale, ≤ coups du trou), `bank_shot` (balle rentrée après 3 rebonds ou plus dans le même coup).
 
 | Slot | id | Nom | Condition | Compteur |
 |---|---|---|---|---|

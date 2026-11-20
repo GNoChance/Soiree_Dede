@@ -8,10 +8,11 @@
  *
  * Le trou n'est pas creusé : la balle est « avalée » sous une vitesse seuil, sinon elle saute
  * par-dessus avec une petite déviation. Moulin : corps cinématique dont l'angle dépend de l'horloge
- * (serveur) passée à `step(t)`. Looping : trajectoire SCRIPTÉE (seul obstacle truqué, pour la fiabilité).
+ * (serveur) passée à `step(t)`, de même que les barrières mobiles (`slider`). Looping : trajectoire SCRIPTÉE
+ * (seul obstacle truqué, pour la fiabilité).
  */
 import * as CANNON from 'cannon-es'
-import { floorHeight, type HoleDef, type Piece } from '../holes'
+import { floorHeight, type HoleDef, type Piece, type Skin } from '../holes'
 
 export const STEP = 1 / 120
 export const G = 9.81
@@ -33,15 +34,19 @@ export const LOOP_V = 3.9
 const FLOOR_T = 0.3
 const WALL_T = 0.14
 
-export type BallStatus = 'rest' | 'rolling' | 'loop' | 'holed'
-export type Tag = 'floor' | 'wall' | 'post' | 'bumper' | 'mill' | 'blade'
+export type BallStatus = 'rest' | 'rolling' | 'loop' | 'tube' | 'holed'
+export type Tag = 'floor' | 'wall' | 'post' | 'bumper' | 'mill' | 'blade' | 'slider' | 'gate'
 
 export type PhysEvent =
   | { type: 'hit'; tag: Tag; speed: number; index: number }
   | { type: 'lip' }
   | { type: 'holed' }
   | { type: 'water'; x: number; z: number }
+  /** Chute dans le vide (trou `void`) : +1 coup, retour au point de frappe. */
+  | { type: 'fall'; x: number; y: number; z: number }
   | { type: 'out' }
+  | { type: 'tube' }
+  | { type: 'tube_end' }
   | { type: 'stop' }
   | { type: 'loop'; ok: boolean }
   | { type: 'loop_end' }
@@ -72,6 +77,49 @@ export const shotSpeed = (power: number) => VMIN_SHOT + (VMAX - VMIN_SHOT) * Mat
 /** Angle des pales du moulin à l'instant t (s). */
 export const millAngle = (t: number) => (t * MILL_W) % (Math.PI * 2)
 
+type SliderDef = Extract<Piece, { kind: 'slider' }>
+type GateDef = Extract<Piece, { kind: 'gate' }>
+type TubeDef = Extract<Piece, { kind: 'tube' }>
+
+/** Revêtements : multiplicateurs [décélération, traînée] du roulement. */
+const SURFACE: Partial<Record<Skin, [number, number]>> = { ice: [0.2, 0.3], sand: [3.4, 2.5], snow: [3.4, 2.5] }
+
+/** Porte : hauteur de la herse. */
+export const GATE_H = 0.45
+/** Porte : levée de 0 (rentrée dans le sol, ~44 % du temps) à 1 (fermée, ~30 % du temps) à l'instant t. */
+export function gateLift(p: GateDef, t: number) {
+  return clamp(0.25 + 1.25 * Math.sin(Math.PI * 2 * (t / p.period + (p.phase ?? 0))), 0, 1)
+}
+/** Porte : hauteur du centre de la herse à l'instant t. */
+export const gateY = (p: GateDef, t: number) => (p.y ?? 0) + gateLift(p, t) * GATE_H - GATE_H / 2 - 0.03
+
+/** Tube : rayon de l'embouchure qui avale la balle. */
+export const TUBE_MOUTH = 0.24
+/** Tube : point (x, y, z) du centre de la balle à l'avancement k (0..1), le long d'une courbe de Bézier en cloche. */
+export function tubePoint(p: TubeDef, k: number): [number, number, number] {
+  const ya = (p.ya ?? 0) + BALL_R
+  const yb = (p.yb ?? 0) + BALL_R
+  const top = Math.max(ya, yb) + (p.arc ?? 0.8)
+  const u = 1 - k
+  return [u * p.a[0] + k * p.b[0], u * u * ya + 2 * u * k * top + k * k * yb, u * p.a[1] + k * p.b[1]]
+}
+
+/** Barrière mobile : abscisse du centre du bloc à l'instant t (s). */
+export function sliderX(p: SliderDef, t: number) {
+  const amp = (p.x1 - p.x0 - p.w) / 2
+  return (p.x0 + p.x1) / 2 + amp * Math.sin(Math.PI * 2 * (t / p.period + (p.phase ?? 0)))
+}
+
+/** Barrière mobile : vitesse du bloc (u/s) à l'instant t. */
+export function sliderV(p: SliderDef, t: number) {
+  const amp = (p.x1 - p.x0 - p.w) / 2
+  const w = (Math.PI * 2) / p.period
+  return amp * w * Math.cos(w * t + Math.PI * 2 * (p.phase ?? 0))
+}
+
+/** Hauteur d'une barrière mobile. */
+export const SLIDER_H = 0.32
+
 /** Position (x, y, z) de la balle dans le looping pour l'angle θ. */
 export function loopPoint(def: LoopDef, theta: number, xIn: number): [number, number, number] {
   const rc = def.r - BALL_R
@@ -95,6 +143,10 @@ export class GolfPhysics {
   grounded = false
   private tags = new Map<CANNON.Body, { tag: Tag; index: number }>()
   private mill: CANNON.Body | null = null
+  private sliders: Array<{ body: CANNON.Body; def: SliderDef }> = []
+  private gates: Array<{ body: CANNON.Body; def: GateDef }> = []
+  private tubes: TubeDef[] = []
+  private tubeRun: { def: TubeDef; k: number; v: number; len: number } | null = null
   private loops: LoopDef[] = []
   private loopRun: LoopRun | null = null
   private loopCool = false
@@ -102,6 +154,7 @@ export class GolfPhysics {
   private slow = 0
   private events: PhysEvent[] = []
   private pendingBump: CANNON.Body | null = null
+  private gateHit = false
   private lastWallAt = new Map<CANNON.Body, number>()
   private bounds = { x0: -5, x1: 5, z0: -6, z1: 6 }
   private prevZ = 0
@@ -116,6 +169,10 @@ export class GolfPhysics {
     this.tags.clear()
     this.loops = []
     this.mill = null
+    this.sliders = []
+    this.gates = []
+    this.tubes = []
+    this.tubeRun = null
     this.loopRun = null
     this.events = []
     const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -G, 0) })
@@ -132,8 +189,10 @@ export class GolfPhysics {
       bumper: new CANNON.Material('bumper'),
       mill: new CANNON.Material('mill'),
       blade: new CANNON.Material('blade'),
+      slider: new CANNON.Material('slider'),
+      gate: new CANNON.Material('gate'),
     }
-    const rest: Record<Tag, number> = { floor: 0, wall: 0.62, post: 0.6, bumper: 0.9, mill: 0.55, blade: 0.6 }
+    const rest: Record<Tag, number> = { floor: 0, wall: 0.62, post: 0.6, bumper: 0.9, mill: 0.55, blade: 0.6, slider: 0.6, gate: 0.5 }
     for (const k of Object.keys(mats) as Tag[]) {
       world.addContactMaterial(new CANNON.ContactMaterial(mBall, mats[k], { friction: 0, restitution: rest[k] }))
     }
@@ -176,6 +235,20 @@ export class GolfPhysics {
       add(b, 'floor', index)
       grow(p.x0, p.z0)
       grow(p.x1, p.z1)
+    } else if (p.kind === 'ramp' && p.axis === 'x') {
+      // dévers : pente le long de X (rotation autour de Z)
+      const dx = p.x1 - p.x0
+      const dy = p.y1 - p.y0
+      const len = Math.hypot(dx, dy)
+      const psi = Math.atan2(dy, dx)
+      const b = box(len / 2, FLOOR_T / 2, (p.z1 - p.z0) / 2)
+      b.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), psi)
+      const nx = -Math.sin(psi)
+      const ny = Math.cos(psi)
+      b.position.set((p.x0 + p.x1) / 2 - (nx * FLOOR_T) / 2, (p.y0 + p.y1) / 2 - (ny * FLOOR_T) / 2, (p.z0 + p.z1) / 2)
+      add(b, 'floor', index)
+      grow(p.x0, p.z0)
+      grow(p.x1, p.z1)
     } else if (p.kind === 'ramp') {
       const dz = p.z1 - p.z0
       const dy = p.y1 - p.y0
@@ -204,7 +277,7 @@ export class GolfPhysics {
     } else if (p.kind === 'post' || p.kind === 'bumper') {
       const h = p.kind === 'post' ? 0.5 : 0.36
       const b = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(p.r, p.r, h, 14) })
-      b.position.set(p.x, h / 2 - 0.1, p.z)
+      b.position.set(p.x, (p.y ?? 0) + h / 2 - 0.1, p.z)
       add(b, p.kind, index)
     } else if (p.kind === 'mill') {
       const back = p.front - p.depth
@@ -230,12 +303,32 @@ export class GolfPhysics {
       blades.position.set(p.cx, MILL_HUB_Y, p.front + 0.16)
       add(blades, 'blade', index)
       this.mill = blades
+    } else if (p.kind === 'slider') {
+      const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3(p.w / 2, SLIDER_H / 2, (p.d ?? 0.3) / 2)) })
+      b.position.set((p.x0 + p.x1) / 2, SLIDER_H / 2 - 0.02, p.z)
+      add(b, 'slider', index)
+      this.sliders.push({ body: b, def: p })
+    } else if (p.kind === 'gate') {
+      const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3((p.x1 - p.x0) / 2, GATE_H / 2, (p.d ?? 0.2) / 2)) })
+      b.position.set((p.x0 + p.x1) / 2, gateY(p, 0), p.z)
+      add(b, 'gate', index)
+      this.gates.push({ body: b, def: p })
+    } else if (p.kind === 'tube') {
+      this.tubes.push(p)
     } else if (p.kind === 'loop') {
       this.loops.push({ z: p.z, r: p.r, x0: p.x0, x1: p.x1, halfWidth: p.halfWidth })
     }
   }
 
   private setMill(t: number) {
+    for (const s of this.sliders) {
+      s.body.position.x = sliderX(s.def, t)
+      s.body.velocity.set(sliderV(s.def, t), 0, 0)
+    }
+    for (const g of this.gates) {
+      g.body.position.y = gateY(g.def, t)
+      g.body.velocity.set(0, (gateY(g.def, t + 0.01) - gateY(g.def, t)) / 0.01, 0)
+    }
     if (!this.mill) return
     this.mill.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), -millAngle(t))
     this.mill.angularVelocity.set(0, 0, -MILL_W)
@@ -247,12 +340,13 @@ export class GolfPhysics {
     if (!info || info.tag === 'floor') return
     const speed = Math.abs(e.contact.getImpactVelocityAlongNormal())
     if (info.tag === 'bumper') this.pendingBump = e.body
+    if (info.tag === 'gate' || info.tag === 'blade') this.gateHit = true
     if (info.tag === 'blade') this.millHit = true
     const last = this.lastWallAt.get(e.body) ?? -1
     if (this.strokeTime - last < 0.12) return
     this.lastWallAt.set(e.body, this.strokeTime)
     if (speed < 0.25 && info.tag !== 'bumper') return
-    if (speed > 0.5 && (info.tag === 'wall' || info.tag === 'post' || info.tag === 'mill' || info.tag === 'bumper')) this.bounces++
+    if (speed > 0.5 && (info.tag === 'wall' || info.tag === 'post' || info.tag === 'mill' || info.tag === 'bumper' || info.tag === 'slider' || info.tag === 'gate')) this.bounces++
     this.events.push({ type: 'hit', tag: info.tag, speed, index: info.index })
   }
 
@@ -265,6 +359,7 @@ export class GolfPhysics {
     b.angularVelocity.setZero()
     this.status = 'rest'
     this.loopRun = null
+    this.tubeRun = null
     this.prevZ = z
   }
 
@@ -299,12 +394,16 @@ export class GolfPhysics {
     this.events = []
     this.setMill(t)
     if (this.status === 'rest' || this.status === 'holed') {
-      if (this.mill) this.world.step(STEP) // pales seulement (la balle cinématique ne bouge pas)
+      if (this.mill || this.sliders.length || this.gates.length) this.world.step(STEP) // pales / barrières seulement (la balle cinématique ne bouge pas)
       return this.events
     }
     this.strokeTime += STEP
     if (this.status === 'loop') {
       this.stepLoop()
+      return this.events
+    }
+    if (this.status === 'tube') {
+      this.stepTube()
       return this.events
     }
     const b = this.ball
@@ -330,18 +429,31 @@ export class GolfPhysics {
       this.pendingBump = null
     }
 
+    // Herse qui monte sous la balle, pale du moulin qui la fauche : elles la repoussent, sans la catapulter par-dessus les bordures.
+    if (this.gateHit) {
+      if (b.velocity.y > 0.8) b.velocity.y = 0.8
+      this.gateHit = false
+    }
+
     // Contact au sol : roulement simulé (décélération constante + traînée).
     this.grounded = false
+    let surface: [number, number] | undefined
     for (const eq of this.world.contacts) {
       if (eq.bi !== b && eq.bj !== b) continue
       const other = eq.bi === b ? eq.bj : eq.bi
-      if (this.tags.get(other)?.tag !== 'floor') continue
+      const info = this.tags.get(other)
+      if (info?.tag !== 'floor') continue
       const ny = eq.bi === b ? -eq.ni.y : eq.ni.y
-      if (ny > 0.5) this.grounded = true
+      if (ny > 0.5) {
+        this.grounded = true
+        const piece = this.hole.pieces[info.index]
+        surface = (piece.kind === 'floor' || piece.kind === 'ramp') && piece.skin ? (SURFACE[piece.skin] ?? surface) : surface
+      }
     }
     let sp = this.speed()
     if (this.grounded && sp > 0) {
-      const ns = Math.max(0, sp - (ROLL_DECEL + DRAG * sp) * STEP)
+      const [kd, kv] = surface ?? [1, 1]
+      const ns = Math.max(0, sp - (ROLL_DECEL * kd + DRAG * kv * sp) * STEP)
       b.velocity.scale(ns / sp, b.velocity)
       sp = ns
     }
@@ -372,7 +484,26 @@ export class GolfPhysics {
     }
     this.prevZ = z
 
-    // Eau / hors piste.
+    // Tube : la balle qui roule dans l'embouchure est avalée.
+    for (const T of this.tubes) {
+      if (Math.hypot(x - T.a[0], z - T.a[1]) < TUBE_MOUTH && Math.abs(y - ((T.ya ?? 0) + BALL_R)) < 0.15) {
+        let len = 0
+        let prev = tubePoint(T, 0)
+        for (let i = 1; i <= 16; i++) {
+          const q = tubePoint(T, i / 16)
+          len += Math.hypot(q[0] - prev[0], q[1] - prev[1], q[2] - prev[2])
+          prev = q
+        }
+        this.tubeRun = { def: T, k: 0, v: clamp(sp, 2.2, 6), len }
+        b.type = CANNON.Body.KINEMATIC
+        b.velocity.setZero()
+        this.status = 'tube'
+        this.events.push({ type: 'tube' })
+        return this.events
+      }
+    }
+
+    // Eau / vide / hors piste.
     for (const w of this.hole.water ?? []) {
       if (y < 0.02 && x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1) {
         this.events.push({ type: 'water', x, z })
@@ -381,7 +512,13 @@ export class GolfPhysics {
       }
     }
     const B = this.bounds
-    if (y < -1.2 || x < B.x0 - 1 || x > B.x1 + 1 || z < B.z0 - 1 || z > B.z1 + 1) {
+    const away = x < B.x0 - 1 || x > B.x1 + 1 || z < B.z0 - 1 || z > B.z1 + 1
+    if (this.hole.void && (y < -0.6 || away)) {
+      this.events.push({ type: 'fall', x, y, z })
+      this.place(this.lastHit[0], this.lastHit[1], this.lastHit[2])
+      return this.events
+    }
+    if (y < -1.2 || away) {
       this.events.push({ type: 'out' })
       this.place(this.lastHit[0], this.lastHit[1], this.lastHit[2])
       return this.events
@@ -414,12 +551,45 @@ export class GolfPhysics {
     if (sp < 0.07 && (this.grounded || this.strokeTime > 1)) this.slow += STEP
     else this.slow = 0
     if (this.slow > 0.15 || this.strokeTime > 25) {
-      this.place(b.position.x, b.position.y, b.position.z)
+      const [px, pz] = this.clearOfSliders(b.position.x, b.position.z)
+      this.place(px, px === b.position.x && pz === b.position.z ? b.position.y : this.floorY(px, pz) + BALL_R, pz)
       this.events.push({ type: 'stop' })
     }
     return this.events
   }
 
+  /** Une balle ne s'arrête jamais sous la course d'une barrière mobile ou d'une porte : poussée juste devant ou derrière. */
+  private clearOfSliders(x: number, z: number): [number, number] {
+    for (const p of [...this.sliders.map((s) => ({ ...s.def, d: s.def.d ?? 0.3 })), ...this.gates.map((g) => ({ ...g.def, d: g.def.d ?? 0.2 }))]) {
+      const half = p.d / 2 + BALL_R + 0.02
+      if (x > p.x0 - BALL_R && x < p.x1 + BALL_R && Math.abs(z - p.z) < half) z = p.z + (z >= p.z ? half + 0.03 : -half - 0.03)
+    }
+    return [x, z]
+  }
+
+  /** Dans le tube : avance le long de la courbe, puis ressort en b dans la direction dir. */
+  private stepTube() {
+    const r = this.tubeRun!
+    const b = this.ball
+    r.k += (r.v * STEP) / r.len
+    if (r.k >= 1) {
+      const T = r.def
+      const n = Math.hypot(T.dir[0], T.dir[1]) || 1
+      const dx = T.dir[0] / n
+      const dz = T.dir[1] / n
+      b.type = CANNON.Body.DYNAMIC
+      b.position.set(T.b[0] + dx * 0.05, (T.yb ?? 0) + BALL_R + 0.01, T.b[1] + dz * 0.05)
+      const v = Math.max(1.6, r.v * 0.9)
+      b.velocity.set(dx * v, 0, dz * v)
+      this.status = 'rolling'
+      this.tubeRun = null
+      this.prevZ = b.position.z
+      this.events.push({ type: 'tube_end' })
+      return
+    }
+    const [x, y, z] = tubePoint(r.def, r.k)
+    b.position.set(x, y, z)
+  }
   private stepLoop() {
     const r = this.loopRun!
     const b = this.ball
@@ -470,17 +640,19 @@ export class GolfPhysics {
     this.shoot(dx, dz, power)
     let t = t0
     let water = false
+    let fall = false
     let out = false
     let holed = false
     for (let i = 0; i < maxSteps && this.status !== 'rest' && this.status !== 'holed'; i++) {
       t += STEP
       for (const e of this.step(t)) {
         if (e.type === 'water') water = true
+        if (e.type === 'fall') fall = true
         if (e.type === 'out') out = true
         if (e.type === 'holed') holed = true
       }
     }
     const p = this.ball.position
-    return { holed, water, out, x: p.x, y: p.y, z: p.z, time: t - t0, bounces: this.bounces, mill: this.millHit }
+    return { holed, water, fall, out, x: p.x, y: p.y, z: p.z, time: t - t0, bounces: this.bounces, mill: this.millHit }
   }
 }

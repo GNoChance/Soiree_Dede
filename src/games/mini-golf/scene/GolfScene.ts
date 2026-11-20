@@ -6,18 +6,20 @@
  */
 import * as THREE from 'three'
 import { vibrate } from '@/lib/feedback'
-import type { HoleDef } from '../holes'
+import { hasBell, type HoleDef } from '../holes'
 import { GolfAudio } from './audio'
 import { CameraRig, type Frame } from './camera'
 import { buildCourse, type CourseView } from './Course'
 import { attachInput, type Drag } from './input'
-import { BALL_R, GolfPhysics, STEP, millAngle } from './physics'
+import { BALL_R, GolfPhysics, STEP, gateY, millAngle, sliderX } from './physics'
 
 export type Vec3 = [number, number, number]
 
 export interface StrokeResult {
   holed: boolean
   water: boolean
+  /** Chute dans le vide (trou suspendu) : +1 coup comme l'eau. */
+  fall: boolean
   out: boolean
   /** Position de repos de la balle (ou du trou si rentrée). */
   pos: Vec3
@@ -107,6 +109,7 @@ export class GolfScene {
   private hidden = false
   private dirty = true
   private water = false
+  private fall = false
   private out = false
   private cleanups: Array<() => void> = []
   private shared: THREE.BufferGeometry[] = []
@@ -301,7 +304,7 @@ export class GolfScene {
   }
 
   isRolling() {
-    return !!this.phys && (this.phys.status === 'rolling' || this.phys.status === 'loop')
+    return !!this.phys && (this.phys.status === 'rolling' || this.phys.status === 'loop' || this.phys.status === 'tube')
   }
 
   setGhost(id: string, info: GhostInfo, pos: Vec3, state: GhostState) {
@@ -446,6 +449,7 @@ export class GolfScene {
     this.audio.putt(d.power)
     vibrate(18)
     this.water = false
+    this.fall = false
     this.out = false
     ph.shoot(dir.x, dir.z, d.power)
     this.o.callbacks.onShot?.(d.power)
@@ -462,7 +466,7 @@ export class GolfScene {
     const ph = this.phys!
     const p = ph.ball.position
     const pos: Vec3 = holed ? [this.hole!.cup[0], (this.hole!.cupY ?? 0) + BALL_R, this.hole!.cup[1]] : [p.x, p.y, p.z]
-    this.o.callbacks.onStrokeEnd?.({ holed, water: this.water, out: this.out, pos, bounces: ph.bounces, mill: ph.millHit })
+    this.o.callbacks.onStrokeEnd?.({ holed, water: this.water, fall: this.fall, out: this.out, pos, bounces: ph.bounces, mill: ph.millHit })
   }
 
   private splash(x: number, z: number) {
@@ -528,7 +532,16 @@ export class GolfScene {
         this.ballMesh.visible = false
         this.fx.push({ t: 0, dur: 0.7, update: () => undefined, end: () => (this.ballMesh.visible = true) })
         this.endStroke(false)
-      } else if (e.type === 'out') {
+      } else if (e.type === 'fall') {
+        this.fall = true
+        this.audio.lip()
+        vibrate([60, 40, 90])
+        // la balle réapparaît au point de frappe
+        this.ballMesh.visible = false
+        this.fx.push({ t: 0, dur: 0.7, update: () => undefined, end: () => (this.ballMesh.visible = true) })
+        this.endStroke(false)
+      } else if (e.type === 'tube') this.audio.loop(true)
+      else if (e.type === 'out') {
         this.out = true
         this.audio.lip()
         this.endStroke(false)
@@ -553,7 +566,7 @@ export class GolfScene {
       end: () => {
         this.sinking = false
         this.ballGrp.visible = false
-        if (h.id === 9) this.ringBell()
+        if (hasBell(h)) this.ringBell()
         this.endStroke(true)
       },
     })
@@ -569,18 +582,18 @@ export class GolfScene {
     let moving = false
 
     if (ph) {
-      const active = ph.status === 'rolling' || ph.status === 'loop'
+      const active = ph.status === 'rolling' || ph.status === 'loop' || ph.status === 'tube'
       if (active) {
         this.acc += dt
         let n = 0
-        while (this.acc >= STEP && n < 12 && (ph.status === 'rolling' || ph.status === 'loop')) {
+        while (this.acc >= STEP && n < 12 && (ph.status === 'rolling' || ph.status === 'loop' || ph.status === 'tube')) {
           this.acc -= STEP
           n++
           this.handleEvents(ph.step(tNow - this.acc))
         }
         if (n === 12) this.acc = 0 // appareil trop lent : on ralentit plutôt que d'accumuler
       } else this.acc = 0
-      if (ph.status === 'rolling' || ph.status === 'loop') {
+      if (ph.status === 'rolling' || ph.status === 'loop' || ph.status === 'tube') {
         moving = true
         const v = ph.ball.velocity
         const p = ph.ball.position
@@ -603,6 +616,16 @@ export class GolfScene {
     const blades = this.course?.blades
     if (blades) {
       blades.rotation.z = -millAngle(tNow)
+      moving = true
+    }
+    // Barrières mobiles (horloge serveur)
+    for (const s of this.course?.sliders ?? []) {
+      s.obj.position.x = sliderX(s.def, tNow)
+      moving = true
+    }
+    // Portes (horloge serveur)
+    for (const g of this.course?.gates ?? []) {
+      g.obj.position.y = gateY(g.def, tNow)
       moving = true
     }
 

@@ -8403,19 +8403,21 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 
 -- ===== games\dede-party.sql =====
 -- =============================================================================
--- JEU « dede-party » (Dédé Party, « Le Grand Plateau de Dédé ») — idempotent.
+-- JEU « dede-party » (Dédé Party, 5 plateaux) — idempotent.
 -- Dépend de schema.sql (game_action, start_match, finish_match).
--- Conception : docs/superpowers/specs/2026-11-19-dede-party-design.md (section « Décisions »).
+-- Conception : docs/superpowers/specs/2026-11-19-dede-party-design.md (section « Décisions ») et
+-- docs/superpowers/specs/2026-11-20-dede-party-plateaux-design.md (les 5 plateaux).
 --
--- Party game de plateau : grand plateau de 47 cases (boucle de 36 + 2 embranchements), 1 à 3 étoiles
--- en jeu selon le nombre de joueurs (30 pièces, la première de chacun à 15), un mini-jeu à chaque tour.
--- Tout le monde lance ses 2 dés EN MÊME TEMPS ; le serveur résout tout le tour d'un coup
--- (scénario `moves`, que les écrans ne font qu'animer). Aucune décision sur le plateau :
--- aux embranchements, un aiguillage (state.sw) envoie le pion et BASCULE après chaque passage.
+-- Party game de plateau sur l'un des 5 plateaux (state.map) : grand (Le Grand Plateau, aiguillages qui
+-- basculent), mer (Dédé-sur-Mer, la marée), kermesse (la Tombola), camping (Riton le raton), ski (Dédé 2000,
+-- télésièges et verglas). 1 à 3 étoiles en jeu selon le nombre de joueurs (30 pièces, la première de chacun
+-- à 15), un mini-jeu à chaque tour. Tout le monde lance ses 2 dés EN MÊME TEMPS ; le serveur résout tout le
+-- tour d'un coup (scénario `moves` + épilogue `epi`, que les écrans ne font qu'animer). Aucune décision sur
+-- le plateau : toutes les mécaniques sont automatiques.
 --
 -- Phases (toutes enchaînées par `deadline` + {"type":"tick"} idempotent, l'hôte n'a rien à cliquer) :
---   intro (5 s) -> roll (15 s) -> move (2 + 5 s × joueurs) -> mg_intro (8 s) -> mg_play (selon le
---   mini-jeu) -> mg_result (8 s) -> roll … -> awards (12 s, étoiles bonus) -> finished.
+--   intro (8 s) -> roll (15 s) -> move (2 + 5 s × joueurs, + 4 s d'épilogue) -> mg_intro (8 s) -> mg_play
+--   (selon le mini-jeu) -> mg_result (8 s) -> roll … -> awards (12 s, étoiles bonus) -> finished.
 -- Actions : roll {double?} · mg_submit {no, payload} · tick · skip (hôte) · end_game (hôte).
 -- `server` (jamais exposé) : questions et réponses, sac de mini-jeux, pioche de cartes, envois
 -- des joueurs avant résultat ; `forced_dice` / `forced_cards` / `forced_mg` pour les tests.
@@ -8425,29 +8427,76 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 create or replace function public._dp_const()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price":15,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":5,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000}'::jsonb $$;
+as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price":15,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":8,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000,"epi_s":4,"tide_low":2,"tide_high":1,"wash":5,"toll":3,"pot_seed":5,"riton_steal":5}'::jsonb $$;
 
--- Plateau « Le Grand Plateau de Dédé » : type de chaque case (index 0 = Départ).
--- Cases 0-35 : la grande boucle ; 36-40 : « La Scène » (détour doré de l'aiguillage 13, retour en 15) ;
--- 41-46 : « Le Tunnel de la pub » (détour piégé de l'aiguillage 22, retour en 25).
--- Dupliqué avec src/games/dede-party/board.ts (synchro vérifiée par tools/sql-tests/dede-party.mjs).
-create or replace function public._dp_board()
+-- Les plateaux sans paramètre (un seul plateau) disparaissent : tout prend désormais le plateau en paramètre.
+drop function if exists public._dp_board();
+drop function if exists public._dp_next();
+drop function if exists public._dp_prev();
+
+-- Les 5 plateaux, dans l'ordre de leur numéro (stat map_no).
+create or replace function public._dp_maps()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","clap","pub","clap","env","loge","clap","pub","loge","clap","env","clap","clap","clap","env","loge","clap","pub","loge","clap","env","loge","pub","clap","clap","env","loge","clap","clap","pub","clap","pub","env","pub","clap"]'::jsonb $$;
+as $$ select '["grand","mer","kermesse","camping","ski"]'::jsonb $$;
+
+-- Type de chaque case du plateau p_map (index 0 = Départ) ; plateau absent ou inconnu = Grand Plateau
+-- (parties lancées avant les 5 plateaux). Dupliqué avec src/games/dede-party/boards/<id>.ts (CELLS) :
+-- synchro vérifiée par tools/sql-tests/dede-party.mjs.
+--   grand    : boucle 0-35, « La Scène » 36-40 (aiguillage 13, retour 15), « Tunnel de la pub » 41-46 (aiguillage 22, retour 25).
+--   mer      : boucle 0-35, Banc de sable 36-44 (embranchement 12 commandé par la marée, retour 14).
+--   kermesse : nœud papillon de 40 cases, Tombola en 13 et 33.
+--   camping  : contour d'une croix, 36 cases.
+--   ski      : escargot de 49 cases (télésièges / verglas), Grande Luge 48 → 0.
+create or replace function public._dp_board(p_map text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select case p_map
+  when 'mer' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","pub","clap","loge","env","clap","pub","loge","clap","pub","env","clap","loge","pub","clap","env","loge","clap","pub","clap","env","loge","pub","clap","clap","clap","env","clap","loge","clap","env","clap","clap"]'
+  when 'kermesse' then '["start","clap","loge","clap","pub","env","loge","clap","pub","clap","loge","clap","env","tombola","clap","loge","clap","pub","env","clap","loge","clap","pub","clap","env","loge","clap","pub","clap","env","loge","clap","pub","tombola","clap","env","loge","clap","pub","clap"]'
+  when 'camping' then '["start","clap","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap"]'
+  when 'ski' then '["start","clap","clap","lift","loge","pub","lift","env","clap","loge","pub","clap","lift","clap","env","lift","loge","pub","clap","env","clap","lift","loge","pub","clap","env","clap","pub","loge","clap","env","clap","pub","loge","clap","env","ice","clap","pub","loge","clap","env","clap","ice","pub","clap","ice","clap","loge"]'
+  else '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","clap","pub","clap","env","loge","clap","pub","loge","clap","env","clap","clap","clap","env","loge","clap","pub","loge","clap","env","loge","pub","clap","clap","env","loge","clap","clap","pub","clap","pub","env","pub","clap"]'
+  end::jsonb $$;
 
 -- Case suivante de chaque case. Un tableau [tout droit, détour] = embranchement : l'aiguillage
--- (state.sw, dans l'ordre des embranchements) choisit, puis bascule. Dupliqué avec board.ts (NEXT).
-create or replace function public._dp_next()
+-- (state.sw, dans l'ordre des embranchements) choisit (et bascule, ou suit la marée). Dupliqué avec NEXT.
+create or replace function public._dp_next(p_map text)
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '[1,2,3,4,5,6,7,8,9,10,11,12,13,[14,36],15,16,17,18,19,20,21,22,[23,41],24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,15,42,43,44,45,46,25]'::jsonb $$;
+as $$ select case p_map
+  when 'mer' then '[1,2,3,4,5,6,7,8,9,10,11,12,[13,36],14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,41,42,43,44,14]'
+  when 'kermesse' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,0]'
+  when 'camping' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0]'
+  when 'ski' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,0]'
+  else '[1,2,3,4,5,6,7,8,9,10,11,12,13,[14,36],15,16,17,18,19,20,21,22,[23,41],24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,15,42,43,44,45,46,25]'
+  end::jsonb $$;
 
--- Case précédente (carte « recule ») : à un retour d'embranchement, on recule par la grande boucle.
-create or replace function public._dp_prev()
+-- Case précédente (carte « recule », ronde de Riton) : à un retour d'embranchement, par la grande boucle ;
+-- au ski, 0 → 48 (la Grande Luge à l'envers). Dupliqué avec PREV.
+create or replace function public._dp_prev(p_map text)
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,13,36,37,38,39,22,41,42,43,44,45]'::jsonb $$;
+as $$ select case p_map
+  when 'mer' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,12,36,37,38,39,40,41,42,43]'
+  when 'kermesse' then '[39,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38]'
+  when 'camping' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]'
+  when 'ski' then '[48,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
+  else '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,13,36,37,38,39,22,41,42,43,44,45]'
+  end::jsonb $$;
+
+-- Fiche de la mécanique du plateau (miroir de EXTRA dans boards/<id>.ts) : numéro, mécanique, mode de
+-- chaque embranchement (toggle : bascule à chaque pion ; tide : suit la marée), données propres.
+create or replace function public._dp_map(p_map text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select case p_map
+  when 'mer' then '{"no":2,"mech":"tide","forks":["tide"],"bank":[36,37,38,39,40,41,42,43,44],"wash_to":14}'
+  when 'kermesse' then '{"no":3,"mech":"tombola","forks":[]}'
+  when 'camping' then '{"no":4,"mech":"riton","forks":[],"riton_start":18}'
+  when 'ski' then '{"no":5,"mech":"tp","forks":[],"tp":{"3":37,"6":40,"12":42,"15":45,"21":47,"36":2,"43":13,"46":20}}'
+  else '{"no":1,"mech":"forks","forks":["toggle","toggle"]}'
+  end::jsonb $$;
 
 -- Les 12 cartes « Enveloppe surprise » (effet immédiat, sans choix).
 create or replace function public._dp_cards()
@@ -8517,7 +8566,8 @@ returns jsonb language sql immutable
 set search_path = public, extensions
 as $$
   select jsonb_build_object('pos', p_state->'pos', 'coins', p_state->'coins', 'stars', p_state->'stars',
-                            'star_cells', p_state->'star_cells', 'sw', p_state->'sw', 'dist', p_state->'dist')
+                            'star_cells', p_state->'star_cells', 'sw', p_state->'sw', 'dist', p_state->'dist',
+                            'mech', coalesce(p_state->'mech', '{}'::jsonb))
 $$;
 
 -- stats[joueur][clé] += delta.
@@ -8549,45 +8599,114 @@ begin
   return p_state;
 end $$;
 
--- L'étoile de la case p_from déménage dans une autre Loge libre (sans étoile), tirée au sort.
+-- L'étoile de la case p_from déménage dans une autre Loge libre (sans étoile) du plateau, tirée au sort.
+-- Dédé-sur-Mer à marée haute : jamais sur une Loge du Banc de sable (la Loge du Phare est sous l'eau).
 drop function if exists public._dp_move_star(jsonb);
 create or replace function public._dp_move_star(p_state jsonb, p_from integer)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
+  v_map  text := coalesce(p_state->>'map', 'grand');
+  v_wet  jsonb := case when v_map = 'mer' and coalesce((p_state->'mech'->>'tide')::integer, 0) = 1
+                       then coalesce(public._dp_map(v_map)->'bank', '[]'::jsonb) else '[]'::jsonb end;
   v_cell integer;
 begin
   select (o - 1)::integer into v_cell
-    from jsonb_array_elements_text(public._dp_board()) with ordinality t(c, o)
+    from jsonb_array_elements_text(public._dp_board(v_map)) with ordinality t(c, o)
    where c = 'loge' and not (p_state->'star_cells') @> to_jsonb((o - 1)::integer)
+     and not v_wet @> to_jsonb((o - 1)::integer)
    order by random() limit 1;
   return jsonb_set(p_state, '{star_cells}',
-    (select jsonb_agg(case when x::integer = p_from then v_cell else x::integer end order by o)
+    (select jsonb_agg(case when x::integer = p_from then coalesce(v_cell, p_from) else x::integer end order by o)
        from jsonb_array_elements_text(p_state->'star_cells') with ordinality t(x, o)));
 end $$;
 
--- Fait marcher le pion de p_pid de p_n cases (p_dir = 1 en avant, -1 en arrière).
--- En avant : suit _dp_next() ; à un embranchement, l'aiguillage choisit puis bascule (évènement fork
--- sur la première case de la voie prise). En arrière : _dp_prev(), sans toucher aux aiguillages.
--- Applique le passage par Départ (+5, en avant seulement) et l'achat automatique d'une étoile
--- (au passage comme à l'arrêt). Renvoie {state, steps:[{cell, ev:[...]}]}.
+-- Achat automatique de l'étoile de la case p_cell (au passage comme à l'arrêt, ou à l'arrivée d'un
+-- télésiège / d'une glissade). Renvoie {state, ev} (ev : star, star_poor ou null s'il n'y a pas d'étoile).
+create or replace function public._dp_star_check(p_state jsonb, p_pid text, p_cell integer, p_exact boolean)
+returns jsonb language plpgsql
+set search_path = public, extensions
+as $$
+declare
+  c       jsonb := public._dp_const();
+  v_price integer;
+begin
+  if not (p_state->'star_cells') @> to_jsonb(p_cell) then
+    return jsonb_build_object('state', p_state, 'ev', null);
+  end if;
+  v_price := case when coalesce((p_state->'half_price'->>p_pid)::boolean, false)
+                  then (c->>'half_price')::integer else (c->>'star_price')::integer end;
+  if (p_state->'coins'->>p_pid)::integer < v_price then
+    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'star_poor', 'need', v_price));
+  end if;
+  p_state := public._dp_coins(p_state, p_pid, -v_price, 'star');
+  p_state := jsonb_set(p_state, array['stars', p_pid], to_jsonb((p_state->'stars'->>p_pid)::integer + 1));
+  p_state := jsonb_set(p_state, array['half_price', p_pid], 'false'::jsonb);
+  p_state := public._dp_stat(p_state, p_pid, 'stars_bought', 1);
+  if p_exact then p_state := public._dp_stat(p_state, p_pid, 'star_exact', 1); end if;
+  p_state := public._dp_move_star(p_state, p_cell);
+  return jsonb_build_object('state', p_state,
+    'ev', jsonb_build_object('t', 'star', 'cost', v_price, 'stars', p_state->'star_cells', 'exact', p_exact));
+end $$;
+
+-- Le Camping : p_pid croise Riton. Sac plein : Riton lâche tout (le pion empoche le sac) ; sac vide : il
+-- pique 5 pièces (ce que le pion a) ; pion sans pièce : rien. Renvoie {state, ev:{t:'riton', k, d, sack}}.
+create or replace function public._dp_riton_hit(p_state jsonb, p_pid text)
+returns jsonb language plpgsql
+set search_path = public, extensions
+as $$
+declare
+  v_sack  integer := coalesce((p_state->'mech'->>'sack')::integer, 0);
+  v_coins integer := coalesce((p_state->'coins'->>p_pid)::integer, 0);
+  v_n     integer;
+begin
+  if v_sack > 0 then
+    p_state := public._dp_coins(p_state, p_pid, v_sack, 'riton');
+    v_n := (p_state->'coins'->>p_pid)::integer - v_coins;
+    p_state := public._dp_stat(p_state, p_pid, 'loot', v_n);
+    if v_n > coalesce((p_state->'stats'->p_pid->'best_card'->>'gain')::integer, 0) then
+      p_state := jsonb_set(p_state, array['stats', p_pid, 'best_card'], jsonb_build_object('card', 'riton', 'text', 'Le sac de Riton', 'gain', v_n), true);
+    end if;
+    p_state := jsonb_set(p_state, '{mech,sack}', '0'::jsonb, true);
+    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'drop', 'd', v_n, 'sack', 0));
+  elsif v_coins > 0 then
+    v_n := least((public._dp_const()->>'riton_steal')::integer, v_coins);
+    p_state := public._dp_coins(p_state, p_pid, -v_n, 'riton');
+    p_state := jsonb_set(p_state, '{mech,sack}', to_jsonb(v_n), true);
+    p_state := public._dp_stat(p_state, p_pid, 'robbed', 1);
+    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'steal', 'd', -v_n, 'sack', v_n));
+  end if;
+  return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'none', 'd', 0, 'sack', 0));
+end $$;
+
+-- Fait marcher le pion de p_pid de p_n cases (p_dir = 1 en avant, -1 en arrière) sur le plateau de la partie.
+-- En avant : suit _dp_next(map) ; à un embranchement « toggle », l'aiguillage choisit puis bascule ; à un
+-- embranchement « tide » (mer), la voie est 1 − marée, sans bascule (évènement fork sur la première case de
+-- la voie prise). En arrière : _dp_prev(map), sans toucher aux aiguillages.
+-- Sur chaque case franchie, dans l'ordre : Départ (+5, en avant) → mécanique du plateau (péage de la
+-- Tombola en avant et sans s'y arrêter ; croisement de Riton, dans les deux sens) → étoile (au passage
+-- comme à l'arrêt). Renvoie {state, steps:[{cell, ev:[...]}]}.
 create or replace function public._dp_walk(p_state jsonb, p_pid text, p_n integer, p_dir integer)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
   c       jsonb := public._dp_const();
-  v_next  jsonb := public._dp_next();
-  v_prev  jsonb := public._dp_prev();
+  v_map   text := coalesce(p_state->>'map', 'grand');
+  v_board jsonb := public._dp_board(v_map);
+  v_next  jsonb := public._dp_next(v_map);
+  v_prev  jsonb := public._dp_prev(v_map);
+  v_modes jsonb := coalesce(public._dp_map(v_map)->'forks', '[]'::jsonb);
   v_nx    jsonb;
   v_fork  integer;
   v_way   integer;
   v_pos   integer := (p_state->'pos'->>p_pid)::integer;
   v_steps jsonb := '[]'::jsonb;
   v_ev    jsonb;
-  v_price integer;
+  v_r     jsonb;
   v_old   integer;
+  v_n     integer;
   k       integer;
 begin
   for k in 1 .. greatest(p_n, 0) loop
@@ -8601,9 +8720,14 @@ begin
         select count(*)::integer into v_fork
           from jsonb_array_elements(v_next) with ordinality t(x, o)
          where jsonb_typeof(x) = 'array' and (o - 1) < v_pos;
-        v_way := coalesce((p_state->'sw'->>v_fork)::integer, 0);
-        p_state := jsonb_set(p_state, array['sw', v_fork::text], to_jsonb(1 - v_way));
-        v_ev := v_ev || jsonb_build_object('t', 'fork', 'fork', v_fork, 'way', v_way);
+        if v_modes->>v_fork = 'tide' then
+          v_way := 1 - coalesce((p_state->'mech'->>'tide')::integer, 0);
+          v_ev := v_ev || jsonb_build_object('t', 'fork', 'fork', v_fork, 'way', v_way, 'tide', true);
+        else
+          v_way := coalesce((p_state->'sw'->>v_fork)::integer, 0);
+          p_state := jsonb_set(p_state, array['sw', v_fork::text], to_jsonb(1 - v_way));
+          v_ev := v_ev || jsonb_build_object('t', 'fork', 'fork', v_fork, 'way', v_way);
+        end if;
         v_pos := (v_nx->>v_way)::integer;
       else
         v_pos := v_nx::text::integer;
@@ -8616,21 +8740,25 @@ begin
       p_state := public._dp_coins(p_state, p_pid, (c->>'start_bonus')::integer, 'start');
       v_ev := v_ev || jsonb_build_object('t', 'start', 'd', (p_state->'coins'->>p_pid)::integer - v_old);
     end if;
-    if (p_state->'star_cells') @> to_jsonb(v_pos) then
-      v_price := case when coalesce((p_state->'half_price'->>p_pid)::boolean, false)
-                      then (c->>'half_price')::integer else (c->>'star_price')::integer end;
-      if (p_state->'coins'->>p_pid)::integer >= v_price then
-        p_state := public._dp_coins(p_state, p_pid, -v_price, 'star');
-        p_state := jsonb_set(p_state, array['stars', p_pid], to_jsonb((p_state->'stars'->>p_pid)::integer + 1));
-        p_state := jsonb_set(p_state, array['half_price', p_pid], 'false'::jsonb);
-        p_state := public._dp_stat(p_state, p_pid, 'stars_bought', 1);
-        if k = p_n then p_state := public._dp_stat(p_state, p_pid, 'star_exact', 1); end if;
-        p_state := public._dp_move_star(p_state, v_pos);
-        v_ev := v_ev || jsonb_build_object('t', 'star', 'cost', v_price, 'stars', p_state->'star_cells', 'exact', k = p_n);
-      else
-        v_ev := v_ev || jsonb_build_object('t', 'star_poor', 'need', v_price);
+    -- La Kermesse : péage de la Tombola (en avant, sans s'y arrêter ; pièces versées dans la cagnotte).
+    if v_map = 'kermesse' and p_dir > 0 and k < p_n and v_board->>v_pos = 'tombola' then
+      v_n := least((c->>'toll')::integer, coalesce((p_state->'coins'->>p_pid)::integer, 0));
+      if v_n > 0 then
+        p_state := public._dp_coins(p_state, p_pid, -v_n, 'toll');
+        p_state := public._dp_stat(p_state, p_pid, 'toll_paid', v_n);
+        p_state := jsonb_set(p_state, '{mech,pot}', to_jsonb(coalesce((p_state->'mech'->>'pot')::integer, 0) + v_n), true);
       end if;
+      v_ev := v_ev || jsonb_build_object('t', 'toll', 'd', -v_n, 'pot', (p_state->'mech'->>'pot')::integer);
     end if;
+    -- Le Camping : marcher sur la case de Riton = le croiser (avant comme arrière).
+    if v_map = 'camping' and v_pos = (p_state->'mech'->>'riton')::integer then
+      v_r := public._dp_riton_hit(p_state, p_pid);
+      p_state := v_r->'state';
+      v_ev := v_ev || (v_r->'ev');
+    end if;
+    v_r := public._dp_star_check(p_state, p_pid, v_pos, k = p_n);
+    p_state := v_r->'state';
+    if jsonb_typeof(v_r->'ev') = 'object' then v_ev := v_ev || (v_r->'ev'); end if;
     v_steps := v_steps || jsonb_build_object('cell', v_pos, 'ev', v_ev);
   end loop;
   return jsonb_build_object('state', p_state, 'steps', v_steps);
@@ -8645,15 +8773,18 @@ as $$
 $$;
 
 -- Effet de la case d'arrivée d'un lancer de dé (jamais d'une carte : pas de chaînes).
--- Renvoie {state, server, ev:[...], steps:[...] (déplacements dus à une carte, marqués card)}.
+-- Renvoie {state, server, ev:[...], steps:[...] (déplacements dus à une carte, marqués card ;
+-- saut de télésiège / verglas, marqué tp)}.
 create or replace function public._dp_land(p_state jsonb, p_server jsonb, p_pid text)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
   c        jsonb := public._dp_const();
+  v_map    text := coalesce(p_state->>'map', 'grand');
   v_cell   integer := (p_state->'pos'->>p_pid)::integer;
-  v_type   text := public._dp_board()->>v_cell;
+  v_type   text := public._dp_board(v_map)->>v_cell;
+  v_to     integer;
   v_ev     jsonb := '[]'::jsonb;
   v_steps  jsonb := '[]'::jsonb;
   v_card   text;
@@ -8677,6 +8808,33 @@ begin
     p_state := public._dp_coins(p_state, p_pid, -(c->>'pub')::integer, 'pub');
     p_state := public._dp_stat(p_state, p_pid, 'pubs', 1);
     v_ev := v_ev || jsonb_build_object('t', 'pub', 'd', (p_state->'coins'->>p_pid)::integer - v_old);
+  elsif v_type = 'tombola' then
+    -- La Kermesse : pile sur la Tombola, le gros lot (toute la cagnotte), qui repart à la mise de départ.
+    v_old := (p_state->'coins'->>p_pid)::integer;
+    p_state := public._dp_coins(p_state, p_pid, coalesce((p_state->'mech'->>'pot')::integer, (c->>'pot_seed')::integer), 'jackpot');
+    v_gain := (p_state->'coins'->>p_pid)::integer - v_old;
+    p_state := public._dp_stat(p_state, p_pid, 'jackpots', 1);
+    p_state := jsonb_set(p_state, array['stats', p_pid, 'jackpot_best'],
+      to_jsonb(greatest(v_gain, coalesce((p_state->'stats'->p_pid->>'jackpot_best')::integer, 0))), true);
+    if v_gain > coalesce((p_state->'stats'->p_pid->'best_card'->>'gain')::integer, 0) then
+      p_state := jsonb_set(p_state, array['stats', p_pid, 'best_card'], jsonb_build_object('card', 'jackpot', 'text', 'Gros lot de la Tombola', 'gain', v_gain), true);
+    end if;
+    p_state := jsonb_set(p_state, '{mech,pot}', c->'pot_seed', true);
+    v_ev := v_ev || jsonb_build_object('t', 'jackpot', 'd', v_gain, 'pot', (c->>'pot_seed')::integer);
+  elsif v_type in ('lift', 'ice') then
+    -- Dédé 2000 : pile sur un télésiège (on monte) ou une plaque de verglas (on glisse). Saut sans case
+    -- franchie : pas d'effet de la case d'arrivée, mais l'étoile s'achète si elle y est (pile dessus).
+    v_to := (public._dp_map(v_map)->'tp'->>(v_cell::text))::integer;
+    if v_to is not null then
+      p_state := jsonb_set(p_state, array['pos', p_pid], to_jsonb(v_to));
+      p_state := jsonb_set(p_state, array['dist', p_pid], to_jsonb(coalesce((p_state->'dist'->>p_pid)::integer, 0) + v_to - v_cell));
+      p_state := public._dp_stat(p_state, p_pid, case when v_type = 'lift' then 'lifts' else 'slides' end, 1);
+      v_cev := jsonb_build_array(jsonb_build_object('t', 'tp', 'k', v_type, 'from', v_cell, 'to', v_to));
+      v_tmp := public._dp_star_check(p_state, p_pid, v_to, true);
+      p_state := v_tmp->'state';
+      if jsonb_typeof(v_tmp->'ev') = 'object' then v_cev := v_cev || (v_tmp->'ev'); end if;
+      v_steps := jsonb_build_array(jsonb_build_object('cell', v_to, 'tp', v_type, 'ev', v_cev));
+    end if;
   elsif v_type = 'env' then
     select d.p_server, d.card into p_server, v_card from public._dp_draw(p_server) d;
     select x->>'text' into v_text from jsonb_array_elements(public._dp_cards()) x where x->>'id' = v_card;
@@ -8786,6 +8944,7 @@ begin
     'moves', '[]'::jsonb,
     'moves_at', null,
     'before', null,
+    'epi', null,
     'deadline', now() + make_interval(secs => (public._dp_const()->>'roll_s')::integer));
 end $$;
 
@@ -8811,8 +8970,93 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Résout tout le tour : chaque pion, dans l'ordre de passage, avance, puis effet de sa case.
--- Le scénario (moves) est publié pour l'animation ; chaque entrée porte l'instantané `after`.
+-- Épilogue du tour (après le dernier pion) : l'évènement du plateau, publié dans state.epi (null s'il n'y a
+-- rien à montrer). Renvoie {state, server}.
+--   mer     : la marée (cycle 2 tours basse / 1 tour haute). Quand elle monte, les pions du Banc de sable
+--             sont emportés (ordre de passage) en wash_to, −5 pièces ; une étoile du Banc déménage.
+--             Épilogue seulement les tours où la marée change : {t:'tide', tide, washed:[{id, from, d}], stars?, after}.
+--   camping : la ronde de Riton (1 dé, à contresens, après tous les dés du tour), à chaque tour ; chaque pion
+--             posé sur une case où il arrive est croisé (ordre des cases, puis ordre de passage) :
+--             {t:'riton', die, from, path, hits:[{id, cell, k, d, sack}], after}.
+create or replace function public._dp_epilogue(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql
+set search_path = public, extensions
+as $$
+declare
+  c       jsonb := public._dp_const();
+  v_map   text := coalesce(p_state->>'map', 'grand');
+  v_fiche jsonb := public._dp_map(v_map);
+  v_epi   jsonb := null;
+  v_tide  integer;
+  v_in    integer;
+  v_list  jsonb := '[]'::jsonb;
+  v_path  jsonb := '[]'::jsonb;
+  v_moved boolean := false;
+  v_cell  integer;
+  v_from  integer;
+  v_die   integer;
+  v_old   integer;
+  v_end   integer;
+  v_r     jsonb;
+  pl      text;
+  k       integer;
+begin
+  if v_map = 'mer' then
+    v_tide := coalesce((p_state->'mech'->>'tide')::integer, 0);
+    v_in := coalesce((p_state->'mech'->>'tide_in')::integer, 1) - 1;
+    if v_in > 0 then
+      p_state := jsonb_set(p_state, '{mech}', jsonb_build_object('tide', v_tide, 'tide_in', v_in));
+    elsif v_tide = 0 then
+      -- La mer monte : le Banc se ferme, la vague emporte les traînards.
+      p_state := p_state || jsonb_build_object('mech', jsonb_build_object('tide', 1, 'tide_in', (c->>'tide_high')::integer), 'sw', '[0]'::jsonb);
+      select max(x::integer) + 1 into v_end from jsonb_array_elements_text(v_fiche->'bank') x;
+      for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
+        v_cell := (p_state->'pos'->>pl)::integer;
+        if (v_fiche->'bank') @> to_jsonb(v_cell) then
+          v_old := (p_state->'coins'->>pl)::integer;
+          p_state := public._dp_coins(p_state, pl, -(c->>'wash')::integer, 'wash');
+          p_state := jsonb_set(p_state, array['pos', pl], v_fiche->'wash_to');
+          p_state := jsonb_set(p_state, array['dist', pl], to_jsonb(coalesce((p_state->'dist'->>pl)::integer, 0) + v_end - v_cell));
+          p_state := public._dp_stat(p_state, pl, 'washed', 1);
+          v_list := v_list || jsonb_build_object('id', pl, 'from', v_cell, 'd', (p_state->'coins'->>pl)::integer - v_old);
+        end if;
+      end loop;
+      for v_cell in select x::integer from jsonb_array_elements_text(p_state->'star_cells') x where (v_fiche->'bank') @> to_jsonb(x::integer) loop
+        p_state := public._dp_move_star(p_state, v_cell);
+        v_moved := true;
+      end loop;
+      v_epi := jsonb_build_object('t', 'tide', 'tide', 1, 'washed', v_list);
+      if v_moved then v_epi := v_epi || jsonb_build_object('stars', p_state->'star_cells'); end if;
+    else
+      -- La mer redescend : le Banc rouvre.
+      p_state := p_state || jsonb_build_object('mech', jsonb_build_object('tide', 0, 'tide_in', (c->>'tide_low')::integer), 'sw', '[1]'::jsonb);
+      v_epi := jsonb_build_object('t', 'tide', 'tide', 0, 'washed', '[]'::jsonb);
+    end if;
+  elsif v_map = 'camping' then
+    select d.p_server, d.v into p_server, v_die from public._dp_die(p_server) d;
+    v_from := coalesce((p_state->'mech'->>'riton')::integer, (v_fiche->>'riton_start')::integer);
+    v_cell := v_from;
+    for k in 1 .. v_die loop
+      v_cell := (public._dp_prev(v_map)->>v_cell)::integer;
+      v_path := v_path || to_jsonb(v_cell);
+      p_state := jsonb_set(p_state, '{mech,riton}', to_jsonb(v_cell), true);
+      for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
+        if (p_state->'pos'->>pl)::integer = v_cell then
+          v_r := public._dp_riton_hit(p_state, pl);
+          p_state := v_r->'state';
+          v_list := v_list || (((v_r->'ev') - 't') || jsonb_build_object('id', pl, 'cell', v_cell));
+        end if;
+      end loop;
+    end loop;
+    v_epi := jsonb_build_object('t', 'riton', 'die', v_die, 'from', v_from, 'path', v_path, 'hits', v_list);
+  end if;
+  if v_epi is not null then v_epi := v_epi || jsonb_build_object('after', public._dp_snap(p_state)); end if;
+  return jsonb_build_object('state', p_state || jsonb_build_object('epi', v_epi), 'server', p_server);
+end $$;
+
+-- Résout tout le tour : chaque pion, dans l'ordre de passage, avance, puis effet de sa case ; puis
+-- l'épilogue du plateau. Le scénario (moves) est publié pour l'animation ; chaque entrée porte
+-- l'instantané `after` ; l'épilogue (state.epi) le sien.
 create or replace function public._dp_resolve(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql
 set search_path = public, extensions
@@ -8861,12 +9105,16 @@ begin
       'from', v_from, 'to', p_state->'pos'->pl, 'steps', v_steps, 'after', public._dp_snap(p_state));
   end loop;
 
+  v_r := public._dp_epilogue(p_state, p_server);
+  p_state := v_r->'state';
+  p_server := v_r->'server';
   p_state := p_state || jsonb_build_object(
     'phase', 'move',
     'moves', v_moves,
     'before', v_before,
     'moves_at', now(),
-    'deadline', now() + make_interval(secs => 2 + v_n * (public._dp_const()->>'move_s')::integer));
+    'deadline', now() + make_interval(secs => 2 + v_n * (public._dp_const()->>'move_s')::integer
+                                       + case when jsonb_typeof(p_state->'epi') = 'object' then (public._dp_const()->>'epi_s')::integer else 0 end));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -9231,7 +9479,17 @@ begin
     'star_exact', coalesce((s->>'star_exact')::integer, 0),
     'mg_wins', coalesce((s->>'mg_wins')::integer, 0),
     'mg_streak', coalesce((s->>'mg_streak_max')::integer, 0),
-    'win_mvp', case when p_won and v_king then 1 else 0 end);
+    'win_mvp', case when p_won and v_king then 1 else 0 end,
+    -- Compteurs des plateaux (enregistrés pour de futurs trophées ; 0 si le plateau ne s'en sert pas).
+    'washed', coalesce((s->>'washed')::integer, 0),
+    'toll_paid', coalesce((s->>'toll_paid')::integer, 0),
+    'jackpots', coalesce((s->>'jackpots')::integer, 0),
+    'jackpot_best', coalesce((s->>'jackpot_best')::integer, 0),
+    'robbed', coalesce((s->>'robbed')::integer, 0),
+    'loot', coalesce((s->>'loot')::integer, 0),
+    'lifts', coalesce((s->>'lifts')::integer, 0),
+    'slides', coalesce((s->>'slides')::integer, 0),
+    'map_no', coalesce((public._dp_map(coalesce(p_state->>'map', 'grand'))->>'no')::integer, 1));
 end $$;
 
 -- Fin de partie : placement = rang (étoiles puis pièces), points = n − rang + 1, won = rang 1.
@@ -9283,8 +9541,10 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Options : {"rounds": 6|9|12 (défaut 9), "quiz": [{prompt, answer, distractors[3]}],
---            "pif": [{prompt, answer, unit?}], "majorite": ["Qui de nous… ?"]} (tirées par le front).
+-- Options : {"rounds": 6|9|12 (défaut 9), "map": "grand"|"mer"|"kermesse"|"camping"|"ski" (absent ou
+--            inconnu : tirage parmi les 5 ; le front résout « Au hasard » lui-même),
+--            "quiz": [{prompt, answer, distractors[3]}], "pif": [{prompt, answer, unit?}],
+--            "majorite": ["Qui de nous… ?"]} (questions tirées par le front).
 create or replace function public.game_dede_party_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -9292,6 +9552,10 @@ as $$
 declare
   c        jsonb := public._dp_const();
   v_rounds integer;
+  v_map    text;
+  v_mech   jsonb := '{}'::jsonb;
+  v_sw     jsonb := '[]'::jsonb;
+  v_wet    jsonb := '[]'::jsonb;
   v_quiz   jsonb;
   v_pif    jsonb;
   v_maj    jsonb;
@@ -9305,6 +9569,22 @@ begin
 
   v_rounds := case when coalesce(p_options->>'rounds', '') ~ '^\d{1,2}$' then (p_options->>'rounds')::integer else 9 end;
   if v_rounds not in (6, 9, 12) then v_rounds := 9; end if;
+
+  -- Plateau : celui demandé, sinon tiré au sort parmi les 5. État initial de sa mécanique.
+  v_map := case when jsonb_typeof(p_options->'map') = 'string' and public._dp_maps() ? (p_options->>'map')
+                then p_options->>'map' else public._dp_maps()->>floor(random() * 5)::integer end;
+  if v_map = 'grand' then
+    v_sw := jsonb_build_array(floor(random() * 2)::integer, floor(random() * 2)::integer);
+  elsif v_map = 'mer' then
+    -- Phase de la marée tirée parmi 3 (sinon tout le monde se fait rincer au même tour à chaque partie).
+    v_mech := (array['{"tide":0,"tide_in":2}', '{"tide":0,"tide_in":1}', '{"tide":1,"tide_in":1}'])[1 + floor(random() * 3)::integer]::jsonb;
+    v_sw := jsonb_build_array(1 - (v_mech->>'tide')::integer);
+    if (v_mech->>'tide')::integer = 1 then v_wet := public._dp_map('mer')->'bank'; end if;
+  elsif v_map = 'kermesse' then
+    v_mech := jsonb_build_object('pot', (c->>'pot_seed')::integer);
+  elsif v_map = 'camping' then
+    v_mech := jsonb_build_object('riton', (public._dp_map('camping')->>'riton_start')::integer, 'sack', 0);
+  end if;
 
   -- Questions : on ne garde que les entrées bien formées.
   select coalesce(jsonb_agg(jsonb_build_object('prompt', q->'prompt', 'answer', q->'answer',
@@ -9323,10 +9603,10 @@ begin
    where jsonb_typeof(q) = 'string';
 
   select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
-  -- 1 à 3 étoiles en jeu selon le nombre de joueurs, chacune sur sa Loge.
+  -- 1 à 3 étoiles en jeu selon le nombre de joueurs, chacune sur sa Loge du plateau (jamais sous l'eau).
   select jsonb_agg(i order by i) into v_star
-    from (select (o - 1)::integer i from jsonb_array_elements_text(public._dp_board()) with ordinality t(x, o)
-           where x = 'loge' order by random()
+    from (select (o - 1)::integer i from jsonb_array_elements_text(public._dp_board(v_map)) with ordinality t(x, o)
+           where x = 'loge' and not v_wet @> to_jsonb((o - 1)::integer) order by random()
            limit (c->'star_count'->>(cardinality(p_players) - 2))::integer) z;
   select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
 
@@ -9343,7 +9623,11 @@ begin
     'coins', (select jsonb_object_agg(p::text, (c->>'start_coins')::integer) from unnest(p_players) p),
     'stars', v_zero,
     'star_cells', v_star,
-    'sw', jsonb_build_array(floor(random() * 2)::integer, floor(random() * 2)::integer),
+    'map', v_map,
+    'mech', v_mech,
+    -- Un aiguillage par embranchement du plateau (mer : tenu par la marée, 1 − tide).
+    'sw', v_sw,
+    'epi', null,
     -- Promo de bienvenue : la première étoile de chacun est à moitié prix.
     'half_price', (select jsonb_object_agg(p::text, true) from unnest(p_players) p),
     'double_left', (select jsonb_object_agg(p::text, 1) from unnest(p_players) p),
@@ -9358,7 +9642,7 @@ begin
     'winners', null,
     'results', null,
     'forced', false,
-    'stats', (select jsonb_object_agg(p::text, '{"pubs":0,"broke":0,"coins_earned":0,"envelopes":0,"star_exact":0,"stars_bought":0,"mg_wins":0,"mg_streak":0,"mg_streak_max":0,"doubles":0}'::jsonb) from unnest(p_players) p),
+    'stats', (select jsonb_object_agg(p::text, '{"pubs":0,"broke":0,"coins_earned":0,"envelopes":0,"star_exact":0,"stars_bought":0,"mg_wins":0,"mg_streak":0,"mg_streak_max":0,"doubles":0,"washed":0,"toll_paid":0,"jackpots":0,"jackpot_best":0,"robbed":0,"loot":0,"lifts":0,"slides":0}'::jsonb) from unnest(p_players) p),
     'deadline', now() + make_interval(secs => (c->>'intro_s')::integer));
 
   return jsonb_build_object(
@@ -9447,9 +9731,14 @@ begin
 end $$;
 
 revoke all on function public._dp_const() from public, anon, authenticated;
-revoke all on function public._dp_board() from public, anon, authenticated;
-revoke all on function public._dp_next() from public, anon, authenticated;
-revoke all on function public._dp_prev() from public, anon, authenticated;
+revoke all on function public._dp_maps() from public, anon, authenticated;
+revoke all on function public._dp_board(text) from public, anon, authenticated;
+revoke all on function public._dp_next(text) from public, anon, authenticated;
+revoke all on function public._dp_prev(text) from public, anon, authenticated;
+revoke all on function public._dp_map(text) from public, anon, authenticated;
+revoke all on function public._dp_star_check(jsonb, text, integer, boolean) from public, anon, authenticated;
+revoke all on function public._dp_riton_hit(jsonb, text) from public, anon, authenticated;
+revoke all on function public._dp_epilogue(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dp_cards() from public, anon, authenticated;
 revoke all on function public._dp_kinds() from public, anon, authenticated;
 revoke all on function public._dp_die(jsonb) from public, anon, authenticated;
@@ -13510,7 +13799,7 @@ revoke all on function public.game_menteur_action(jsonb, jsonb, uuid, boolean, j
 
 -- ===== games\mini-golf.sql =====
 -- =============================================================================
--- JEU « mini-golf » (Mini-golf 3D, « La Kermesse du village ») — idempotent.
+-- JEU « mini-golf » (Mini-golf 3D, 20 trous de kermesse + 9 trous « Défi ») — idempotent.
 -- Dépend de schema.sql (game_action, start_match, finish_match).
 -- Conception : docs/superpowers/specs/2026-11-19-mini-golf-design.md.
 --
@@ -13518,27 +13807,44 @@ revoke all on function public.game_menteur_action(jsonb, jsonb, uuid, boolean, j
 -- (physique 3D côté client, positions diffusées en broadcast `golf:<matchId>`, jamais
 -- en base). Le serveur ne reçoit qu'UNE écriture par joueur et par trou :
 --   {"type":"hole","hole":h,"strokes":n,"holed":true|false,"stats":{water,mill_hits,bank_shot}}
--- h = index (0-based) du trou dans state.holes. Rentrée : 1 ≤ n ≤ 6 ; non rentrée (6 coups
--- joués) : score 7. Temps minimum (anti-triche minimal) : (n − balles à l'eau) × 1,5 s depuis
+-- h = index (0-based) du trou dans state.holes. Rentrée : 1 ≤ n ≤ cap (6, ou par + 2) ; non rentrée
+-- (cap coups joués) : score cap + 1. Temps minimum (anti-triche minimal) : (n − balles à l'eau) × 1,5 s depuis
 -- hole_started_at (fin de l'annonce du trou). Doublon : ignoré sans erreur.
+--
+-- Parcours (option course) : « kermesse » = trous 1..9 dans l'ordre ; « random » (défaut) = 9 trous tirés au
+-- sort parmi les 20 premiers ; « express » = 5 trous tirés au sort parmi les 20 ; « defi » = trous 21..29 dans
+-- l'ordre (longs trous, pars 4 à 6 : jamais tirés au sort).
+-- Coups max sur un trou : _mg_cap(par) = max(6, par + 2) ; balle non rentrée : _mg_picked(par) = cap + 1
+-- (7 sur un par 2 à 4, 8 sur un par 5, 9 sur un par 6). Tirage côté serveur, trié par par croissant
+-- (ordre aléatoire entre trous de même par) : on commence par les plus faciles, on finit sur un par 4.
 --
 -- Phases : playing (trou h, chrono `timer` s, 0 = sans chrono) -> hole_end (6 s, classement
 -- provisoire) -> playing (trou h+1) ... ; au dernier trou : finished directement.
 -- Trou terminé : tous ont fini, échéance du chrono (absents = 7), ou `next` de l'hôte.
 -- =============================================================================
 
--- Parcours « La Kermesse du village » : par de chaque trou (ids 1..9) et parcours express.
+-- Les 29 trous : par de chaque trou (pars[id - 1]), parcours « La Kermesse du village » (1..9), « Défi » (21..29),
+-- et pool = les ids 1..pool sont tirés au sort (aléatoire, express).
 -- Dupliqué avec src/games/mini-golf/holes.ts (synchro vérifiée par tools/sql-tests/mini-golf.mjs).
 create or replace function public._mg_course()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '{"pars":[2,2,3,3,3,3,3,3,4],"express":[1,3,5,8,9]}'::jsonb $$;
+as $$ select '{"pars":[2,2,3,3,3,3,3,3,4,3,3,3,2,3,4,3,3,3,3,3,4,4,6,4,4,4,4,4,5],"kermesse":[1,2,3,4,5,6,7,8,9],"defi":[21,22,23,24,25,26,27,28,29],"pool":20}'::jsonb $$;
 
--- Score d'un trou non rentré (balle ramassée, chrono écoulé, fin forcée).
-create or replace function public._mg_max_score()
+-- Ancienne constante (score 7 partout), remplacée par _mg_picked(par).
+drop function if exists public._mg_max_score();
+
+-- Coups max sur un trou de par p_par (dupliqué : maxStrokes() de holes.ts).
+create or replace function public._mg_cap(p_par integer)
 returns integer language sql immutable
 set search_path = public, extensions
-as $$ select 7 $$;
+as $$ select greatest(6, coalesce(p_par, 3) + 2) $$;
+
+-- Score d'un trou non rentré (balle ramassée, chrono écoulé, fin forcée) : coups max + 1 (pickedUp() de holes.ts).
+create or replace function public._mg_picked(p_par integer)
+returns integer language sql immutable
+set search_path = public, extensions
+as $$ select public._mg_cap(p_par) + 1 $$;
 
 -- Ouvre le trou n° p_idx (index dans state.holes) : 3 s d'annonce puis chrono.
 create or replace function public._mg_open_hole(p_state jsonb, p_idx integer)
@@ -13579,7 +13885,7 @@ declare
 begin
   -- La carte d'un joueur a exactement `hole` cases avant l'écriture (trous précédents tous clos).
   while jsonb_array_length(v_card) < v_h loop
-    v_card := v_card || to_jsonb(public._mg_max_score());
+    v_card := v_card || to_jsonb(public._mg_picked((p_state->'pars'->>jsonb_array_length(v_card))::integer));
   end loop;
   v_card := (select coalesce(jsonb_agg(e order by i), '[]'::jsonb)
                from jsonb_array_elements(v_card) with ordinality t(e, i) where i <= v_h)
@@ -13677,7 +13983,7 @@ declare
 begin
   for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
     if not ((p_state->'done') ? pl) then
-      p_state := public._mg_record(p_state, pl, public._mg_max_score());
+      p_state := public._mg_record(p_state, pl, public._mg_picked((p_state->'pars'->>((p_state->>'hole')::integer))::integer));
     end if;
   end loop;
   if (p_state->>'hole')::integer >= jsonb_array_length(p_state->'holes') - 1 then
@@ -13687,13 +13993,15 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Options : {"holes": 9|5 (5 = parcours express 1,3,5,8,9), "timer": 60|90|0 secondes par trou (0 = sans chrono)}
+-- Options : {"course": "random"|"kermesse"|"express"|"defi", "timer": 60|90|0 secondes par trou (0 = sans chrono)}.
+-- Anciennes options (sans course) : {"holes": 9} = kermesse, {"holes": 5} = express ; sinon aléatoire 9 trous.
 create or replace function public.game_mini_golf_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
   v_course jsonb := public._mg_course();
+  v_mode   text;
   v_count  integer;
   v_timer  integer;
   v_holes  jsonb;
@@ -13706,13 +14014,24 @@ begin
   if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
 
-  v_count := case when coalesce(p_options->>'holes', '') ~ '^\d{1,2}$' then (p_options->>'holes')::integer else 9 end;
-  if v_count not in (5, 9) then v_count := 9; end if;
+  v_mode := case when p_options->>'course' in ('random', 'kermesse', 'express', 'defi') then p_options->>'course'
+                 when p_options->'course' is null and p_options->>'holes' = '9' then 'kermesse'
+                 when p_options->'course' is null and p_options->>'holes' = '5' then 'express'
+                 else 'random' end;
   v_timer := case when coalesce(p_options->>'timer', '') ~ '^\d{1,3}$' then (p_options->>'timer')::integer else 90 end;
   if v_timer not in (0, 60, 90) then v_timer := 90; end if;
 
-  v_holes := case when v_count = 5 then v_course->'express'
-                  else (select jsonb_agg(i) from generate_series(1, 9) i) end;
+  if v_mode in ('kermesse', 'defi') then
+    v_holes := v_course->v_mode;
+  else
+    -- Tirage sans remise parmi les ids 1..pool (20), puis tri par par croissant (hasard entre pars égaux).
+    v_count := case when v_mode = 'express' then 5 else 9 end;
+    select jsonb_agg(d.id order by d.par, random()) into v_holes
+      from (select o::integer as id, p::integer as par
+              from jsonb_array_elements_text(v_course->'pars') with ordinality t(p, o)
+             where o <= (v_course->>'pool')::integer
+             order by random() limit v_count) d;
+  end if;
   select jsonb_agg(v_course->'pars'->((h::integer) - 1) order by o) into v_pars
     from jsonb_array_elements_text(v_holes) with ordinality t(h, o);
   select jsonb_object_agg(p::text, '[]'::jsonb), jsonb_object_agg(p::text, 0) into v_empty, v_zero from unnest(p_players) p;
@@ -13720,6 +14039,7 @@ begin
   v_state := jsonb_build_object(
     'game', 'mini-golf',
     'players', to_jsonb(p_players),
+    'course', v_mode,
     'holes', v_holes,
     'pars', v_pars,
     'total_rounds', jsonb_array_length(v_holes),
@@ -13747,6 +14067,7 @@ declare
   v_hole    integer := (p_state->>'hole')::integer;
   v_n       integer := jsonb_array_length(p_state->'holes');
   v_strokes integer;
+  v_cap     integer;
   v_holed   boolean;
   v_score   integer;
   v_water   integer;
@@ -13775,7 +14096,8 @@ begin
       raise exception 'invalid_strokes';
     end if;
     v_strokes := (p_action->>'strokes')::integer;
-    if v_strokes < 1 or v_strokes > (case when v_holed then 6 else 7 end) then raise exception 'invalid_strokes'; end if;
+    v_cap := public._mg_cap((p_state->'pars'->>v_hole)::integer);
+    if v_strokes < 1 or v_strokes > (case when v_holed then v_cap else v_cap + 1 end) then raise exception 'invalid_strokes'; end if;
 
     -- Compteurs de trophées déclarés par le client, bornés.
     v_st := case when jsonb_typeof(p_action->'stats') = 'object' then p_action->'stats' else '{}'::jsonb end;
@@ -13794,7 +14116,7 @@ begin
       raise exception 'too_fast';
     end if;
 
-    v_score := case when v_holed then v_strokes else public._mg_max_score() end;
+    v_score := case when v_holed then v_strokes else v_cap + 1 end;
     p_state := public._mg_record(p_state, v_me, v_score);
     p_state := p_state || jsonb_build_object('last_hole', jsonb_build_object(
       'id', v_me, 'hole', v_hole, 'strokes', v_score, 'holed', v_holed, 'at', now()));
@@ -13835,7 +14157,7 @@ begin
     loop
       for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
         if not ((p_state->'done') ? pl) then
-          p_state := public._mg_record(p_state, pl, public._mg_max_score());
+          p_state := public._mg_record(p_state, pl, public._mg_picked((p_state->'pars'->>((p_state->>'hole')::integer))::integer));
         end if;
       end loop;
       i := (p_state->>'hole')::integer;
@@ -13850,7 +14172,8 @@ begin
 end $$;
 
 revoke all on function public._mg_course() from public, anon, authenticated;
-revoke all on function public._mg_max_score() from public, anon, authenticated;
+revoke all on function public._mg_cap(integer) from public, anon, authenticated;
+revoke all on function public._mg_picked(integer) from public, anon, authenticated;
 revoke all on function public._mg_open_hole(jsonb, integer) from public, anon, authenticated;
 revoke all on function public._mg_bump(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._mg_record(jsonb, text, integer) from public, anon, authenticated;

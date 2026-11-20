@@ -1,5 +1,5 @@
 -- =============================================================================
--- JEU « mini-golf » (Mini-golf 3D, « La Kermesse du village ») — idempotent.
+-- JEU « mini-golf » (Mini-golf 3D, 20 trous de kermesse + 9 trous « Défi ») — idempotent.
 -- Dépend de schema.sql (game_action, start_match, finish_match).
 -- Conception : docs/superpowers/specs/2026-11-19-mini-golf-design.md.
 --
@@ -7,27 +7,44 @@
 -- (physique 3D côté client, positions diffusées en broadcast `golf:<matchId>`, jamais
 -- en base). Le serveur ne reçoit qu'UNE écriture par joueur et par trou :
 --   {"type":"hole","hole":h,"strokes":n,"holed":true|false,"stats":{water,mill_hits,bank_shot}}
--- h = index (0-based) du trou dans state.holes. Rentrée : 1 ≤ n ≤ 6 ; non rentrée (6 coups
--- joués) : score 7. Temps minimum (anti-triche minimal) : (n − balles à l'eau) × 1,5 s depuis
+-- h = index (0-based) du trou dans state.holes. Rentrée : 1 ≤ n ≤ cap (6, ou par + 2) ; non rentrée
+-- (cap coups joués) : score cap + 1. Temps minimum (anti-triche minimal) : (n − balles à l'eau) × 1,5 s depuis
 -- hole_started_at (fin de l'annonce du trou). Doublon : ignoré sans erreur.
+--
+-- Parcours (option course) : « kermesse » = trous 1..9 dans l'ordre ; « random » (défaut) = 9 trous tirés au
+-- sort parmi les 20 premiers ; « express » = 5 trous tirés au sort parmi les 20 ; « defi » = trous 21..29 dans
+-- l'ordre (longs trous, pars 4 à 6 : jamais tirés au sort).
+-- Coups max sur un trou : _mg_cap(par) = max(6, par + 2) ; balle non rentrée : _mg_picked(par) = cap + 1
+-- (7 sur un par 2 à 4, 8 sur un par 5, 9 sur un par 6). Tirage côté serveur, trié par par croissant
+-- (ordre aléatoire entre trous de même par) : on commence par les plus faciles, on finit sur un par 4.
 --
 -- Phases : playing (trou h, chrono `timer` s, 0 = sans chrono) -> hole_end (6 s, classement
 -- provisoire) -> playing (trou h+1) ... ; au dernier trou : finished directement.
 -- Trou terminé : tous ont fini, échéance du chrono (absents = 7), ou `next` de l'hôte.
 -- =============================================================================
 
--- Parcours « La Kermesse du village » : par de chaque trou (ids 1..9) et parcours express.
+-- Les 29 trous : par de chaque trou (pars[id - 1]), parcours « La Kermesse du village » (1..9), « Défi » (21..29),
+-- et pool = les ids 1..pool sont tirés au sort (aléatoire, express).
 -- Dupliqué avec src/games/mini-golf/holes.ts (synchro vérifiée par tools/sql-tests/mini-golf.mjs).
 create or replace function public._mg_course()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '{"pars":[2,2,3,3,3,3,3,3,4],"express":[1,3,5,8,9]}'::jsonb $$;
+as $$ select '{"pars":[2,2,3,3,3,3,3,3,4,3,3,3,2,3,4,3,3,3,3,3,4,4,6,4,4,4,4,4,5],"kermesse":[1,2,3,4,5,6,7,8,9],"defi":[21,22,23,24,25,26,27,28,29],"pool":20}'::jsonb $$;
 
--- Score d'un trou non rentré (balle ramassée, chrono écoulé, fin forcée).
-create or replace function public._mg_max_score()
+-- Ancienne constante (score 7 partout), remplacée par _mg_picked(par).
+drop function if exists public._mg_max_score();
+
+-- Coups max sur un trou de par p_par (dupliqué : maxStrokes() de holes.ts).
+create or replace function public._mg_cap(p_par integer)
 returns integer language sql immutable
 set search_path = public, extensions
-as $$ select 7 $$;
+as $$ select greatest(6, coalesce(p_par, 3) + 2) $$;
+
+-- Score d'un trou non rentré (balle ramassée, chrono écoulé, fin forcée) : coups max + 1 (pickedUp() de holes.ts).
+create or replace function public._mg_picked(p_par integer)
+returns integer language sql immutable
+set search_path = public, extensions
+as $$ select public._mg_cap(p_par) + 1 $$;
 
 -- Ouvre le trou n° p_idx (index dans state.holes) : 3 s d'annonce puis chrono.
 create or replace function public._mg_open_hole(p_state jsonb, p_idx integer)
@@ -68,7 +85,7 @@ declare
 begin
   -- La carte d'un joueur a exactement `hole` cases avant l'écriture (trous précédents tous clos).
   while jsonb_array_length(v_card) < v_h loop
-    v_card := v_card || to_jsonb(public._mg_max_score());
+    v_card := v_card || to_jsonb(public._mg_picked((p_state->'pars'->>jsonb_array_length(v_card))::integer));
   end loop;
   v_card := (select coalesce(jsonb_agg(e order by i), '[]'::jsonb)
                from jsonb_array_elements(v_card) with ordinality t(e, i) where i <= v_h)
@@ -166,7 +183,7 @@ declare
 begin
   for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
     if not ((p_state->'done') ? pl) then
-      p_state := public._mg_record(p_state, pl, public._mg_max_score());
+      p_state := public._mg_record(p_state, pl, public._mg_picked((p_state->'pars'->>((p_state->>'hole')::integer))::integer));
     end if;
   end loop;
   if (p_state->>'hole')::integer >= jsonb_array_length(p_state->'holes') - 1 then
@@ -176,13 +193,15 @@ begin
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
--- Options : {"holes": 9|5 (5 = parcours express 1,3,5,8,9), "timer": 60|90|0 secondes par trou (0 = sans chrono)}
+-- Options : {"course": "random"|"kermesse"|"express"|"defi", "timer": 60|90|0 secondes par trou (0 = sans chrono)}.
+-- Anciennes options (sans course) : {"holes": 9} = kermesse, {"holes": 5} = express ; sinon aléatoire 9 trous.
 create or replace function public.game_mini_golf_start(p_players uuid[], p_options jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
   v_course jsonb := public._mg_course();
+  v_mode   text;
   v_count  integer;
   v_timer  integer;
   v_holes  jsonb;
@@ -195,13 +214,24 @@ begin
   if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
 
-  v_count := case when coalesce(p_options->>'holes', '') ~ '^\d{1,2}$' then (p_options->>'holes')::integer else 9 end;
-  if v_count not in (5, 9) then v_count := 9; end if;
+  v_mode := case when p_options->>'course' in ('random', 'kermesse', 'express', 'defi') then p_options->>'course'
+                 when p_options->'course' is null and p_options->>'holes' = '9' then 'kermesse'
+                 when p_options->'course' is null and p_options->>'holes' = '5' then 'express'
+                 else 'random' end;
   v_timer := case when coalesce(p_options->>'timer', '') ~ '^\d{1,3}$' then (p_options->>'timer')::integer else 90 end;
   if v_timer not in (0, 60, 90) then v_timer := 90; end if;
 
-  v_holes := case when v_count = 5 then v_course->'express'
-                  else (select jsonb_agg(i) from generate_series(1, 9) i) end;
+  if v_mode in ('kermesse', 'defi') then
+    v_holes := v_course->v_mode;
+  else
+    -- Tirage sans remise parmi les ids 1..pool (20), puis tri par par croissant (hasard entre pars égaux).
+    v_count := case when v_mode = 'express' then 5 else 9 end;
+    select jsonb_agg(d.id order by d.par, random()) into v_holes
+      from (select o::integer as id, p::integer as par
+              from jsonb_array_elements_text(v_course->'pars') with ordinality t(p, o)
+             where o <= (v_course->>'pool')::integer
+             order by random() limit v_count) d;
+  end if;
   select jsonb_agg(v_course->'pars'->((h::integer) - 1) order by o) into v_pars
     from jsonb_array_elements_text(v_holes) with ordinality t(h, o);
   select jsonb_object_agg(p::text, '[]'::jsonb), jsonb_object_agg(p::text, 0) into v_empty, v_zero from unnest(p_players) p;
@@ -209,6 +239,7 @@ begin
   v_state := jsonb_build_object(
     'game', 'mini-golf',
     'players', to_jsonb(p_players),
+    'course', v_mode,
     'holes', v_holes,
     'pars', v_pars,
     'total_rounds', jsonb_array_length(v_holes),
@@ -236,6 +267,7 @@ declare
   v_hole    integer := (p_state->>'hole')::integer;
   v_n       integer := jsonb_array_length(p_state->'holes');
   v_strokes integer;
+  v_cap     integer;
   v_holed   boolean;
   v_score   integer;
   v_water   integer;
@@ -264,7 +296,8 @@ begin
       raise exception 'invalid_strokes';
     end if;
     v_strokes := (p_action->>'strokes')::integer;
-    if v_strokes < 1 or v_strokes > (case when v_holed then 6 else 7 end) then raise exception 'invalid_strokes'; end if;
+    v_cap := public._mg_cap((p_state->'pars'->>v_hole)::integer);
+    if v_strokes < 1 or v_strokes > (case when v_holed then v_cap else v_cap + 1 end) then raise exception 'invalid_strokes'; end if;
 
     -- Compteurs de trophées déclarés par le client, bornés.
     v_st := case when jsonb_typeof(p_action->'stats') = 'object' then p_action->'stats' else '{}'::jsonb end;
@@ -283,7 +316,7 @@ begin
       raise exception 'too_fast';
     end if;
 
-    v_score := case when v_holed then v_strokes else public._mg_max_score() end;
+    v_score := case when v_holed then v_strokes else v_cap + 1 end;
     p_state := public._mg_record(p_state, v_me, v_score);
     p_state := p_state || jsonb_build_object('last_hole', jsonb_build_object(
       'id', v_me, 'hole', v_hole, 'strokes', v_score, 'holed', v_holed, 'at', now()));
@@ -324,7 +357,7 @@ begin
     loop
       for pl in select x from jsonb_array_elements_text(p_state->'players') x loop
         if not ((p_state->'done') ? pl) then
-          p_state := public._mg_record(p_state, pl, public._mg_max_score());
+          p_state := public._mg_record(p_state, pl, public._mg_picked((p_state->'pars'->>((p_state->>'hole')::integer))::integer));
         end if;
       end loop;
       i := (p_state->>'hole')::integer;
@@ -339,7 +372,8 @@ begin
 end $$;
 
 revoke all on function public._mg_course() from public, anon, authenticated;
-revoke all on function public._mg_max_score() from public, anon, authenticated;
+revoke all on function public._mg_cap(integer) from public, anon, authenticated;
+revoke all on function public._mg_picked(integer) from public, anon, authenticated;
 revoke all on function public._mg_open_hole(jsonb, integer) from public, anon, authenticated;
 revoke all on function public._mg_bump(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._mg_record(jsonb, text, integer) from public, anon, authenticated;

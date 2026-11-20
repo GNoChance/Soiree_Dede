@@ -17,7 +17,7 @@ export const definition: GameDefinition = {
   minPlayers: 2,
   maxPlayers: 9,
   rules:
-    'Tout le monde joue le même trou en même temps, chacun sur son téléphone. Pose le doigt n’importe où, tire en arrière comme un lance-pierre et lâche : plus tu tires, plus ça part fort. 6 coups maximum par trou (sinon 7 inscrits), balle à l’eau = 1 coup de pénalité. Le plus petit total gagne !',
+    'Tout le monde joue le même trou en même temps, chacun sur son téléphone. Pose le doigt n’importe où, tire en arrière comme un lance-pierre et lâche : plus tu tires, plus ça part fort. 6 coups maximum par trou, par + 2 sur les longs trous (sinon balle ramassée : un coup de plus inscrit), balle à l’eau ou dans le vide = 1 coup de pénalité. Le plus petit total gagne ! Parcours : 9 trous tirés au sort parmi 20 (par défaut), La Kermesse du village (les 9 trous d’origine), Express (5 trous) ou le Défi (9 longs trous : château hanté, Far-West, station de ski).',
   Play,
   tv: true,
   Options: MiniGolfOptions,

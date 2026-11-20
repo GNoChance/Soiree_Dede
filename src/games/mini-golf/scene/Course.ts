@@ -3,10 +3,12 @@
  * Lit les mêmes primitives que la physique (holes.ts) + le décor de kermesse.
  */
 import * as THREE from 'three'
-import { floorHeight, type Decor, type HoleDef, type Piece, type Skin } from '../holes'
-import { BALL_R, CUP_R, MILL_BLADE, MILL_HUB_Y, loopPoint } from './physics'
+import { floorHeight, type Decor, type HoleDef, type Piece, type Skin, type Theme } from '../holes'
+import { BALL_R, CUP_R, GATE_H, MILL_BLADE, MILL_HUB_Y, SLIDER_H, TUBE_MOUTH, gateY, loopPoint, tubePoint } from './physics'
 
 export const GROUND_Y = -0.35
+/** Trou suspendu (`void`) : le sol (fond du vide) est loin en dessous. */
+export const VOID_Y = -2.6
 
 let ramp: THREE.DataTexture | null = null
 function gradient() {
@@ -22,6 +24,10 @@ export interface CourseView {
   root: THREE.Group
   /** Pales du moulin (rotation autour de Z). */
   blades: THREE.Group | null
+  /** Barrières mobiles (position X calée sur l'horloge par la scène). */
+  sliders: Array<{ obj: THREE.Object3D; def: Extract<Piece, { kind: 'slider' }> }>
+  /** Portes (position Y calée sur l'horloge par la scène). */
+  gates: Array<{ obj: THREE.Object3D; def: Extract<Piece, { kind: 'gate' }> }>
   /** Bumpers (index de pièce → maillage, pour le « flash »). */
   bumpers: Map<number, THREE.Object3D>
   water: THREE.Mesh[]
@@ -39,14 +45,43 @@ interface Palette {
   sand: string
   wall: string
   wallTop: string
+  hedge: string
+  hedgeTop: string
+  ice: string
+  snow: string
+  stone: string
+  /** Fond du vide (trous suspendus). */
+  abyss: string
   ink: string
 }
 
-const PAL_LIGHT: Palette = { ground: '#9ED98A', grass: '#2FBF5B', green: '#58D97A', wood: '#C98B55', sand: '#E9D3A1', wall: '#FF6B6B', wallTop: '#FFF4E0', ink: '#1F1B2E' }
-const PAL_DARK: Palette = { ground: '#2C5A3E', grass: '#25A94F', green: '#46C46A', wood: '#B57A47', sand: '#CDB585', wall: '#F2545B', wallTop: '#FFE9C7', ink: '#0D0B16' }
+const PAL_LIGHT: Palette = { ground: '#9ED98A', grass: '#2FBF5B', green: '#58D97A', wood: '#C98B55', sand: '#E9D3A1', wall: '#FF6B6B', wallTop: '#FFF4E0', hedge: '#2E9E4F', hedgeTop: '#6FDB8A', ice: '#7FE3FF', snow: '#D3E2EE', stone: '#B4B2C6', abyss: '#5E8C61', ink: '#1F1B2E' }
+const PAL_DARK: Palette = { ground: '#2C5A3E', grass: '#25A94F', green: '#46C46A', wood: '#B57A47', sand: '#CDB585', wall: '#F2545B', wallTop: '#FFE9C7', hedge: '#257F40', hedgeTop: '#4CC46C', ice: '#45BEE0', snow: '#A9BCCC', stone: '#807E96', abyss: '#1D3A2A', ink: '#0D0B16' }
+
+/** Couleurs propres à chaque décor d'ensemble (par-dessus la palette kermesse). */
+const THEMES: Record<Exclude<Theme, 'kermesse'>, { light: Partial<Palette>; dark: Partial<Palette> }> = {
+  // Château hanté de Dédé : feutre violet, remparts de pierre
+  castle: {
+    light: { ground: '#8C7BBF', grass: '#9D87E8', green: '#C1B0FF', wall: '#5A4790', wallTop: '#E5DBFF', abyss: '#3E3266' },
+    dark: { ground: '#2C2247', grass: '#6E58C4', green: '#9483E0', wall: '#46377A', wallTop: '#C9B8FF', abyss: '#140F24' },
+  },
+  // Far-West : terre rouge, planches de saloon
+  desert: {
+    light: { ground: '#F2C57C', grass: '#E58F4E', green: '#F2B26B', wall: '#8C4A2F', wallTop: '#FFE3B3', sand: '#FFE29A', abyss: '#B86A3C' },
+    dark: { ground: '#6E4A2B', grass: '#B8693A', green: '#C98A4E', wall: '#6B3622', wallTop: '#E8C38E', sand: '#CFAE5E', abyss: '#3A2416' },
+  },
+  // Station de ski : pistes bleues, piquets rouges
+  snow: {
+    light: { ground: '#E3F2FC', grass: '#6FB7E3', green: '#7FD39A', wall: '#E63946', wallTop: '#FFFFFF', abyss: '#A9CBE3' },
+    dark: { ground: '#2B3F5C', grass: '#3D7FB0', green: '#46A86A', wall: '#C42A37', wallTop: '#E8F1F8', abyss: '#16233A' },
+  },
+}
 
 export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
-  const P = dark ? PAL_DARK : PAL_LIGHT
+  const theme = hole.theme && hole.theme !== 'kermesse' ? THEMES[hole.theme] : null
+  const P: Palette = { ...(dark ? PAL_DARK : PAL_LIGHT), ...(theme ? (dark ? theme.dark : theme.light) : {}) }
+  const hang = !!hole.void
+  const GY = hang ? VOID_Y : GROUND_Y
   const root = new THREE.Group()
   const geos: THREE.BufferGeometry[] = []
   const mats = new Map<string, THREE.Material>()
@@ -84,17 +119,20 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
     src.parent?.add(o)
     return o
   }
-  const skinColor = (s: Skin | undefined) => (s === 'wood' ? P.wood : s === 'green' ? P.green : s === 'sand' ? P.sand : P.grass)
+  const skinColor = (s: Skin | undefined) =>
+    s === 'wood' ? P.wood : s === 'green' ? P.green : s === 'sand' ? P.sand : s === 'ice' ? P.ice : s === 'snow' ? P.snow : s === 'stone' ? P.stone : P.grass
   const bounds = new THREE.Box3()
   const bumpers = new Map<number, THREE.Object3D>()
   const water: THREE.Mesh[] = []
   let blades: THREE.Group | null = null
+  const sliders: CourseView['sliders'] = []
+  const gates: CourseView['gates'] = []
   let bell: THREE.Object3D | null = null
 
-  // Sol de la kermesse
-  const ground = mesh(g(new THREE.PlaneGeometry(60, 60)), toon(P.ground), root, false, true)
+  // Sol (fond du vide pour un trou suspendu)
+  const ground = mesh(g(new THREE.PlaneGeometry(60, 60)), toon(hang ? P.abyss : P.ground), root, false, true)
   ground.rotation.x = -Math.PI / 2
-  ground.position.y = GROUND_Y
+  ground.position.y = GY
 
   /** Bloc vertical de y0 à y1 (contour noir : rebord de 0,03 sur les côtés). */
   const block = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, color: string, outlined = true) => {
@@ -109,6 +147,17 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       root.add(o)
     }
     return m
+  }
+
+  /** Pose une forme plane (face +Z) à plat sur le sol, inclinée comme lui (dévers). */
+  function lieFlat(m: THREE.Object3D, x: number, z: number) {
+    const e = 0.02
+    const n = new THREE.Vector3(
+      -(floorHeight(hole, x + e, z) - floorHeight(hole, x - e, z)) / (2 * e),
+      1,
+      -(floorHeight(hole, x, z + e) - floorHeight(hole, x, z - e)) / (2 * e),
+    ).normalize()
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n)
   }
 
   for (const [index, p] of hole.pieces.entries()) buildPiece(p, index)
@@ -141,10 +190,10 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
   const cy = (hole.cupY ?? 0) + 0.004
   const cup = mesh(g(new THREE.CircleGeometry(CUP_R, 28)), new THREE.MeshBasicMaterial({ color: '#0D0B16' }), root, false, false)
   mats.set('cup', cup.material as THREE.Material)
-  cup.rotation.x = -Math.PI / 2
+  lieFlat(cup, hole.cup[0], hole.cup[1])
   cup.position.set(hole.cup[0], cy, hole.cup[1])
   const rim = mesh(g(new THREE.RingGeometry(CUP_R, CUP_R + 0.03, 28)), toon('#FFFFFF'), root, false, false)
-  rim.rotation.x = -Math.PI / 2
+  lieFlat(rim, hole.cup[0], hole.cup[1])
   rim.position.set(hole.cup[0], cy + 0.001, hole.cup[1])
   const flag = new THREE.Group()
   const pole = mesh(g(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 6)), toon('#FFFFFF'), flag)
@@ -164,7 +213,7 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
 
   // Départ
   const tee = mesh(g(new THREE.PlaneGeometry(0.5, 0.5)), toon(dark ? '#1E7F3D' : '#239B4A'), root, false, true)
-  tee.rotation.x = -Math.PI / 2
+  lieFlat(tee, hole.tee[0], hole.tee[1])
   tee.position.set(hole.tee[0], 0.003 + floorHeight(hole, hole.tee[0], hole.tee[1]), hole.tee[1])
 
   for (const d of hole.decor ?? []) buildDecor(d)
@@ -172,6 +221,8 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
   return {
     root,
     blades,
+    sliders,
+    gates,
     bumpers,
     water,
     bell,
@@ -188,7 +239,17 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
   function buildPiece(p: Piece, index: number) {
     if (p.kind === 'floor') {
       const y = p.y ?? 0
-      block(p.x0, p.x1, p.z0, p.z1, Math.min(GROUND_Y, y - 0.3), y, skinColor(p.skin))
+      block(p.x0, p.x1, p.z0, p.z1, hang ? y - 0.3 : Math.min(GY, y - 0.3), y, skinColor(p.skin))
+      if (p.skin === 'ice') {
+        // reflets de la glace
+        for (let k = 0; k < Math.max(1, Math.round(((p.x1 - p.x0) * (p.z1 - p.z0)) / 2.5)); k++) {
+          const fx = ((k * 0.618) % 1) * 0.7 + 0.15
+          const fz = ((k * 0.382 + 0.2) % 1) * 0.7 + 0.15
+          const l = mesh(g(new THREE.BoxGeometry(0.42, 0.004, 0.05)), toon('#FFFFFF'), root, false, false)
+          l.position.set(p.x0 + (p.x1 - p.x0) * fx, y + 0.003, p.z0 + (p.z1 - p.z0) * fz)
+          l.rotation.y = 0.6
+        }
+      }
       if (p.skin === 'wood') {
         // planches
         for (let z = p.z0 + 0.2; z < p.z1 - 0.1; z += 0.25) {
@@ -201,6 +262,28 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
         }
       }
       if (y >= -0.25) grow(p.x0, p.x1, p.z0, p.z1, y)
+    } else if (p.kind === 'ramp' && p.axis === 'x') {
+      // dévers : pente le long de X
+      const geo = g(new THREE.BoxGeometry(1, 1, 1))
+      const pos = geo.attributes.position as THREE.BufferAttribute
+      for (let i = 0; i < pos.count; i++) {
+        const lx = pos.getX(i)
+        const ly = pos.getY(i)
+        const lz = pos.getZ(i)
+        const top = lx < 0 ? p.y0 : p.y1
+        pos.setXYZ(i, lx < 0 ? p.x0 : p.x1, ly > 0 ? top : hang ? top - 0.3 : GY - 0.01, lz < 0 ? p.z0 : p.z1)
+      }
+      geo.computeVertexNormals()
+      mesh(geo, toon(p.skin ? skinColor(p.skin) : dark ? '#33B95A' : '#45CF6C'))
+      // liserés de niveau (parallèles à la pente) : on voit de quel côté ça penche
+      for (const f of [0.2, 0.4, 0.6, 0.8]) {
+        const x = p.x0 + (p.x1 - p.x0) * f
+        const y = p.y0 + (p.y1 - p.y0) * f
+        const l = mesh(g(new THREE.BoxGeometry(0.025, 0.01, p.z1 - p.z0)), toon(dark ? '#1C7A3A' : '#24A04C'), root, false, false)
+        l.position.set(x, y + 0.004, (p.z0 + p.z1) / 2)
+        l.rotation.z = Math.atan2(p.y1 - p.y0, p.x1 - p.x0)
+      }
+      grow(p.x0, p.x1, p.z0, p.z1, Math.max(p.y0, p.y1))
     } else if (p.kind === 'ramp') {
       const geo = g(new THREE.BoxGeometry(1, 1, 1))
       const pos = geo.attributes.position as THREE.BufferAttribute
@@ -211,7 +294,7 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
         const x = lx < 0 ? p.x0 : p.x1
         const z = lz < 0 ? p.z0 : p.z1
         const top = lz < 0 ? p.y0 : p.y1
-        pos.setXYZ(i, x, ly > 0 ? top : GROUND_Y - 0.01, z)
+        pos.setXYZ(i, x, ly > 0 ? top : hang ? top - 0.3 : GY - 0.01, z)
       }
       geo.computeVertexNormals()
       // montée (vers le trou) plus claire, descente plus sombre : les bosses se lisent d'en haut
@@ -230,22 +313,46 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       const [ax, az] = p.a
       const [bx, bz] = p.b
       const len = Math.hypot(bx - ax, bz - az) + 0.14
-      const y0 = Math.max(GROUND_Y, p.y0 ?? -0.1)
+      const y0 = hang ? (p.y0 ?? -0.1) : Math.max(GY, p.y0 ?? -0.1)
       const top = p.top ?? 0.3
       const grp = new THREE.Group()
       grp.position.set((ax + bx) / 2, 0, (az + bz) / 2)
       grp.rotation.y = Math.atan2(-(bz - az), bx - ax)
       root.add(grp)
-      const body = mesh(g(new THREE.BoxGeometry(len, top - y0, 0.14)), toon(P.wall), grp)
+      const body = mesh(g(new THREE.BoxGeometry(len, top - y0, 0.14)), toon(p.skin === 'hedge' ? P.hedge : P.wall), grp)
       body.position.y = (top + y0) / 2
-      const cap = mesh(g(new THREE.BoxGeometry(len + 0.01, 0.05, 0.16)), toon(P.wallTop), grp)
+      const cap = mesh(g(new THREE.BoxGeometry(len + 0.01, 0.05, 0.16)), toon(p.skin === 'hedge' ? P.hedgeTop : P.wallTop), grp)
       cap.position.y = top
       const o = new THREE.Mesh(g(new THREE.BoxGeometry(len + 0.05, top - y0 + 0.06, 0.2)), ink)
       o.position.y = (top + y0) / 2 + 0.01
       grp.add(o)
+    } else if (p.kind === 'post' && p.style === 'rock') {
+      // rocher
+      const geo = g(new THREE.DodecahedronGeometry(p.r * 1.15, 0))
+      const rock = mesh(geo, toon(dark ? '#8E7F74' : '#B9A99B'))
+      rock.position.set(p.x, (p.y ?? 0) + 0.12, p.z)
+      rock.scale.set(1, 0.8, 1)
+      outline(geo, rock, 1.1)
+    } else if (p.kind === 'post' && p.style === 'barrel') {
+      // tonneau de cidre
+      const grp = new THREE.Group()
+      grp.position.set(p.x, (p.y ?? 0) - 0.1, p.z)
+      root.add(grp)
+      const geo = g(new THREE.CylinderGeometry(p.r * 0.9, p.r * 0.9, 0.5, 16))
+      const c = mesh(geo, toon('#B9763F'), grp)
+      c.position.y = 0.25
+      outline(geo, c, 1.1)
+      const belly = mesh(g(new THREE.CylinderGeometry(p.r, p.r, 0.22, 16)), toon('#C98B55'), grp)
+      belly.position.y = 0.25
+      for (const y of [0.08, 0.42]) {
+        const hoop = mesh(g(new THREE.CylinderGeometry(p.r * 0.94, p.r * 0.94, 0.04, 16)), toon('#3B2F4A'), grp)
+        hoop.position.y = y
+      }
+      const lid = mesh(g(new THREE.CylinderGeometry(p.r * 0.8, p.r * 0.8, 0.02, 16)), toon('#8A5A33'), grp)
+      lid.position.y = 0.505
     } else if (p.kind === 'post') {
       const grp = new THREE.Group()
-      grp.position.set(p.x, -0.1, p.z)
+      grp.position.set(p.x, (p.y ?? 0) - 0.1, p.z)
       root.add(grp)
       const geo = g(new THREE.CylinderGeometry(p.r * 0.85, p.r, 0.5, 16))
       const c = mesh(geo, toon('#FFFFFF'), grp)
@@ -259,7 +366,7 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       }
     } else if (p.kind === 'bumper') {
       const grp = new THREE.Group()
-      grp.position.set(p.x, -0.1, p.z)
+      grp.position.set(p.x, (p.y ?? 0) - 0.1, p.z)
       root.add(grp)
       const geo = g(new THREE.CylinderGeometry(p.r, p.r * 1.05, 0.36, 20))
       const c = mesh(geo, toon(p.color ?? '#FF5D73'), grp)
@@ -275,8 +382,8 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       const zc = (p.front + back) / 2
       const H = 1.1
       // maison (deux blocs + linteau au-dessus du tunnel)
-      block(p.x0, p.cx - p.gap, back, p.front, GROUND_Y, H, '#FFF3E0')
-      block(p.cx + p.gap, p.x1, back, p.front, GROUND_Y, H, '#FFF3E0')
+      block(p.x0, p.cx - p.gap, back, p.front, GY, H, '#FFF3E0')
+      block(p.cx + p.gap, p.x1, back, p.front, GY, H, '#FFF3E0')
       block(p.cx - p.gap, p.cx + p.gap, back, p.front, 0.45, H, '#FFF3E0')
       // intérieur sombre du tunnel
       const inside = mesh(g(new THREE.BoxGeometry(p.gap * 2, 0.02, p.depth)), toon('#3B2F4A'), root, false, true)
@@ -310,6 +417,74 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       const hub = mesh(g(new THREE.CylinderGeometry(0.1, 0.1, 0.14, 12)), toon('#E63946'), blades)
       hub.rotation.x = Math.PI / 2
       grow(p.x0, p.x1, back, p.front, H + 0.9)
+    } else if (p.kind === 'slider') {
+      // barrière de passage à niveau rayée rouge et blanc, qui va et vient
+      const d = p.d ?? 0.3
+      const grp = new THREE.Group()
+      grp.position.set((p.x0 + p.x1) / 2, 0, p.z)
+      root.add(grp)
+      const body = mesh(g(new THREE.BoxGeometry(p.w, SLIDER_H, d)), toon('#FFFFFF'), grp)
+      body.position.y = SLIDER_H / 2 - 0.02
+      const o = new THREE.Mesh(g(new THREE.BoxGeometry(p.w + 0.06, SLIDER_H + 0.05, d + 0.06)), ink)
+      o.position.copy(body.position)
+      grp.add(o)
+      const n = Math.max(2, Math.round(p.w / 0.22))
+      for (let k = 0; k < n; k += 2) {
+        const s = mesh(g(new THREE.BoxGeometry(p.w / n, SLIDER_H + 0.01, d + 0.01)), toon('#FF3B4E'), grp)
+        s.position.set(-p.w / 2 + (k + 0.5) * (p.w / n), body.position.y, 0)
+      }
+      const lamp = mesh(g(new THREE.SphereGeometry(0.07, 10, 8)), toon('#FFD23F'), grp)
+      lamp.position.y = SLIDER_H + 0.04
+      // rail au sol (toute la course)
+      const rail = mesh(g(new THREE.BoxGeometry(p.x1 - p.x0, 0.01, 0.06)), toon('#3B2F4A'), root, false, false)
+      rail.position.set((p.x0 + p.x1) / 2, 0.004, p.z)
+      sliders.push({ obj: grp, def: p })
+    } else if (p.kind === 'gate') {
+      // herse : barreaux sombres + traverse, qui montent et descendent
+      const d = p.d ?? 0.2
+      const w = p.x1 - p.x0
+      const grp = new THREE.Group()
+      grp.position.set((p.x0 + p.x1) / 2, gateY(p, 0), p.z)
+      root.add(grp)
+      const n = Math.max(3, Math.round(w / 0.16))
+      const barGeo = g(new THREE.BoxGeometry(0.05, GATE_H, d))
+      const barMat = toon(dark ? '#5C5470' : '#4A4458')
+      for (let k = 0; k <= n; k++) mesh(barGeo, barMat, grp).position.x = -w / 2 + (k * w) / n
+      for (const yy of [-GATE_H / 2 + 0.06, GATE_H / 2 - 0.04]) {
+        const t = mesh(g(new THREE.BoxGeometry(w, 0.06, d + 0.02)), toon('#3B2F4A'), grp)
+        t.position.y = yy
+      }
+      for (const k of [0, n]) {
+        const tip = mesh(g(new THREE.ConeGeometry(0.04, 0.1, 6)), toon('#FFD23F'), grp)
+        tip.position.set(-w / 2 + (k * w) / n, GATE_H / 2 + 0.05, 0)
+      }
+      // fente dans le sol + piliers
+      const slot = mesh(g(new THREE.BoxGeometry(w, 0.006, d + 0.04)), toon('#1F1B2E'), root, false, false)
+      slot.position.set((p.x0 + p.x1) / 2, (p.y ?? 0) + 0.003, p.z)
+      for (const x of [p.x0 - 0.1, p.x1 + 0.1]) {
+        const pil = mesh(g(new THREE.BoxGeometry(0.16, 0.75, d + 0.12)), toon(P.stone), root)
+        pil.position.set(x, (p.y ?? 0) + 0.3, p.z)
+        outline(pil.geometry, pil, 1.08)
+      }
+      gates.push({ obj: grp, def: p })
+    } else if (p.kind === 'tube') {
+      // tuyau en cloche entre les deux embouchures
+      const pts: THREE.Vector3[] = []
+      for (let i = 0; i <= 24; i++) pts.push(new THREE.Vector3(...tubePoint(p, i / 24)))
+      const col = p.color ?? '#2EC4B6'
+      const geo = g(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.17, 10, false))
+      const pipe = mesh(geo, toon(col))
+      outline(geo, pipe, 1.12)
+      for (const [x, y, z] of [[p.a[0], p.ya ?? 0, p.a[1]], [p.b[0], p.yb ?? 0, p.b[1]]]) {
+        const mouth = mesh(g(new THREE.TorusGeometry(TUBE_MOUTH, 0.05, 8, 20)), toon('#FFD23F'), root, false, false)
+        mouth.rotation.x = -Math.PI / 2
+        mouth.position.set(x, y + 0.03, z)
+        const pit = mesh(g(new THREE.CircleGeometry(TUBE_MOUTH - 0.03, 20)), toon('#1F1B2E'), root, false, false)
+        pit.rotation.x = -Math.PI / 2
+        pit.position.set(x, y + 0.006, z)
+      }
+      const top = tubePoint(p, 0.5)
+      grow(Math.min(p.a[0], p.b[0]), Math.max(p.a[0], p.b[0]), Math.min(p.a[1], p.b[1]), Math.max(p.a[1], p.b[1]), top[1])
     } else if (p.kind === 'loop') {
       /** Point de la piste sous la balle (θ), écarté de `out` vers l'extérieur du cercle et de dx en X. */
       const at = (th: number, out: number, dx: number) => {
@@ -331,20 +506,20 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       // pylônes
       for (const sx of [-1, 1]) {
         const pyl = mesh(g(new THREE.CylinderGeometry(0.04, 0.05, p.r * 2 + 0.6, 8)), toon('#4CC9F0'))
-        pyl.position.set(sx * 0.32 + (p.x0 + p.x1) / 2, p.r + 0.3 + GROUND_Y + 0.0, p.z)
+        pyl.position.set(sx * 0.32 + (p.x0 + p.x1) / 2, p.r + 0.3 + GY + 0.0, p.z)
       }
       grow(-p.halfWidth, p.halfWidth, p.z - p.r, p.z + p.r, p.r * 2)
     }
   }
 
   function grow(x0: number, x1: number, z0: number, z1: number, top: number) {
-    bounds.expandByPoint(new THREE.Vector3(x0, GROUND_Y, z0))
+    bounds.expandByPoint(new THREE.Vector3(x0, GY, z0))
     bounds.expandByPoint(new THREE.Vector3(x1, Math.max(0.3, top), z1))
   }
 
   function buildDecor(d: Decor) {
     const grp = new THREE.Group()
-    grp.position.set(d.x, GROUND_Y, d.z)
+    grp.position.set(d.x, GY, d.z)
     grp.rotation.y = d.rot ?? 0
     root.add(grp)
     if (d.kind === 'tree') {
@@ -414,9 +589,181 @@ export function buildCourse(hole: HoleDef, dark: boolean): CourseView {
       bell = b
       const cross = mesh(g(new THREE.BoxGeometry(0.05, 0.3, 0.05)), toon('#FFD23F'), grp)
       cross.position.y = 3.0
+    } else if (d.kind === 'balloons') {
+      // grappe de ballons de baudruche
+      const colors = [d.color ?? '#FF5D73', '#FFD23F', '#4CC9F0', '#7AE582', '#9B5DE5']
+      const weight = mesh(g(new THREE.BoxGeometry(0.12, 0.1, 0.12)), toon('#3B2F4A'), grp)
+      weight.position.y = 0.05
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2
+        const top = new THREE.Vector3(Math.cos(a) * 0.22, 1.35 + (k % 2) * 0.22, Math.sin(a) * 0.22)
+        const geo = g(new THREE.SphereGeometry(0.17, 12, 10))
+        const b = mesh(geo, toon(colors[k]), grp)
+        b.scale.set(1, 1.18, 1)
+        b.position.copy(top)
+        outline(geo, b, 1.1)
+        const len = top.length()
+        const str = mesh(g(new THREE.CylinderGeometry(0.008, 0.008, len, 4)), toon('#3B2F4A'), grp, false, false)
+        str.position.copy(top).multiplyScalar(0.5)
+        str.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().normalize())
+      }
+    } else if (d.kind === 'hay') {
+      // botte de foin
+      const geo = g(new THREE.BoxGeometry(0.75, 0.42, 0.48))
+      const bale = mesh(geo, toon('#F2C94C'), grp)
+      bale.position.y = 0.21
+      outline(geo, bale, 1.06)
+      for (const x of [-0.2, 0.2]) {
+        const band = mesh(g(new THREE.BoxGeometry(0.04, 0.44, 0.5)), toon('#B5651D'), grp)
+        band.position.set(x, 0.21, 0)
+      }
+      const top = mesh(g(new THREE.BoxGeometry(0.5, 0.3, 0.36)), toon('#F7DC6F'), grp)
+      top.position.set(0.05, 0.57, 0)
+      top.rotation.y = 0.3
+      outline(top.geometry, top, 1.08)
+    } else if (d.kind === 'drum') {
+      // grosse caisse de la fanfare
+      const geo = g(new THREE.CylinderGeometry(0.38, 0.38, 0.32, 20))
+      const shell = mesh(geo, toon('#FF3B4E'), grp)
+      shell.rotation.x = Math.PI / 2
+      shell.position.y = 0.4
+      outline(geo, shell, 1.08)
+      for (const s of [-1, 1]) {
+        const skin = mesh(g(new THREE.CylinderGeometry(0.33, 0.33, 0.02, 20)), toon('#FFF4E0'), grp)
+        skin.rotation.x = Math.PI / 2
+        skin.position.set(0, 0.4, s * 0.17)
+      }
+      const stick = mesh(g(new THREE.CylinderGeometry(0.025, 0.025, 0.6, 6)), toon('#8A5A33'), grp)
+      stick.position.set(0.3, 0.75, 0.2)
+      stick.rotation.z = 0.7
+      const knob = mesh(g(new THREE.SphereGeometry(0.07, 10, 8)), toon('#FFFFFF'), grp)
+      knob.position.set(0.09, 0.98, 0.2)
+    } else if (d.kind === 'ghost') {
+      // fantôme en drap (il flotte)
+      const geo = g(new THREE.SphereGeometry(0.32, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62))
+      const sheet = mesh(geo, toon('#FFFFFF'), grp)
+      sheet.position.y = 1.35
+      sheet.scale.set(1, 1.35, 1)
+      outline(geo, sheet, 1.08)
+      const skirt = mesh(g(new THREE.CylinderGeometry(0.29, 0.36, 0.42, 14, 1, true)), new THREE.MeshToonMaterial({ color: '#FFFFFF', gradientMap: gradient(), side: THREE.DoubleSide }), grp)
+      mats.set('skirt' + d.x + d.z, skirt.material as THREE.Material)
+      skirt.position.y = 1.05
+      for (const sx of [-0.1, 0.1]) {
+        const eye = mesh(g(new THREE.SphereGeometry(0.05, 8, 6)), toon('#1F1B2E'), grp, false, false)
+        eye.position.set(sx, 1.5, 0.27)
+      }
+      const mouth = mesh(g(new THREE.SphereGeometry(0.045, 8, 6)), toon('#1F1B2E'), grp, false, false)
+      mouth.position.set(0, 1.37, 0.29)
+    } else if (d.kind === 'pumpkin') {
+      const geo = g(new THREE.SphereGeometry(0.3, 14, 10))
+      const pk = mesh(geo, toon(d.color ?? '#FF8C2B'), grp)
+      pk.position.y = 0.26
+      pk.scale.set(1.2, 0.85, 1.2)
+      outline(geo, pk, 1.08)
+      const stem = mesh(g(new THREE.CylinderGeometry(0.04, 0.05, 0.14, 6)), toon('#3FA34D'), grp)
+      stem.position.y = 0.55
+      for (const sx of [-0.12, 0.12]) {
+        const eye = mesh(g(new THREE.ConeGeometry(0.06, 0.08, 3)), toon('#3B2F4A'), grp, false, false)
+        eye.position.set(sx, 0.34, 0.33)
+        eye.rotation.x = Math.PI / 2
+      }
+    } else if (d.kind === 'tower') {
+      // tour de château, toit pointu
+      const geo = g(new THREE.CylinderGeometry(0.55, 0.6, 2.2, 10))
+      const t = mesh(geo, toon(dark ? '#8C89A6' : '#C9C4DD'), grp)
+      t.position.y = 1.1
+      outline(geo, t, 1.05)
+      const roofGeo = g(new THREE.ConeGeometry(0.72, 1.1, 10))
+      const roof = mesh(roofGeo, toon(d.color ?? '#7B4FD8'), grp)
+      roof.position.y = 2.75
+      outline(roofGeo, roof, 1.06)
+      const win = mesh(g(new THREE.BoxGeometry(0.2, 0.3, 0.05)), new THREE.MeshBasicMaterial({ color: '#FFD23F' }), grp, false, false)
+      mats.set('twin' + d.x + d.z, win.material as THREE.Material)
+      win.position.set(0, 1.6, 0.58)
+      const flag = mesh(g(new THREE.BoxGeometry(0.3, 0.16, 0.02)), toon('#FF5D73'), grp)
+      flag.position.set(0.17, 3.35, 0)
+    } else if (d.kind === 'cactus') {
+      const col = toon(dark ? '#2E8B57' : '#3FB36B')
+      const geo = g(new THREE.CapsuleGeometry(0.16, 0.9, 4, 10))
+      const trunk = mesh(geo, col, grp)
+      trunk.position.y = 0.6
+      outline(geo, trunk, 1.1)
+      for (const [sx, h] of [[-1, 0.55], [1, 0.8]]) {
+        const armGeo = g(new THREE.CapsuleGeometry(0.1, 0.32, 4, 8))
+        const arm = mesh(armGeo, col, grp)
+        arm.position.set(sx * 0.3, h + 0.15, 0)
+        outline(armGeo, arm, 1.12)
+        const link = mesh(g(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 8)), col, grp)
+        link.rotation.z = Math.PI / 2
+        link.position.set(sx * 0.18, h - 0.05, 0)
+      }
+      const flower = mesh(g(new THREE.SphereGeometry(0.07, 8, 6)), toon('#FF5D73'), grp, false, false)
+      flower.position.y = 1.2
+    } else if (d.kind === 'saloon') {
+      // façade de saloon à fausse corniche
+      const geo = g(new THREE.BoxGeometry(1.4, 1.0, 0.8))
+      const body = mesh(geo, toon(dark ? '#9A6A44' : '#C98B55'), grp)
+      body.position.y = 0.5
+      outline(geo, body, 1.04)
+      const front = mesh(g(new THREE.BoxGeometry(1.5, 0.55, 0.08)), toon(dark ? '#B57A47' : '#E0A458'), grp)
+      front.position.set(0, 1.25, 0.4)
+      const sign = mesh(g(new THREE.BoxGeometry(0.9, 0.22, 0.04)), toon('#FFF4E0'), grp)
+      sign.position.set(0, 1.27, 0.46)
+      for (const sx of [-0.13, 0.13]) {
+        const door = mesh(g(new THREE.BoxGeometry(0.24, 0.32, 0.03)), toon('#8A5A33'), grp)
+        door.position.set(sx, 0.42, 0.42)
+      }
+    } else if (d.kind === 'rock') {
+      const geo = g(new THREE.DodecahedronGeometry(0.42, 0))
+      const r = mesh(geo, toon(dark ? '#8E5A3C' : '#C77A4A'), grp)
+      r.position.y = 0.3
+      r.scale.set(1.3, 0.9, 1)
+      outline(geo, r, 1.08)
+      const r2 = mesh(g(new THREE.DodecahedronGeometry(0.22, 0)), toon(dark ? '#A06A47' : '#D99063'), grp)
+      r2.position.set(0.45, 0.16, 0.15)
+    } else if (d.kind === 'snowman') {
+      for (const [r, y] of [[0.32, 0.3], [0.23, 0.78], [0.17, 1.13]]) {
+        const geo = g(new THREE.SphereGeometry(r, 14, 10))
+        const b = mesh(geo, toon('#FFFFFF'), grp)
+        b.position.y = y
+        outline(geo, b, 1.08)
+      }
+      const nose = mesh(g(new THREE.ConeGeometry(0.04, 0.18, 6)), toon('#FF8C42'), grp)
+      nose.rotation.x = Math.PI / 2
+      nose.position.set(0, 1.13, 0.22)
+      const hat = mesh(g(new THREE.CylinderGeometry(0.13, 0.13, 0.2, 10)), toon('#1F1B2E'), grp)
+      hat.position.y = 1.36
+      const scarf = mesh(g(new THREE.TorusGeometry(0.18, 0.05, 6, 14)), toon(d.color ?? '#E63946'), grp)
+      scarf.rotation.x = Math.PI / 2
+      scarf.position.y = 0.97
+    } else if (d.kind === 'pine') {
+      const trunk = mesh(g(new THREE.CylinderGeometry(0.07, 0.09, 0.35, 6)), toon('#8A5A33'), grp)
+      trunk.position.y = 0.17
+      for (const [r, y] of [[0.55, 0.55], [0.42, 0.95], [0.28, 1.3]]) {
+        const geo = g(new THREE.ConeGeometry(r, 0.6, 8))
+        const c = mesh(geo, toon(dark ? '#1F7A4A' : '#2E9E5B'), grp)
+        c.position.y = y
+        outline(geo, c, 1.08)
+        const snowCap = mesh(g(new THREE.ConeGeometry(r * 0.55, 0.22, 8)), toon('#FFFFFF'), grp, false, false)
+        snowCap.position.y = y + 0.2
+      }
+    } else if (d.kind === 'chalet') {
+      const geo = g(new THREE.BoxGeometry(1.1, 0.75, 0.9))
+      const body = mesh(geo, toon(dark ? '#9A6A44' : '#B9763F'), grp)
+      body.position.y = 0.38
+      outline(geo, body, 1.05)
+      const roofGeo = g(new THREE.ConeGeometry(0.95, 0.6, 4))
+      const roof = mesh(roofGeo, toon('#FFFFFF'), grp)
+      roof.rotation.y = Math.PI / 4
+      roof.scale.set(1, 1, 0.8)
+      roof.position.y = 1.05
+      outline(roofGeo, roof, 1.06)
+      const win = mesh(g(new THREE.BoxGeometry(0.26, 0.22, 0.03)), new THREE.MeshBasicMaterial({ color: '#FFD23F' }), grp, false, false)
+      mats.set('cwin' + d.x + d.z, win.material as THREE.Material)
+      win.position.set(0, 0.45, 0.46)
     } else if (d.kind === 'flags' && d.to) {
       grp.rotation.y = 0
-      grp.position.set(0, GROUND_Y, 0)
+      grp.position.set(0, GY, 0)
       const a = new THREE.Vector3(d.x, 1.3, d.z)
       const b = new THREE.Vector3(d.to[0], 1.3, d.to[1])
       for (const p of [a, b]) {

@@ -16,7 +16,7 @@ import { fmtClock, useDeadlineTick } from './useTick'
 import { TvButton } from '@/features/tv/TvButton'
 import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps, PlayerInfo } from '../types'
-import { MAX_STROKES, PICKED_UP, floorHeight } from './holes'
+import { floorHeight, maxStrokes, pickedUp } from './holes'
 import { MARK_DOT, holeAt, markOf, scoreLabel, spriteOf } from './logic'
 import { useGolfNet } from './net'
 import { ScoreCard } from './ScoreCard'
@@ -140,7 +140,7 @@ function GolfScreen({ matchId, soireeId, state, meId, isHost, players, act, pend
           setConfirmNext(false)
         }}
       >
-        {`${unfinished.map((id) => get(id).nickname).join(', ')} n’${unfinished.length > 1 ? 'ont' : 'a'} pas fini : ${PICKED_UP} sur ce trou.`}
+        {`${unfinished.map((id) => get(id).nickname).join(', ')} n’${unfinished.length > 1 ? 'ont' : 'a'} pas fini : ${pickedUp(s.pars[s.hole] ?? 3)} sur ce trou.`}
       </ConfirmModal>
       <ConfirmModal
         open={confirmEnd}
@@ -154,7 +154,7 @@ function GolfScreen({ matchId, soireeId, state, meId, isHost, players, act, pend
           setConfirmEnd(false)
         }}
       >
-        Les trous pas encore joués compteront {PICKED_UP} coups pour tout le monde.
+        Les trous pas encore joués compteront comme balle ramassée pour tout le monde (7 coups, plus sur les longs trous).
       </ConfirmModal>
     </div>
   )
@@ -197,7 +197,8 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
   const announcing = s.phase === 'playing' && startLeft > 0
   const serverDone = s.done.includes(meId)
   const myTurn = isPlayer && s.phase === 'playing' && !serverDone && !local.finished && local.hole === s.hole
-  const canShoot = myTurn && !announcing && local.strokes < MAX_STROKES
+  const cap = maxStrokes(par)
+  const canShoot = myTurn && !announcing && local.strokes < cap
 
   const live = useRef({ s, local, meId })
   useEffect(() => {
@@ -240,7 +241,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
   const onStrokeEnd = useCallback((r: StrokeResult) => {
     const L = live.current.local
     if (L.finished || L.hole !== live.current.s.hole) return
-    const strokes = L.strokes + 1 + (r.water ? 1 : 0)
+    const strokes = L.strokes + 1 + (r.water || r.fall ? 1 : 0)
     const water = L.water + (r.water ? 1 : 0)
     const mill = L.mill + (r.mill ? 1 : 0)
     setRolling(false)
@@ -261,14 +262,16 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
       }
       publish(r.pos, 2, true)
       void submit(hole, strokes, true, { water, mill_hits: mill, bank_shot: r.bounces >= 3 ? 1 : 0 })
-    } else if (strokes >= MAX_STROKES) {
-      finished = { holed: false, strokes: Math.min(strokes, PICKED_UP) }
-      setBanner({ id: Date.now(), text: 'Balle ramassée', sub: `🧺 ${MAX_STROKES} coups sans rentrer : ${PICKED_UP} inscrits`, tone: 'bg-grape text-white' })
+    } else if (strokes >= maxStrokes(parNow)) {
+      const picked = pickedUp(parNow)
+      finished = { holed: false, strokes: Math.min(strokes, picked) }
+      setBanner({ id: Date.now(), text: 'Balle ramassée', sub: `🧺 ${maxStrokes(parNow)} coups sans rentrer : ${picked} inscrits`, tone: 'bg-grape text-white' })
       playSound('fail')
       publish(r.pos, 2, true)
-      void submit(hole, Math.min(strokes, PICKED_UP), false, { water, mill_hits: mill, bank_shot: 0 })
+      void submit(hole, Math.min(strokes, picked), false, { water, mill_hits: mill, bank_shot: 0 })
     } else {
       if (r.water) setBanner({ id: Date.now(), text: 'Plouf !', sub: '💦 +1 coup de pénalité', tone: 'bg-sky text-[#1f1b2e]' })
+      else if (r.fall) setBanner({ id: Date.now(), text: 'Dans le vide !', sub: '🕳️ +1 coup de pénalité', tone: 'bg-grape text-white' })
       else if (r.out) setBanner({ id: Date.now(), text: 'Hors piste !', sub: '↩️ La balle revient', tone: 'bg-grape text-white' })
       publish(r.pos, 1, true)
     }
@@ -415,7 +418,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
             <span className="text-5xl">😵</span>
             <span className="font-display text-xl font-extrabold">La 3D ne démarre pas sur cet appareil.</span>
-            <span className="text-sm text-muted">Ferme les autres applis et rouvre celle-ci ; sinon tu marqueras {PICKED_UP} à chaque trou.</span>
+            <span className="text-sm text-muted">Ferme les autres applis et rouvre celle-ci ; sinon ta balle sera ramassée à chaque trou.</span>
           </div>
         )}
 
@@ -446,7 +449,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
             {myTurn && !rolling && local.strokes === 0 && s.hole === 0 && <GestureHint />}
             {isPlayer && !finishedMine && (
               <span className="sticker-sm bg-surface/90 px-3 py-1 font-display text-2xl leading-none font-extrabold">
-                Coup {Math.min(local.strokes + 1, MAX_STROKES)} <span className="text-base text-muted">/ {MAX_STROKES}</span>
+                Coup {Math.min(local.strokes + 1, cap)} <span className="text-base text-muted">/ {cap}</span>
               </span>
             )}
             {isPlayer && myTurn && !rolling && local.strokes > 0 && <span className="sticker-sm bg-surface/80 px-2 py-0.5 text-xs font-bold">Tire en arrière, lâche !</span>}

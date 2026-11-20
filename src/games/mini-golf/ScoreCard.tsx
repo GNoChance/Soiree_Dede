@@ -2,12 +2,13 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { playerOrPlaceholder } from '@/features/soiree/players'
 import type { PlayerInfo } from '../types'
+import { holeById } from './holes'
 import { MARK_CLASS, markOf, ranking } from './logic'
 import type { MiniGolfState } from './types'
 
 /**
  * Carte de score : un joueur par ligne (classés), un trou par colonne, case colorée selon le par
- * (vert sous le par, blanc dans le par, rouge au-dessus ; 7 = balle ramassée).
+ * (vert sous le par, blanc dans le par, rouge au-dessus ; par + 4 au moins = balle ramassée, 7 sur un par 2 à 4).
  */
 export function ScoreCard({ s, players, meId, current, big }: { s: MiniGolfState; players: Record<string, PlayerInfo>; meId?: string; current?: number; big?: boolean }) {
   const rows = ranking(s)
@@ -21,8 +22,8 @@ export function ScoreCard({ s, players, meId, current, big }: { s: MiniGolfState
           <tr>
             <th className="sticky left-0 bg-sunk p-1 text-left">Trou</th>
             {s.holes.map((id, i) => (
-              <th key={i} className={cn(cell, 'font-display font-extrabold', i === current && 'bg-sun text-[#1f1b2e]')}>
-                {id}
+              <th key={i} title={holeById(id).name} className={cn(cell, 'font-display font-extrabold', i === current && 'bg-sun text-[#1f1b2e]')}>
+                {i + 1}
               </th>
             ))}
             <th className={cn(cell, 'font-display')}>Tot.</th>

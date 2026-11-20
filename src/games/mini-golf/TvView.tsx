@@ -8,7 +8,7 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import { useViewport } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
-import { PICKED_UP } from './holes'
+import { hasBell, maxStrokes, pickedUp } from './holes'
 import { MARK_DOT, holeAt, markOf, ranking, spriteOf, vsPar } from './logic'
 import { useGolfNet } from './net'
 import { HoleEnd } from './HoleEnd'
@@ -97,7 +97,7 @@ export function MiniGolfTv({ matchId, state, act, players }: GamePlayProps) {
     if (first || !lh) return
     if (lh.holed) {
       playSound('pop')
-      if (holeAt(s, lh.hole).id === 9) sceneRef.current?.ringBell()
+      if (hasBell(holeAt(s, lh.hole))) sceneRef.current?.ringBell()
     }
   }, [s.last_hole, s])
 
@@ -154,9 +154,9 @@ export function MiniGolfTv({ matchId, state, act, players }: GamePlayProps) {
                 <span className="truncate text-lg font-extrabold">{p.nickname}</span>
                 <span className="text-sm font-bold text-muted">
                   {s.phase === 'playing' && done && sc !== undefined
-                    ? `${MARK_DOT[markOf(sc, par)]} ${sc >= PICKED_UP ? 'ramassée (7)' : `rentré en ${sc}`}`
+                    ? `${MARK_DOT[markOf(sc, par)]} ${sc >= pickedUp(par) ? `ramassée (${sc})` : `rentré en ${sc}`}`
                     : s.phase === 'playing'
-                      ? `⛳ coup ${Math.min(n + 1, 6)}`
+                      ? `⛳ coup ${Math.min(n + 1, maxStrokes(par))}`
                       : vsPar(s, r.id)}
                 </span>
               </div>

@@ -9,7 +9,7 @@ export interface MgLastHole {
   id: string
   /** Index du trou dans `holes`. */
   hole: number
-  /** Score inscrit (7 = ramassée). */
+  /** Score inscrit (pickedUp(par) = ramassée : 7 sur un par 2 à 4, 8 sur un par 5, 9 sur un par 6). */
   strokes: number
   holed: boolean
   at: string
@@ -24,7 +24,9 @@ export interface MiniGolfState {
   hole: number
   round?: number
   total_rounds?: number
-  /** Ids des trous du parcours (1..9, ou 1,3,5,8,9 en express). */
+  /** Parcours choisi (absent sur les parties d'avant le tirage au sort). */
+  course?: MgCourse
+  /** Ids des trous du parcours (La Kermesse = 1..9, Défi = 21..29 dans l'ordre ; sinon tirés au sort parmi 1..20, par croissant). */
   holes: number[]
   /** Par de chaque trou du parcours (même ordre que `holes`). */
   pars: number[]
@@ -45,8 +47,11 @@ export interface MiniGolfState {
   results: Array<{ profile_id: string; points: number; won: boolean; placement: number; stats?: Record<string, number> }> | null
 }
 
+/** random = 9 trous tirés au sort parmi 1..20 (défaut) ; kermesse = trous 1..9 ; express = 5 tirés au sort ; defi = trous 21..29. */
+export type MgCourse = 'random' | 'kermesse' | 'express' | 'defi'
+
 export interface MgOptions {
-  holes: 9 | 5
+  course: MgCourse
   /** secondes par trou, 0 = sans chrono */
   timer: 0 | 60 | 90
 }

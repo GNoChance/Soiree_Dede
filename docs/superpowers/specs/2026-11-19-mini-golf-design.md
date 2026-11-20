@@ -48,7 +48,7 @@ dure **10-12 min quel que soit le nombre de joueurs**, on voit les balles des au
 | 8 | Le Grand Huit | looping : assez d'élan sinon la balle redescend | 3 |
 | 9 | Le Clocher | rampe vers un green surélevé ; la cloche sonne quand ça rentre | 4 |
 
-Parcours **express** (option) : trous 1, 3, 5, 8, 9 (par 15, ≈ 6 min).
+Parcours **express** (option) : trous 1, 3, 5, 8, 9 (par 15, ≈ 6 min). *Remplacé le 2026-11-20 : voir « Trous 10 à 20 et parcours aléatoires » à la fin.*
 
 ### Options (hôte)
 `{ "holes": 9 | 5, "timer": 60 | 90 | 0 }` — défaut 9 trous, 90 s par trou ; `0` = sans chrono (l'hôte a alors un bouton « Trou suivant »).
@@ -159,7 +159,7 @@ Les slots 10 et 11 exigent le parcours de 9 trous. Seuils à ajuster après deux
 
 ## 10. Hors périmètre
 
-Collisions entre balles, tour par tour, plusieurs parcours, éditeur de trous, effets (lift, rétro), vent, bonus à ramasser, trous tirés au hasard,
+Collisions entre balles, tour par tour, éditeur de trous, effets (lift, rétro), vent, bonus à ramasser,
 mode solo / défi du jour, équipes, caméra libre, vérification serveur de la physique (rejeu des coups).
 
 ## Décisions (2026-11-19, validées par l'utilisateur : « j'accepte tout »)
@@ -169,3 +169,65 @@ mode solo / défi du jour, équipes, caméra libre, vérification serveur de la 
 - Thème « La Kermesse du village » (pas de lieux réels en V1).
 - Looping scripté (trajectoire guidée), pas physique.
 - Balle à l'eau : +1 coup de pénalité, balle replacée au dernier point de frappe.
+
+## Trous 10 à 20 et parcours aléatoires (2026-11-20)
+
+20 trous en tout dans `holes.ts` (ids 1..20). Options `{ "course": "random" | "kermesse" | "express", "timer": … }` :
+**aléatoire** (défaut) = 9 trous tirés au sort parmi 20 ; **La Kermesse** = trous 1 à 9 dans l'ordre (par 26) ; **express** = 5 trous tirés au sort.
+Anciennes options acceptées : `{holes: 9}` = La Kermesse, `{holes: 5}` = express. Tirage **côté serveur** (`game_mini_golf_start`), sans remise,
+puis **trié par par croissant** (hasard entre pars égaux) : on s'échauffe sur les par 2, on finit sur un par 4 s'il y en a un.
+`state.course` mémorise le parcours. La carte de score numérote les trous 1..n (nom du trou au survol). Trophées `under_par` / `clean_card` :
+tout parcours de 9 trous (aléatoire ou Kermesse), jamais l'express.
+
+| N° | Nom | Obstacle | Par |
+|---|---|---|---|
+| 10 | L'Entonnoir du Pressoir | murs en biais qui mènent à un goulot | 3 |
+| 11 | Le Tremplin des Canards | tremplin au-dessus de la mare (trop mou : plouf) | 3 |
+| 12 | Le Dévers de la Fanfare | tout le trou penche (nouvelle rampe `axis: 'x'`), 2 tonneaux | 3 |
+| 13 | Le Passage à Niveau | barrière qui va et vient (nouvelle pièce `slider`, horloge serveur) | 2 |
+| 14 | La Chatière de Mémé | haie avec une chatière (raccourci) ou le tour par la droite | 3 |
+| 15 | Le Serpent de la Brocante | trois allées en zigzag | 4 |
+| 16 | Le Grand Flipper | 5 bumpers + 2 rampes de lancement | 3 |
+| 17 | La Rivière aux Deux Ponts | grand pont ou planche étroite droit sur le trou | 3 |
+| 18 | Le Toboggan de la Mairie | départ en hauteur, descente, remontée derrière le trou | 3 |
+| 19 | Le Moulin de la Meunière | mare à longer puis moulin décentré | 3 |
+| 20 | Le Bouquet Final | looping + 2 bumpers, la cloche sonne | 3 |
+
+Nouveautés techniques : `ramp.axis = 'x'` (dévers), `slider` (bloc cinématique ; une balle ne s'arrête jamais sous sa course,
+elle est poussée juste devant / derrière), `wall.skin = 'hedge'`, `post.style = 'barrel'` (tonneau), décors `balloons`, `hay`, `drum`.
+La cloche sonne sur tout trou qui a un décor `bell` (9 et 20).
+
+## Parcours « Défi » (trous 21 à 29, 2026-11-20)
+
+Option `course: "defi"` : 9 longs trous dans l'ordre, jamais tirés au sort (l'aléatoire et l'express restent sur 1..20).
+Inspiré des mécaniques de genre des mini-golfs multijoueurs déjantés, sans reprendre de nom, carte ni visuel d'un jeu existant.
+Coups max : `max(6, par + 2)` (6 jusqu'au par 4, 7 au par 5, 8 au par 6) ; balle ramassée = coups max + 1 (7 / 8 / 9),
+côté serveur (`_mg_cap`, `_mg_picked`) et front (`maxStrokes`, `pickedUp`). Trophées inchangés : tout parcours de 9 trous
+compte pour « sous le par » / « sans bavure » (Défi compris).
+
+Nouvelles mécaniques (toutes déterministes côté client) : glace (`skin: 'ice'`, la balle glisse), sable / neige (freinent fort),
+vide (`void: true` : la chute coûte +1 coup, retour au point de frappe), herses (`gate`, montent / descendent sur l'horloge
+serveur), tubes (`tube`, trajectoire scriptée comme le looping), étages (rampes + bordures `wallAt`), tremplins au-dessus du vide.
+Thèmes `castle`, `desert`, `snow` : couleurs (clair / sombre) et décors (`ghost`, `pumpkin`, `tower`, `cactus`, `saloon`,
+`rock`, `snowman`, `pine`, `chalet`).
+
+Les 9 trous (définition complète dans `holes.ts`), par total **39** :
+
+| Id | Thème | Nom | Par | Mécanique |
+|---:|---|---|---:|---|
+| 21 | Château | Les Douves du Château | 4 | pont-levis en bois sur des douves (eau : +1 coup), herse qui monte et descend, cour à contourner (mur, 2 bumpers) |
+| 22 | Château (vide) | L’Escalier du Fantôme | 4 | trois étages (rampes, balcon, sommet) au-dessus du vide, bumper, passage secret en tube du balcon au sommet |
+| 23 | Château | La Galerie des Herses | 6 | trois herses décalées dans le temps à passer l’une après l’autre, 2 bumpers |
+| 24 | Far-West (vide) | Le Canyon du Coyote | 4 | longer le ravin (bande de sable) ou franchir le vide par le tremplin, rochers |
+| 25 | Far-West | La Mine d’Or de Dédé | 4 | paroi percée de trois galeries (tubes) : une seule mène au trou, sable, rocher, tonneaux |
+| 26 | Far-West | La Grand-Rue du Saloon | 4 | sable, deux diligences (barrières mobiles), tonneaux, perron du saloon surélevé (rampe) |
+| 27 | Neige | La Patinoire de Dédé | 4 | sol en glace (la balle glisse), enclos central, 3 bumpers |
+| 28 | Neige (vide) | Le Grand Tremplin | 4 | descente en rampe, saut du ravin par le tremplin ou chemin des piétons, bande de glace, piquets |
+| 29 | Neige (vide) | Le Sommet de Dédé | 5 | patinoire, balcon puis sommet par deux rampes, télécabine (tube) en raccourci gardée par trois piquets, neige |
+
+Calage des pars : « joueur moyen » simulé (`check-holes.mjs --quick --human 24`, visée ±2,5°, puissance ±8 %) ; il fait environ
+1 coup de plus que le par sur les trous d'origine, donc par ≈ moyenne − 1, borné à 4..6. Les moyennes simulées (≈ 2 à 4 coups) donnent
+presque partout le plancher de 4 ; le 29 (le plus dur après le 23) passe à 5 et le 23 (jamais rentré par le joueur simulé, qui ne
+choisit pas son instant de frappe devant les herses) à 6, pour avoir un par 4, un par 5 et un par 6 (exigé par le test SQL).
+Vérification : `tools/mini-golf/check-holes.mjs` (solveur + tirs au hasard avec la vraie physique) ; `--human N` = « joueur moyen »
+bruité pour régler les pars (trous `void` : une portion de route séparée de la balle par une bordure n'est pas un raccourci).

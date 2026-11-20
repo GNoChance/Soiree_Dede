@@ -4,7 +4,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { mood } from '@/features/soiree/players'
 import type { PlayerInfo } from '../types'
-import { PICKED_UP } from './holes'
+import { pickedUp } from './holes'
 import { MARK_DOT, markOf, ranking } from './logic'
 import type { MiniGolfState } from './types'
 
@@ -39,7 +39,7 @@ export function HoleEnd({ s, get, meId, left, big }: { s: MiniGolfState; get: Ge
               <span className={cn('min-w-0 flex-1 truncate font-extrabold', big && 'text-2xl')}>{p.nickname}</span>
               {sc !== undefined && (
                 <span className={cn('font-bold', big ? 'text-xl' : 'text-sm')}>
-                  {MARK_DOT[markOf(sc, par)]} {sc >= PICKED_UP ? '🧺 7' : sc}
+                  {MARK_DOT[markOf(sc, par)]} {sc >= pickedUp(par) ? `🧺 ${sc}` : sc}
                 </span>
               )}
               <span className={cn('w-10 text-right font-display font-extrabold tabular-nums', big ? 'text-3xl' : 'text-xl')}>{r.total}</span>

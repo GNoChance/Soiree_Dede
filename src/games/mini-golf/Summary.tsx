@@ -4,8 +4,8 @@ import { cn } from '@/lib/cn'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { useTv } from '@/features/tv/tv'
 import type { GameSummaryProps } from '../types'
-import { holeById } from './holes'
-import { MARK_DOT, markOf, ranking, vsPar } from './logic'
+import { holeById, pickedUp } from './holes'
+import { MARK_DOT, courseLabel, markOf, ranking, vsPar } from './logic'
 import { ScoreCard } from './ScoreCard'
 import type { MiniGolfState } from './types'
 
@@ -38,7 +38,7 @@ export default function MiniGolfSummary({ state, meId, players }: GameSummaryPro
           ⛳ {winners.length > 1 ? 'Égalité en tête' : `${get(winners[0].id).nickname} gagne`} avec {winners[0].total} coups
         </p>
         <p className="text-sm font-bold text-muted">
-          Parcours {s.holes.length === 9 ? 'complet' : 'express'} · par {parTotal}
+          {courseLabel(s)} · par {parTotal}
           {s.forced ? ' · partie écourtée' : ''}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
@@ -65,7 +65,7 @@ export default function MiniGolfSummary({ state, meId, players }: GameSummaryPro
               <span className="min-w-0">
                 <span className="font-extrabold">{get(r.id).nickname}</span>
                 <span className="text-muted"> · {holeById(s.holes[b.i]).name} : </span>
-                {MARK_DOT[markOf(b.score, b.par)]} {b.score >= 7 ? 'ramassée' : `${b.score} coup${b.score > 1 ? 's' : ''}`} (par {b.par})
+                {MARK_DOT[markOf(b.score, b.par)]} {b.score >= pickedUp(b.par) ? 'ramassée' : `${b.score} coup${b.score > 1 ? 's' : ''}`} (par {b.par})
               </span>
             </div>
           )

@@ -50,25 +50,67 @@ const res = (r, pid) => r.results.find((x) => x.profile_id === pid)
 
 // ----------------------------------------------------------------------------- parcours / synchro avec holes.ts
 const holesTs = fs.readFileSync(new URL('../../src/games/mini-golf/holes.ts', import.meta.url), 'utf8')
+const tsIds = [...holesTs.matchAll(/^\s+id: (\d+),$/gm)].map((m) => Number(m[1]))
 const tsPars = [...holesTs.matchAll(/^\s+par: (\d),$/gm)].map((m) => Number(m[1]))
-const tsExpress = JSON.parse(holesTs.match(/export const EXPRESS = (\[[\d, ]+\])/)[1])
+const tsKermesse = JSON.parse((holesTs.match(/export const KERMESSE = (\[[\d, ]+\])/) ?? [0, 'null'])[1])
+const tsDefi = JSON.parse((holesTs.match(/export const DEFI = (\[[\d, ]+\])/) ?? [0, 'null'])[1])
+const tsPool = Number((holesTs.match(/export const RANDOM_POOL = (\d+)/) ?? [0, 'NaN'])[1])
+const tsMinCap = Number((holesTs.match(/export const MIN_CAP = (\d+)/) ?? [0, 'NaN'])[1])
+const tsOverPar = Number((holesTs.match(/export const CAP_OVER_PAR = (\d+)/) ?? [0, 'NaN'])[1])
 const course = (await db.query(`select public._mg_course() c`)).rows[0].c
-ok('holes.ts : 9 trous, par 26', tsPars.length === 9 && tsPars.reduce((a, b) => a + b, 0) === 26, JSON.stringify(tsPars))
+const N = tsPars.length
+const sum = (a) => a.reduce((x, y) => x + y, 0)
+ok('holes.ts : 29 trous, ids 1..29 dans l’ordre, un par par trou', N === 29 && tsIds.length === 29 && tsIds.every((id, i) => id === i + 1), JSON.stringify(tsIds))
+ok('holes.ts : pars de 2 à 4 (trous 1..20), de 4 à 6 (Défi, 21..29)', tsPars.slice(0, 20).every((p) => p >= 2 && p <= 4) && tsPars.slice(20).every((p) => p >= 4 && p <= 6), JSON.stringify(tsPars))
+ok('holes.ts : La Kermesse = trous 1..9, par 26', JSON.stringify(tsKermesse) === '[1,2,3,4,5,6,7,8,9]' && sum(tsPars.slice(0, 9)) === 26)
+ok('holes.ts : Défi = trous 21..29, tirage au sort parmi 1..20', JSON.stringify(tsDefi) === '[21,22,23,24,25,26,27,28,29]' && tsPool === 20)
 ok('synchro des pars SQL ↔ holes.ts', JSON.stringify(course.pars) === JSON.stringify(tsPars), JSON.stringify(course.pars))
-ok('synchro du parcours express SQL ↔ holes.ts', JSON.stringify(course.express) === JSON.stringify(tsExpress))
+ok('synchro de La Kermesse SQL ↔ holes.ts', JSON.stringify(course.kermesse) === JSON.stringify(tsKermesse))
+ok('synchro du Défi et du tirage SQL ↔ holes.ts', JSON.stringify(course.defi) === JSON.stringify(tsDefi) && course.pool === tsPool)
+const caps = (await db.query(`select p, public._mg_cap(p) c, public._mg_picked(p) k from generate_series(2, 6) p`)).rows
+ok('plafond de coups SQL ↔ holes.ts : max(6, par + 2), ramassée = plafond + 1', tsMinCap === 6 && tsOverPar === 2 &&
+  caps.every((r) => r.c === Math.max(tsMinCap, r.p + tsOverPar) && r.k === r.c + 1) && caps.map((r) => r.k).join() === '7,7,7,8,9', JSON.stringify(caps))
+/** Tirage valide : n ids distincts de 1..20, pars du parcours, triés par par croissant. */
+const validDraw = (st, n) => {
+  const h = st.holes
+  return h.length === n && new Set(h).size === n && h.every((id) => Number.isInteger(id) && id >= 1 && id <= 20) &&
+    JSON.stringify(st.pars) === JSON.stringify(h.map((id) => tsPars[id - 1])) && st.pars.every((p, i) => i === 0 || st.pars[i - 1] <= p) &&
+    st.total_rounds === n
+}
 
 // ----------------------------------------------------------------------------- démarrage
 const s0 = must(await start(), 'start')
 ok('state : game mini-golf, phase playing, trou 0', s0.state.game === 'mini-golf' && s0.state.phase === 'playing' && s0.state.hole === 0 && s0.state.round === 1)
-ok('défaut : 9 trous (1..9), pars du parcours, chrono 90 s', JSON.stringify(s0.state.holes) === '[1,2,3,4,5,6,7,8,9]' && JSON.stringify(s0.state.pars) === JSON.stringify(tsPars) && s0.state.timer === 90 && s0.state.total_rounds === 9)
+ok('défaut : aléatoire, 9 trous distincts parmi 1..20, pars cohérents, triés par par, chrono 90 s', s0.state.course === 'random' && validDraw(s0.state, 9) && s0.state.timer === 90, JSON.stringify([s0.state.holes, s0.state.pars]))
 ok('annonce : hole_started_at ≈ +3 s, deadline ≈ +93 s', approx(s0.state.hole_started_at, 3) && approx(s0.state.deadline, 93))
 ok('cartes vides, totaux à 0, personne n’a fini', Object.values(s0.state.cards).every((c) => c.length === 0) && Object.values(s0.state.totals).every((t) => t === 0) && s0.state.done.length === 0)
-const ex = must(await start({ holes: 5, timer: 60 }), 'express')
-ok('express : trous 1, 3, 5, 8, 9 (par 15), chrono 60 s', JSON.stringify(ex.state.holes) === '[1,3,5,8,9]' && ex.state.pars.reduce((a, b) => a + b, 0) === 15 && ex.state.timer === 60)
+const draws = []
+for (let i = 0; i < 40; i++) draws.push(must(await start(i % 2 ? {} : { course: 'random' }), 'random').state)
+ok('aléatoire × 40 : tirages tous valides', draws.every((d) => d.course === 'random' && validDraw(d, 9)))
+const seen = new Set(draws.flatMap((d) => d.holes))
+ok('aléatoire × 40 : tirages variés, les nouveaux trous (10..20) sortent', new Set(draws.map((d) => d.holes.join())).size > 30 && [...seen].some((id) => id > 9) && seen.size >= 18, String(seen.size))
+const ker = must(await start({ course: 'kermesse' }), 'kermesse')
+ok('La Kermesse : trous 1..9 dans l’ordre, par 26', ker.state.course === 'kermesse' && JSON.stringify(ker.state.holes) === '[1,2,3,4,5,6,7,8,9]' && sum(ker.state.pars) === 26 && ker.state.total_rounds === 9)
+const ex = must(await start({ course: 'express', timer: 60 }), 'express')
+ok('express : 5 trous distincts parmi 1..20, pars cohérents, chrono 60 s', ex.state.course === 'express' && validDraw(ex.state, 5) && ex.state.timer === 60, JSON.stringify(ex.state.holes))
+const exs = []
+for (let i = 0; i < 20; i++) exs.push(must(await start({ course: 'express' }), 'express').state)
+ok('express × 20 : tirages valides et variés', exs.every((d) => validDraw(d, 5)) && new Set(exs.map((d) => d.holes.join())).size > 10)
+const leg9 = must(await start({ holes: 9, timer: 60 }), 'legacy 9')
+ok('options anciennes {holes: 9} → La Kermesse (1..9)', leg9.state.course === 'kermesse' && JSON.stringify(leg9.state.holes) === '[1,2,3,4,5,6,7,8,9]' && leg9.state.timer === 60)
+const leg5 = must(await start({ holes: 5 }), 'legacy 5')
+ok('options anciennes {holes: 5} → express tiré au sort (5 trous)', leg5.state.course === 'express' && validDraw(leg5.state, 5))
+ok('course prioritaire sur holes', must(await start({ course: 'kermesse', holes: 5 }), 'prio').state.holes.length === 9)
+const junk = must(await start({ course: 'golf-de-luxe', timer: 'vite' }), 'junk')
+ok('course inconnue → aléatoire 9 trous, 90 s', junk.state.course === 'random' && validDraw(junk.state, 9) && junk.state.timer === 90)
+const defi = must(await start({ course: 'defi', timer: 60 }), 'defi')
+ok('Défi : trous 21..29 dans l’ordre, pars du parcours (4 à 6)', defi.state.course === 'defi' && JSON.stringify(defi.state.holes) === JSON.stringify(tsDefi) &&
+  JSON.stringify(defi.state.pars) === JSON.stringify(tsPars.slice(20)) && defi.state.total_rounds === 9 && defi.state.timer === 60, JSON.stringify(defi.state.holes))
+ok('aléatoire et express ne piochent jamais dans le Défi (ids ≤ 20)', [...draws, ...exs].every((d) => d.holes.every((id) => id <= 20)))
 const nt = must(await start({ timer: 0 }), 'sans chrono')
 ok('sans chrono : timer 0, pas d’échéance', nt.state.timer === 0 && nt.state.deadline === null)
 const bad = must(await start({ holes: 7, timer: 45 }), 'bad')
-ok('options invalides → 9 trous, 90 s', bad.state.holes.length === 9 && bad.state.timer === 90)
+ok('options invalides → aléatoire 9 trous, 90 s', bad.state.course === 'random' && validDraw(bad.state, 9) && bad.state.timer === 90)
 ok('1 joueur → not_enough_players', (await start({}, P.slice(0, 1))).err === 'not_enough_players')
 ok('10 joueurs → too_many_players', (await start({}, [...P, OUT])).err === 'too_many_players')
 ok('9 joueurs acceptés', !(await start({}, P)).err)
@@ -162,9 +204,8 @@ async function play(opts, players, scores, extras = {}) {
   }
   return st
 }
-const pars = tsPars
 const A = P[0], B = P[1], C = P[2], D = P[3]
-const fin = await play({}, [A, B, C, D], {
+const fin = await play({ course: 'kermesse' }, [A, B, C, D], {
   [A]: [1, 2, 2, 3, 3, 3, 3, 3, 4], // as au 1, birdie au 3 : 24, sous le par, sans bavure
   [B]: [2, 2, 3, 3, 3, 3, 3, 3, 4], // le par partout : 26, sans bavure, pas sous le par
   [C]: [3, 7, 3, 4, 3, 3, 3, 3, 5], // ramassée au 2
@@ -182,11 +223,39 @@ ok('stats B : moulin cumulé, borné par les coups du trou (3 + 3)', sB.mill_hit
 ok('stats C : 3 balles à l’eau, ramassée 1, par la bande (rentrée)', sC.water === 3 && sC.picked_up === 1 && sC.bank_shot === 1 && sC.clean_card === 0, JSON.stringify(sC))
 ok('stats D : ramassée 1 (le chrono ne compte pas), bande 1, total 35', sD.picked_up === 1 && sD.bank_shot === 1 && sD.total === 35)
 ok('stats : holes = 9', [sA, sB, sC, sD].every((x) => x.holes === 9))
-const fin5 = await play({ holes: 5 }, [A, B], { [A]: [1, 2, 2, 2, 3], [B]: [2, 3, 3, 3, 4] })
-ok('express : sous le par / sans bavure exigent 9 trous', res(fin5, A).stats.under_par === 0 && res(fin5, A).stats.clean_card === 0 && res(fin5, A).stats.aces === 1)
-const tie = await play({ holes: 5 }, [A, B, C], { [A]: [2, 3, 3, 3, 4], [B]: [2, 3, 3, 3, 4], [C]: [3, 3, 3, 3, 4] })
+const fin5 = await play({ course: 'express' }, [A, B], { [A]: [1, 1, 1, 1, 1], [B]: [2, 3, 3, 3, 4] })
+ok('express : sous le par / sans bavure exigent 9 trous', res(fin5, A).stats.under_par === 0 && res(fin5, A).stats.clean_card === 0 && res(fin5, A).stats.aces === 5)
+const tie = await play({ course: 'express' }, [A, B, C], { [A]: [2, 3, 3, 3, 4], [B]: [2, 3, 3, 3, 4], [C]: [3, 3, 3, 3, 4] })
 ok('ex aequo : rang 1 partagé, deux vainqueurs, 3e = rang 3', res(tie, A).placement === 1 && res(tie, B).placement === 1 && res(tie, C).placement === 3 && res(tie, A).won && res(tie, B).won && tie.state.winners.length === 2)
 ok('ex aequo : points 3 / 3 / 1', res(tie, A).points === 3 && res(tie, B).points === 3 && res(tie, C).points === 1)
+const rnd9 = await play({}, [A, B], { [A]: Array(9).fill(1), [B]: Array(9).fill(7) })
+ok('aléatoire 9 trous : « sous le par » et « sans bavure » possibles', res(rnd9, A).stats.under_par === 1 && res(rnd9, A).stats.clean_card === 1 && res(rnd9, A).stats.aces === 9 && res(rnd9, B).stats.under_par === 0)
+// ----------------------------------------------------------------------------- Défi : plafond de coups selon le par
+const dPars = tsPars.slice(20)
+const picked = (p) => Math.max(6, p + 2) + 1
+const i4 = dPars.indexOf(4), i5 = dPars.indexOf(5), i6 = dPars.indexOf(6)
+ok('Défi : au moins un par 4, un par 5 et un par 6', i4 >= 0 && i5 >= 0 && i6 >= 0, JSON.stringify(dPars))
+const dStart = must(await start({ course: 'defi' }, [A, B]), 'defi AB')
+/** Place la partie sur le trou d'index i (trous précédents non joués). */
+const at = (st, i) => started({ ...st, state: { ...st.state, hole: i, round: i + 1 } }, 60)
+const d5 = at(dStart, Math.max(0, i5)), d6 = at(dStart, Math.max(0, i6)), d4 = at(dStart, Math.max(0, i4))
+const r57 = await act(d5, A, hole(i5, 7))
+ok('par 5 : rentrée en 7 acceptée (plafond 7)', !r57.err && r57.r.state.cards[A][i5] === 7, r57.err)
+ok('par 5 : trous précédents non joués = ramassée selon leur par', !r57.err && r57.r.state.cards[A].slice(0, i5).every((v, j) => v === picked(dPars[j])), JSON.stringify(r57.r?.state.cards[A]))
+ok('par 5 : rentrée en 8 → invalid_strokes', (await act(d5, A, hole(i5, 8))).err === 'invalid_strokes')
+const r58 = await act(d5, A, hole(i5, 7, false))
+ok('par 5 : non rentrée → 8 inscrits', !r58.err && r58.r.state.cards[A][i5] === 8, r58.err)
+ok('par 5 : non rentrée en 9 → invalid_strokes', (await act(d5, A, hole(i5, 9, false))).err === 'invalid_strokes')
+const r68 = await act(d6, A, hole(i6, 8))
+ok('par 6 : rentrée en 8 acceptée, non rentrée → 9', !r68.err && r68.r.state.cards[A][i6] === 8 && must(await act(d6, A, hole(i6, 8, false)), 'r69').state.cards[A][i6] === 9, r68.err)
+ok('par 4 : plafond inchangé (6, ramassée 7)', (await act(d4, A, hole(i4, 7))).err === 'invalid_strokes' && must(await act(d4, A, hole(i4, 6, false)), 'r47').state.cards[A][i4] === 7)
+const ch5 = must(await act(late(must(await act(d5, A, hole(i5, 5)), 'c5')), B, { type: 'tick' }), 'ch5')
+ok('par 5 : chrono écoulé → absent = 8', ch5.state.cards[B][i5] === 8 && ch5.state.cards[A][i5] === 5)
+const dEnd = must(await act(started(dStart, 60), A, { type: 'end_game' }, true), 'dEnd')
+ok('Défi : fin forcée → chaque trou restant = ramassée selon son par', dEnd.state.totals[B] === sum(dPars.map(picked)) && JSON.stringify(dEnd.state.cards[B]) === JSON.stringify(dPars.map(picked)), JSON.stringify(dEnd.state.cards[B]))
+const dFin = await play({ course: 'defi' }, [A, B], { [A]: dPars, [B]: dPars.map((p) => p + 1) })
+ok('Défi : parcours de 9 trous → « sans bavure » possible, « sous le par » non au par', res(dFin, A).stats.clean_card === 1 && res(dFin, A).stats.under_par === 0 && res(dFin, A).stats.pars === 9 && res(dFin, B).stats.pars === 0 && res(dFin, A).placement === 1)
+
 ok('bornes : bank_shot ignoré si non rentrée, eau ≤ coups', (await (async () => {
   const st = started(must(await start({}, [A, B]), 's'), 60)
   const r = must(await act(st, A, hole(0, 6, false, { water: 40, mill_hits: 99, bank_shot: 1 })), 'b')
