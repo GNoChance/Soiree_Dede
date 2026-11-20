@@ -12,7 +12,7 @@ import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
-import { getTenue } from '@/data/tenues'
+import { getTenue, isSecretTenue } from '@/data/tenues'
 import { trophyForSlot } from '@/data/trophees'
 import { slotUnlocked, useTrophyProgress } from '@/features/trophees/access'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
@@ -70,7 +70,7 @@ export function InventoryPage() {
   const trophyOf = (id: string) => (tenueDef ? trophyForSlot(tenue, stickerSlot(profile.slug, tenue, id)) : undefined)
   const isUnlocked = (id: string) =>
     tenueDef
-      ? slotUnlocked(stickerSlot(profile.slug, tenue, id), trophyUnlocks, trophyOf(id)?.id)
+      ? slotUnlocked(stickerSlot(profile.slug, tenue, id), trophyUnlocks, trophyOf(id)?.id, tenue)
       : Boolean(EXPRESSIONS[id as ExpressionId]?.default || unlocks[id as ExpressionId])
   const all = tenuePalette(profile.slug, tenue) as ExpressionId[]
   const unlockedCount = all.filter(isUnlocked).length
@@ -157,7 +157,9 @@ export function InventoryPage() {
       {tenueDef && (
         <StaggerItem>
           <p className="text-center text-sm font-bold text-muted">
-            Stickers en {tenueDef.emoji} {tenueDef.label} : « Joie » est offert, les autres se gagnent avec leur trophée 🏆.
+            {isSecretTenue(tenue)
+              ? <>Stickers en {tenueDef.emoji} {tenueDef.label} : toute la planche est à toi, cadeau de la voyante ✨</>
+              : <>Stickers en {tenueDef.emoji} {tenueDef.label} : « Joie » est offert, les autres se gagnent avec leur trophée 🏆.</>}
           </p>
         </StaggerItem>
       )}

@@ -4,7 +4,7 @@
  * Pour ajouter une tenue : une ligne ici + une ligne dans tenues.sql (+ la planche, cf. tools/slice-chibis/README.md).
  */
 
-export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host'
+export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host' | 'irma'
 
 export interface TenueDef {
   id: TenueId
@@ -28,6 +28,12 @@ export interface TenueDef {
   artOwn?: string
   /** true = débloquée d'office */
   default?: boolean
+  /**
+   * Tenue SECRÈTE offerte par ce trophée (miroir de tenues.trophy_id, condition 'trophy' côté SQL) : hors de
+   * `TENUES` (donc absente du catalogue, du tableau des trophées et de la galerie) ; l'onglet Tenues ne la
+   * montre qu'une fois débloquée (`SECRET_TENUES`, aucun portrait). Tous ses stickers sont offerts d'office.
+   */
+  secretTrophy?: string
 }
 
 const wins = (id: TenueId, label: string, emoji: string, gameId: string, gameName: string, threshold = 10): TenueDef => ({
@@ -81,7 +87,16 @@ export const TENUES: TenueDef[] = [
   { ...wins('host', 'Animateur Télé', '🎤', 'dede-party', 'Dédé Party', 5), art: 'host' },
 ]
 
-export const TENUES_BY_ID = Object.fromEntries(TENUES.map((t) => [t.id, t])) as Record<TenueId, TenueDef>
+/** Tenues secrètes (récompenses de trophée) : à ne montrer qu'à qui les a débloquées. */
+export const SECRET_TENUES: TenueDef[] = [
+  // 12 stickers « voyante » (public/chibis/<slug>/irma/), trophée « Madame Irma » = 3 bons pronostics d'affilée.
+  { id: 'irma', label: 'Madame Irma', emoji: '🔮', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'irma', secretTrophy: 'gen_madame_irma' },
+]
+
+export const TENUES_BY_ID = Object.fromEntries([...TENUES, ...SECRET_TENUES].map((t) => [t.id, t])) as Record<TenueId, TenueDef>
 
 export const getTenue = (id: string | null | undefined): TenueDef | undefined =>
   id ? (TENUES_BY_ID as Record<string, TenueDef>)[id] : undefined
+
+/** Tenue secrète : tous ses stickers sont utilisables (pas de trophée par rang). */
+export const isSecretTenue = (id: string | null | undefined): boolean => Boolean(getTenue(id)?.secretTrophy)

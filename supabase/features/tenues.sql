@@ -11,11 +11,14 @@ create table if not exists public.tenues (
   label          text not null,
   emoji          text not null,
   game_id        text,                                  -- null = tous jeux confondus
-  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins'
+  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins' | 'trophy'
   threshold      integer not null default 10,
   sort_order     integer not null default 100,
   has_art        boolean not null default false         -- informatif ; le front lit tenues-art.generated.ts
 );
+-- Tenue SECRÈTE (condition_type = 'trophy') : offerte par le trophée `trophy_id` (trigger de trophees.sql),
+-- jamais gagnée aux victoires, tous ses stickers sont offerts. Pas de FK : `trophies` est créée après.
+alter table public.tenues add column if not exists trophy_id text;
 
 create table if not exists public.tenue_unlocks (
   profile_id  uuid not null references public.profiles(id) on delete cascade,
@@ -63,6 +66,19 @@ on conflict (id) do update
       condition_type = excluded.condition_type,
       threshold      = excluded.threshold,
       sort_order     = excluded.sort_order;
+
+-- Tenue secrète « Madame Irma » : planche de 12 stickers « voyante », débloquée par le trophée gen_madame_irma
+-- (3 bons pronostics d'affilée). evaluate_tenues l'ignore (condition 'trophy' = jamais remplie aux victoires).
+insert into public.tenues (id, label, emoji, game_id, condition_type, threshold, sort_order, trophy_id) values
+  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma')
+on conflict (id) do update
+  set label          = excluded.label,
+      emoji          = excluded.emoji,
+      game_id        = excluded.game_id,
+      condition_type = excluded.condition_type,
+      threshold      = excluded.threshold,
+      sort_order     = excluded.sort_order,
+      trophy_id      = excluded.trophy_id;
 
 -- Tenue équipée invalide -> retour à 'default'
 update public.profiles set equipped_tenue = 'default'
@@ -145,7 +161,8 @@ grant select on table public.tenues, public.tenue_unlocks to authenticated;
 -- Débloque les tenues dont la condition est remplie ; renvoie les ids NOUVELLEMENT débloqués.
 -- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id` ;
 -- 'duel_wins' = au moins `threshold` duels remportés (somme de match_players.stats.duel_wins)
--- (tous jeux si game_id est null). Ajouter un type = ajouter un `when` ci-dessous.
+-- (tous jeux si game_id est null) ; 'trophy' = tenue secrète offerte par un trophée (trigger de trophees.sql),
+-- jamais débloquée ici (else false). Ajouter un type = ajouter un `when` ci-dessous.
 create or replace function public.evaluate_tenues(p_profile_id uuid)
 returns text[] language plpgsql security definer
 set search_path = public, extensions

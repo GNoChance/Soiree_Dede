@@ -26,6 +26,7 @@ export const TENUE_ART: readonly string[] = [
   'carole/golfer',
   'carole/host',
   'carole/cowboy',
+  'carole/irma',
   'cecile/tycoon',
   'cecile/admiral',
   'cecile/tictactoe',
@@ -51,6 +52,7 @@ export const TENUE_ART: readonly string[] = [
   'cecile/golfer',
   'cecile/host',
   'cecile/cowboy',
+  'cecile/irma',
   'cycy/spy',
   'cycy/cinema',
   'cycy/croupier',
@@ -76,6 +78,7 @@ export const TENUE_ART: readonly string[] = [
   'cycy/golfer',
   'cycy/host',
   'cycy/cowboy',
+  'cycy/irma',
   'dede/star',
   'dede/spy',
   'dede/croupier',
@@ -101,6 +104,7 @@ export const TENUE_ART: readonly string[] = [
   'dede/golfer',
   'dede/host',
   'dede/cowboy',
+  'dede/irma',
   'kevin/spy',
   'kevin/cinema',
   'kevin/student',
@@ -126,6 +130,7 @@ export const TENUE_ART: readonly string[] = [
   'kevin/golfer',
   'kevin/host',
   'kevin/cowboy',
+  'kevin/irma',
   'manon/spy',
   'manon/cinema',
   'manon/student',
@@ -151,6 +156,7 @@ export const TENUE_ART: readonly string[] = [
   'manon/golfer',
   'manon/host',
   'manon/cowboy',
+  'manon/irma',
   'marius/admiral',
   'marius/tycoon',
   'marius/tictactoe',
@@ -176,6 +182,7 @@ export const TENUE_ART: readonly string[] = [
   'marius/golfer',
   'marius/host',
   'marius/cowboy',
+  'marius/irma',
   'mika/spy',
   'mika/cinema',
   'mika/student',
@@ -201,6 +208,7 @@ export const TENUE_ART: readonly string[] = [
   'mika/golfer',
   'mika/host',
   'mika/cowboy',
+  'mika/irma',
   'nini/star',
   'nini/spy',
   'nini/croupier',
@@ -226,6 +234,7 @@ export const TENUE_ART: readonly string[] = [
   'nini/golfer',
   'nini/host',
   'nini/cowboy',
+  'nini/irma',
 ]
 
 // "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).
@@ -537,6 +546,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'carole/cowboy/pouces',
   'carole/cowboy/timide',
   'carole/cowboy/determine',
+  'carole/irma/pouces',
+  'carole/irma/timide',
+  'carole/irma/determine',
   'cecile/tycoon/pouces',
   'cecile/tycoon/timide',
   'cecile/tycoon/determine',
@@ -612,6 +624,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cecile/cowboy/pouces',
   'cecile/cowboy/timide',
   'cecile/cowboy/determine',
+  'cecile/irma/pouces',
+  'cecile/irma/timide',
+  'cecile/irma/determine',
   'cycy/spy/pouces',
   'cycy/spy/timide',
   'cycy/spy/determine',
@@ -687,6 +702,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cycy/cowboy/pouces',
   'cycy/cowboy/timide',
   'cycy/cowboy/determine',
+  'cycy/irma/pouces',
+  'cycy/irma/timide',
+  'cycy/irma/determine',
   'dede/star/pouces',
   'dede/star/timide',
   'dede/star/determine',
@@ -762,6 +780,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'dede/cowboy/pouces',
   'dede/cowboy/timide',
   'dede/cowboy/determine',
+  'dede/irma/pouces',
+  'dede/irma/timide',
+  'dede/irma/determine',
   'kevin/spy/pouces',
   'kevin/spy/timide',
   'kevin/spy/determine',
@@ -837,6 +858,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'kevin/cowboy/pouces',
   'kevin/cowboy/timide',
   'kevin/cowboy/determine',
+  'kevin/irma/pouces',
+  'kevin/irma/timide',
+  'kevin/irma/determine',
   'manon/spy/pouces',
   'manon/spy/timide',
   'manon/spy/determine',
@@ -912,6 +936,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'manon/cowboy/pouces',
   'manon/cowboy/timide',
   'manon/cowboy/determine',
+  'manon/irma/pouces',
+  'manon/irma/timide',
+  'manon/irma/determine',
   'marius/admiral/pouces',
   'marius/admiral/timide',
   'marius/admiral/determine',
@@ -987,6 +1014,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'marius/cowboy/pouces',
   'marius/cowboy/timide',
   'marius/cowboy/determine',
+  'marius/irma/pouces',
+  'marius/irma/timide',
+  'marius/irma/determine',
   'mika/spy/pouces',
   'mika/spy/timide',
   'mika/spy/determine',
@@ -1062,6 +1092,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'mika/cowboy/pouces',
   'mika/cowboy/timide',
   'mika/cowboy/determine',
+  'mika/irma/pouces',
+  'mika/irma/timide',
+  'mika/irma/determine',
   'nini/star/pouces',
   'nini/star/timide',
   'nini/star/determine',
@@ -1137,6 +1170,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'nini/cowboy/pouces',
   'nini/cowboy/timide',
   'nini/cowboy/determine',
+  'nini/irma/pouces',
+  'nini/irma/timide',
+  'nini/irma/determine',
 ]
 
 // Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
@@ -1266,6 +1302,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "carole/irma": {
+    "pouces": "charmee",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "cecile/tycoon": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1387,6 +1428,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cecile/cowboy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cecile/irma": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -1516,6 +1562,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "cycy/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "dede/star": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1637,6 +1688,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "dede/cowboy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "dede/irma": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -1766,6 +1822,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "kevin/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "manon/spy": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -1887,6 +1948,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "manon/cowboy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/irma": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
@@ -2016,6 +2082,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "marius/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "mika/spy": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -2141,6 +2212,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "timide": "cool",
     "determine": "gamer"
   },
+  "mika/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
   "nini/star": {
     "pouces": "amoureux",
     "timide": "cool",
@@ -2262,6 +2338,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "nini/cowboy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/irma": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"

@@ -1,5 +1,6 @@
 // Tests SQL des pronostics (PGlite) : node pronos.mjs ../../supabase/install.sql
 // Charge install.sql deux fois (idempotence) puis déroule des scénarios ; sort en code 1 au premier échec.
+import fs from 'node:fs'
 import { bootDb } from './boot.mjs'
 
 const file = process.argv[2]
@@ -145,6 +146,31 @@ const m6 = await round3([A], [[3, A], [1, A]]) // m6 : D ok (3e), B ok (1 seule 
 ok('3e bon pronostic d’affilée (parieur absent de la manche) : trophée débloqué', await hasIrma(D))
 ok('finish_match annonce le trophée du parieur absent dans new_trophies', (m6.fin.new_trophies?.[D] ?? []).includes('gen_madame_irma'), JSON.stringify(m6.fin.new_trophies))
 ok('une série cassée par un faux pronostic : pas de trophée', !(await hasIrma(B)))
+
+// --- récompense : la tenue secrète « irma » (planche exclusive de 12 stickers) ----------------------
+const hasTenue = async (who, t = 'irma') => (await sys(`select 1 from public.tenue_unlocks where profile_id = $1 and tenue_id = $2`, [who, t])).length > 0
+ok('la tenue irma existe : condition « trophy » liée à gen_madame_irma (jamais gagnée aux victoires)',
+  (await sys(`select 1 from public.tenues where id = 'irma' and condition_type = 'trophy' and trophy_id = 'gen_madame_irma'`)).length === 1)
+ok('Madame Irma obtenue : la tenue irma est débloquée d’office', await hasTenue(D))
+ok('sans le trophée : pas de tenue irma', !(await hasTenue(B)))
+ok('equip_tenue(irma) sans le trophée → tenue_locked', (await call(1, `select public.equip_tenue('irma') r`)).err?.includes('tenue_locked'))
+ok('equip_tenue(irma) avec le trophée : tenue portée', (await call(3, `select public.equip_tenue('irma') r`)).r?.r?.equipped_tenue === 'irma')
+ok('irma portée : les 12 stickers sont utilisables comme avatar (ici le rang 7, sans trophée de rang)',
+  (await call(3, `select public.equip_expression('bisou', 7) r`)).r?.r?.equipped_expression === 'bisou')
+const sendSticker = (i, slot) => call(i, `select public.send_soiree_message($1, 'sticker', 'colere', $2) r`, [soiree, slot])
+const st5 = await sendSticker(3, 5)
+ok('irma portée : sticker du rang 5 envoyable dans le chat de la soirée', !st5.err && st5.r?.r != null, JSON.stringify(st5))
+// garde-fou : une autre tenue ne devient pas gratuite (le sticker de rang 5 de « star » exige toujours son trophée)
+await sys(`insert into public.tenue_unlocks(profile_id, tenue_id) values ($1, 'star') on conflict do nothing`, [B])
+await call(1, `select public.equip_tenue('star') r`)
+ok('une tenue ordinaire garde ses trophées de rang (star, rang 5) → expression_locked', (await sendSticker(1, 5)).err?.includes('expression_locked'))
+ok('Garde-robe ne compte pas la tenue secrète (D : irma seule = 0 ; B : star = 1)',
+  Number((await sys(`select public._tr_progress($1, null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb) v`, [D]))[0].v) === 0
+  && Number((await sys(`select public._tr_progress($1, null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb) v`, [B]))[0].v) === 1)
+// rattrapage idempotent : une tenue irma perdue est restituée à qui a le trophée en rejouant le SQL
+await sys(`delete from public.tenue_unlocks where profile_id = $1 and tenue_id = 'irma'`, [D])
+await db.exec(fs.readFileSync(new URL('../../supabase/features/trophees.sql', import.meta.url), 'utf8'))
+ok('rejouer trophees.sql restitue la tenue irma à qui a le trophée', await hasTenue(D))
 
 // --- award « Meilleur devin » du Wrapped -----------------------------------------
 await call(0, `select public.end_soiree($1)`, [soiree])

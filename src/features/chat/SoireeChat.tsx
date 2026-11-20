@@ -91,7 +91,7 @@ function ChatWidget({ soireeId, meId }: { soireeId: string; meId: string }) {
     () => [
       ...tenuePalette(me.slug, me.equippedTenue).filter((e) =>
         inTenue
-          ? slotUnlocked(stickerSlot(me.slug, me.equippedTenue, e), trophyUnlocks, trophyForSlot(me.equippedTenue, stickerSlot(me.slug, me.equippedTenue, e))?.id)
+          ? slotUnlocked(stickerSlot(me.slug, me.equippedTenue, e), trophyUnlocks, trophyForSlot(me.equippedTenue, stickerSlot(me.slug, me.equippedTenue, e))?.id, me.equippedTenue)
           : e === 'joie' || EXPRESSIONS[e as ExpressionId]?.default || unlocks[e as ExpressionId],
       ),
       ...tenueExtras(me.slug, me.equippedTenue).map((x) => x.id),

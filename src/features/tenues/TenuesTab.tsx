@@ -13,7 +13,7 @@ import { fx } from '@/lib/feedback'
 import { toastRpcError } from '@/lib/rpcError'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
-import { DEFAULT_TENUE, TENUES, type TenueDef } from '@/data/tenues'
+import { DEFAULT_TENUE, SECRET_TENUES, TENUES, type TenueDef } from '@/data/tenues'
 import { trophiesOfTenue } from '@/data/trophees'
 import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
@@ -82,9 +82,12 @@ export function TenuesTab() {
     }
   }
 
+  // Tenues secrètes (ex. Madame Irma) : rien à voir tant qu'elles ne sont pas débloquées (ni silhouette, ni verrou).
+  const catalogue = [...TENUES, ...SECRET_TENUES.filter((t) => tenueUnlocks[t.id])]
+
   return (
     <StaggerList className="grid grid-cols-2 gap-3">
-      {TENUES.map((t) => {
+      {catalogue.map((t) => {
         const unlocked = Boolean(t.default || tenueUnlocks[t.id])
         return (
           <StaggerItem key={t.id} className={cn(t.default && 'col-span-2')}>
@@ -125,6 +128,7 @@ function TenueCard({
   const portrait = tenuePortraitUrl(slug, def.id)
   const reveal = useFirstReveal(slug, def.id, unlocked && !def.default)
   const pct = progress.target ? (progress.value / progress.target) * 100 : 100
+  const chibi = <ChibiImage slug={slug} expression={expression} tenue={def.id} size={128} />
   return (
     <motion.div
       whileHover={{ y: -3 }}
@@ -142,8 +146,23 @@ function TenueCard({
       <div className="relative flex h-36 w-full items-center justify-center">
         {portrait ? (
           <PortraitCard src={portrait} label={def.label} unlocked={unlocked} reveal={reveal} />
+        ) : def.secretTrophy && hasArt && unlocked ? (
+          // Surprise : la tenue secrète surgit en tournoyant la première fois qu'on la voit sur cet appareil.
+          <motion.div
+            initial={reveal ? { scale: 0, rotate: -35 } : false}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 160, damping: 9, delay: reveal ? 0.35 : 0 }}
+            onAnimationComplete={() => {
+              if (reveal) {
+                fx.success()
+                burst({ x: 0.5, y: 0.4 }, 60)
+              }
+            }}
+          >
+            {chibi}
+          </motion.div>
         ) : def.default || (hasArt && unlocked) ? (
-          <ChibiImage slug={slug} expression={expression} tenue={def.id} size={128} />
+          chibi
         ) : (
           <motion.div
             initial={{ scale: 0.6, rotate: -8 }}
@@ -173,7 +192,7 @@ function TenueCard({
 
       {unlocked ? (
         <p className={cn('text-xs font-bold', equipped ? 'text-[#1f1b2e]/70' : 'text-muted')}>
-          {def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
+          {def.secretTrophy ? 'Tenue secrète découverte ✨' : def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
           {trophies && !def.default && ` · 🏆 ${trophies.got}/${trophies.total}`}
         </p>
       ) : (

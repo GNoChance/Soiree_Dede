@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { confettiRain } from '@/components/ui/confetti'
 import { tenueStickerAt } from '@/components/ui/tenueArt'
 import { getExpression } from '@/data/expressions'
-import { getTenue } from '@/data/tenues'
+import { getTenue, SECRET_TENUES } from '@/data/tenues'
 import { getTrophy } from '@/data/trophees'
 import type { PlayerInfo } from '@/games/types'
 import { fx } from '@/lib/feedback'
@@ -45,6 +45,8 @@ export function TrophyUnlockReveal({
   const tenue = t?.tenue ? getTenue(t.tenue) : undefined
   const sticker = me && t?.tenue && t.slot ? tenueStickerAt(me.slug, t.tenue, t.slot) : null
   const owned = Boolean(t?.tenue && tenueUnlocks[t.tenue])
+  // Trophée qui offre une tenue secrète (Madame Irma) : on dévoile la surprise (sinon, personne ne la voit venir).
+  const secret = t ? SECRET_TENUES.find((x) => x.secretTrophy === t.id) : undefined
 
   return (
     <Modal open onClose={onClose} title={mine.length ? (mine.length > 1 ? 'Nouveaux trophées !' : 'Nouveau trophée !') : 'Trophées des autres'}>
@@ -70,6 +72,19 @@ export function TrophyUnlockReveal({
               </div>
             )}
             {tenue && !sticker && <p className="text-xs font-bold">Badge {tenue.emoji} ajouté à ton profil.</p>}
+            {secret && me && (
+              <motion.div
+                initial={reduce ? false : { scale: 0, rotate: -20, opacity: 0 }}
+                animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 180, damping: 9, delay: 0.5 }}
+                className="mt-1 flex flex-col items-center gap-1 rounded-card border-[3px] border-ink bg-surface px-3 py-2 text-text"
+              >
+                <p className="font-display text-sm font-extrabold">{secret.emoji} Surprise ! Une tenue secrète !</p>
+                <ChibiImage slug={me.slug} tenue={secret.id} expression="joie" size={110} />
+                <p className="text-sm font-extrabold">{secret.label} : 12 stickers rien que pour toi</p>
+                <p className="text-xs font-bold text-muted">À équiper dans Inventaire › Tenues.</p>
+              </motion.div>
+            )}
           </motion.div>
         )}
         {mine.length > 1 && (

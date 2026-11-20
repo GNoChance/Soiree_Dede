@@ -4659,11 +4659,14 @@ create table if not exists public.tenues (
   label          text not null,
   emoji          text not null,
   game_id        text,                                  -- null = tous jeux confondus
-  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins'
+  condition_type text not null default 'game_wins',     -- 'default' | 'game_wins' | 'duel_wins' | 'trophy'
   threshold      integer not null default 10,
   sort_order     integer not null default 100,
   has_art        boolean not null default false         -- informatif ; le front lit tenues-art.generated.ts
 );
+-- Tenue SECRÈTE (condition_type = 'trophy') : offerte par le trophée `trophy_id` (trigger de trophees.sql),
+-- jamais gagnée aux victoires, tous ses stickers sont offerts. Pas de FK : `trophies` est créée après.
+alter table public.tenues add column if not exists trophy_id text;
 
 create table if not exists public.tenue_unlocks (
   profile_id  uuid not null references public.profiles(id) on delete cascade,
@@ -4711,6 +4714,19 @@ on conflict (id) do update
       condition_type = excluded.condition_type,
       threshold      = excluded.threshold,
       sort_order     = excluded.sort_order;
+
+-- Tenue secrète « Madame Irma » : planche de 12 stickers « voyante », débloquée par le trophée gen_madame_irma
+-- (3 bons pronostics d'affilée). evaluate_tenues l'ignore (condition 'trophy' = jamais remplie aux victoires).
+insert into public.tenues (id, label, emoji, game_id, condition_type, threshold, sort_order, trophy_id) values
+  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma')
+on conflict (id) do update
+  set label          = excluded.label,
+      emoji          = excluded.emoji,
+      game_id        = excluded.game_id,
+      condition_type = excluded.condition_type,
+      threshold      = excluded.threshold,
+      sort_order     = excluded.sort_order,
+      trophy_id      = excluded.trophy_id;
 
 -- Tenue équipée invalide -> retour à 'default'
 update public.profiles set equipped_tenue = 'default'
@@ -4793,7 +4809,8 @@ grant select on table public.tenues, public.tenue_unlocks to authenticated;
 -- Débloque les tenues dont la condition est remplie ; renvoie les ids NOUVELLEMENT débloqués.
 -- condition_type : 'game_wins' = au moins `threshold` victoires (match_players.won) dans `game_id` ;
 -- 'duel_wins' = au moins `threshold` duels remportés (somme de match_players.stats.duel_wins)
--- (tous jeux si game_id est null). Ajouter un type = ajouter un `when` ci-dessous.
+-- (tous jeux si game_id est null) ; 'trophy' = tenue secrète offerte par un trophée (trigger de trophees.sql),
+-- jamais débloquée ici (else false). Ajouter un type = ajouter un `when` ci-dessous.
 create or replace function public.evaluate_tenues(p_profile_id uuid)
 returns text[] language plpgsql security definer
 set search_path = public, extensions
@@ -5072,7 +5089,9 @@ begin
         -- compteur persistant (le chat est purgé en fin de soirée), incrémenté par send_soiree_message
         select coalesce(max(stickers_sent), 0) into v from public.player_stats where profile_id = p_profile;
       when 'tenues' then
-        select count(*) into v from public.tenue_unlocks where profile_id = p_profile;
+        -- tenues gagnées aux victoires : la tenue secrète offerte par un trophée (Madame Irma) ne compte pas
+        select count(*) into v from public.tenue_unlocks u join public.tenues x on x.id = u.tenue_id
+         where u.profile_id = p_profile and x.condition_type <> 'trophy';
       when 'full_board' then
         select coalesce(max(c), 0) into v from (
           select count(*) as c from public.trophy_unlocks u join public.trophies t on t.id = u.trophy_id
@@ -5190,17 +5209,43 @@ end $$;
 -- ---- Stickers de tenue : droit d'usage -----------------------------------------
 
 -- Le joueur peut-il utiliser le sticker de rang p_slot de la planche de la tenue p_tenue ?
--- Tenue débloquée ET (slot 1 | slot > 12 (bonus) | trophée (tenue, slot) obtenu).
+-- Tenue débloquée ET (slot 1 | slot > 12 (bonus) | tenue secrète (condition 'trophy' : tous ses stickers
+-- sont offerts, la tenue étant déjà la récompense) | trophée (tenue, slot) obtenu).
 create or replace function public._tenue_slot_ok(p_profile uuid, p_tenue text, p_slot integer)
 returns boolean language sql stable security definer
 set search_path = public, extensions
 as $$
   select p_slot >= 1
      and exists (select 1 from public.tenue_unlocks u where u.profile_id = p_profile and u.tenue_id = p_tenue)
-     and (p_slot = 1 or p_slot > 12 or exists (
+     and (p_slot = 1 or p_slot > 12
+          or exists (select 1 from public.tenues x where x.id = p_tenue and x.condition_type = 'trophy')
+          or exists (
            select 1 from public.trophies t join public.trophy_unlocks tu on tu.trophy_id = t.id
             where t.tenue_id = p_tenue and t.slot = p_slot and tu.profile_id = p_profile))
 $$;
+
+-- ---- Trophée -> tenue secrète ---------------------------------------------------
+-- Obtenir un trophée qui est la clé d'une tenue secrète (tenues.trophy_id, ex. gen_madame_irma -> irma)
+-- débloque cette tenue. Un trigger couvre tous les chemins d'attribution (fin de partie, evaluate_trophy…).
+create or replace function public._trophy_reward_tenue()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  insert into public.tenue_unlocks(profile_id, tenue_id)
+  select new.profile_id, x.id from public.tenues x where x.trophy_id = new.trophy_id
+  on conflict do nothing;
+  return null;
+end $$;
+
+drop trigger if exists trophy_unlocks_reward_tenue on public.trophy_unlocks;
+create trigger trophy_unlocks_reward_tenue after insert on public.trophy_unlocks
+  for each row execute function public._trophy_reward_tenue();
+
+-- Rattrapage (idempotent) : trophées déjà obtenus avant la mise en place de la tenue secrète.
+insert into public.tenue_unlocks(profile_id, tenue_id)
+select u.profile_id, x.id from public.trophy_unlocks u join public.tenues x on x.trophy_id = u.trophy_id
+on conflict do nothing;
 
 -- ---- Catalogue (généré depuis docs/TROPHEES.md) ----------------------------------
 
@@ -5505,6 +5550,7 @@ revoke all on function public._tr_progress(uuid, text, jsonb) from public, anon,
 revoke all on function public.evaluate_trophies(uuid, text) from public, anon, authenticated;
 revoke all on function public._after_finish_trophies(uuid, uuid[]) from public, anon, authenticated;
 revoke all on function public._tenue_slot_ok(uuid, text, integer) from public, anon, authenticated;
+revoke all on function public._trophy_reward_tenue() from public, anon, authenticated;
 revoke all on function public.my_trophy_progress(text) from public, anon;
 grant execute on function public.my_trophy_progress(text) to authenticated;
 

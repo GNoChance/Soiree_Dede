@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
+import { isSecretTenue } from '@/data/tenues'
 import { supabase } from '@/lib/supabase'
 import type { TrophyProgress } from '@/types/db'
 
 /**
  * Le sticker de rang `slot` de la planche de la tenue portée (donc débloquée) est-il utilisable ?
  * Slot 1 (joie) et stickers bonus (slot > 12) : offerts avec la tenue ; slots 2..12 : trophée de ce slot obtenu
- * (`trophyId` = trophyForSlot(tenue, slot)?.id). Miroir de `_tenue_slot_ok` (supabase/features/trophees.sql),
- * qui reste l'autorité côté serveur.
+ * (`trophyId` = trophyForSlot(tenue, slot)?.id). Tenue secrète (`tenue`, ex. Madame Irma) : tous les stickers sont
+ * offerts. Miroir de `_tenue_slot_ok` (supabase/features/trophees.sql), qui reste l'autorité côté serveur.
  */
-export function slotUnlocked(slot: number, trophyUnlocks: Record<string, string>, trophyId: string | undefined): boolean {
+export function slotUnlocked(slot: number, trophyUnlocks: Record<string, string>, trophyId: string | undefined, tenue?: string): boolean {
   if (slot < 1) return false
-  if (slot === 1 || slot > 12) return true
+  if (slot === 1 || slot > 12 || isSecretTenue(tenue)) return true
   return Boolean(trophyId && trophyUnlocks[trophyId])
 }
 

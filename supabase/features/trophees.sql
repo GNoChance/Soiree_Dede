@@ -174,7 +174,9 @@ begin
         -- compteur persistant (le chat est purgé en fin de soirée), incrémenté par send_soiree_message
         select coalesce(max(stickers_sent), 0) into v from public.player_stats where profile_id = p_profile;
       when 'tenues' then
-        select count(*) into v from public.tenue_unlocks where profile_id = p_profile;
+        -- tenues gagnées aux victoires : la tenue secrète offerte par un trophée (Madame Irma) ne compte pas
+        select count(*) into v from public.tenue_unlocks u join public.tenues x on x.id = u.tenue_id
+         where u.profile_id = p_profile and x.condition_type <> 'trophy';
       when 'full_board' then
         select coalesce(max(c), 0) into v from (
           select count(*) as c from public.trophy_unlocks u join public.trophies t on t.id = u.trophy_id
@@ -292,17 +294,43 @@ end $$;
 -- ---- Stickers de tenue : droit d'usage -----------------------------------------
 
 -- Le joueur peut-il utiliser le sticker de rang p_slot de la planche de la tenue p_tenue ?
--- Tenue débloquée ET (slot 1 | slot > 12 (bonus) | trophée (tenue, slot) obtenu).
+-- Tenue débloquée ET (slot 1 | slot > 12 (bonus) | tenue secrète (condition 'trophy' : tous ses stickers
+-- sont offerts, la tenue étant déjà la récompense) | trophée (tenue, slot) obtenu).
 create or replace function public._tenue_slot_ok(p_profile uuid, p_tenue text, p_slot integer)
 returns boolean language sql stable security definer
 set search_path = public, extensions
 as $$
   select p_slot >= 1
      and exists (select 1 from public.tenue_unlocks u where u.profile_id = p_profile and u.tenue_id = p_tenue)
-     and (p_slot = 1 or p_slot > 12 or exists (
+     and (p_slot = 1 or p_slot > 12
+          or exists (select 1 from public.tenues x where x.id = p_tenue and x.condition_type = 'trophy')
+          or exists (
            select 1 from public.trophies t join public.trophy_unlocks tu on tu.trophy_id = t.id
             where t.tenue_id = p_tenue and t.slot = p_slot and tu.profile_id = p_profile))
 $$;
+
+-- ---- Trophée -> tenue secrète ---------------------------------------------------
+-- Obtenir un trophée qui est la clé d'une tenue secrète (tenues.trophy_id, ex. gen_madame_irma -> irma)
+-- débloque cette tenue. Un trigger couvre tous les chemins d'attribution (fin de partie, evaluate_trophy…).
+create or replace function public._trophy_reward_tenue()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  insert into public.tenue_unlocks(profile_id, tenue_id)
+  select new.profile_id, x.id from public.tenues x where x.trophy_id = new.trophy_id
+  on conflict do nothing;
+  return null;
+end $$;
+
+drop trigger if exists trophy_unlocks_reward_tenue on public.trophy_unlocks;
+create trigger trophy_unlocks_reward_tenue after insert on public.trophy_unlocks
+  for each row execute function public._trophy_reward_tenue();
+
+-- Rattrapage (idempotent) : trophées déjà obtenus avant la mise en place de la tenue secrète.
+insert into public.tenue_unlocks(profile_id, tenue_id)
+select u.profile_id, x.id from public.trophy_unlocks u join public.tenues x on x.trophy_id = u.trophy_id
+on conflict do nothing;
 
 -- ---- Catalogue (généré depuis docs/TROPHEES.md) ----------------------------------
 
@@ -607,5 +635,6 @@ revoke all on function public._tr_progress(uuid, text, jsonb) from public, anon,
 revoke all on function public.evaluate_trophies(uuid, text) from public, anon, authenticated;
 revoke all on function public._after_finish_trophies(uuid, uuid[]) from public, anon, authenticated;
 revoke all on function public._tenue_slot_ok(uuid, text, integer) from public, anon, authenticated;
+revoke all on function public._trophy_reward_tenue() from public, anon, authenticated;
 revoke all on function public.my_trophy_progress(text) from public, anon;
 grant execute on function public.my_trophy_progress(text) to authenticated;
