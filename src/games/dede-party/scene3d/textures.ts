@@ -68,16 +68,18 @@ export function makeCellTop(type: CellType, anisotropy: number): THREE.CanvasTex
   ctx.stroke()
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.font = `${type === 'start' ? 118 : 138}px ${EMOJI_FONT}`
-  ctx.fillText(info.emoji, S / 2, type === 'start' ? 104 : 138)
-  if (type === 'start') {
+  // Départ et Halte (ponton, gare) : l'émoji en haut, le mot en dessous.
+  const word = type === 'start' ? 'DÉPART' : type === 'halt' ? 'HALTE' : null
+  ctx.font = `${word ? 118 : 138}px ${EMOJI_FONT}`
+  ctx.fillText(info.emoji, S / 2, word ? 104 : 138)
+  if (word) {
     ctx.font = `800 46px ${FONT}`
     ctx.lineJoin = 'round'
     ctx.strokeStyle = '#fff6e5'
     ctx.lineWidth = 10
-    ctx.strokeText('DÉPART', S / 2, 204)
+    ctx.strokeText(word, S / 2, 204)
     ctx.fillStyle = INK
-    ctx.fillText('DÉPART', S / 2, 204)
+    ctx.fillText(word, S / 2, 204)
   }
   return tex(c, anisotropy)
 }
@@ -304,4 +306,44 @@ export function makeFloor(a: string, b: string): THREE.CanvasTexture {
     ctx.fill()
   }
   return tex(c, 4)
+}
+
+/** Aplat à pois (chapeau de champignon, bâche…) : fond + pois clairs, répétable. */
+export function makeDots(bg: string, dot: string, n = 5): THREE.CanvasTexture {
+  const S = 128
+  const [c, ctx] = canvas(S, S)
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, S, S)
+  ctx.fillStyle = dot
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < 2; j++) {
+      const x = ((i + (j ? 0.5 : 0)) / n) * S
+      const y = (j ? 0.68 : 0.25) * S
+      ctx.beginPath()
+      ctx.arc(x, y, S * 0.075, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  const t = tex(c)
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return t
+}
+
+/** Écran de régie : fond coloré, liseré, gros emoji au centre. */
+export function makeScreen(emoji: string, bg: string): THREE.CanvasTexture {
+  const W = 128
+  const H = 96
+  const [c, ctx] = canvas(W, H)
+  ctx.fillStyle = INK
+  ctx.fillRect(0, 0, W, H)
+  roundRect(ctx, 7, 7, W - 14, H - 14, 12)
+  ctx.fillStyle = bg
+  ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'
+  for (let y = 10; y < H - 10; y += 6) ctx.fillRect(9, y, W - 18, 2)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `56px ${EMOJI_FONT}`
+  ctx.fillText(emoji, W / 2, H / 2 + 3)
+  return tex(c)
 }

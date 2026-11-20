@@ -1,5 +1,6 @@
 /**
- * Répliques de Dédé, l'animatrice de l'émission. `{name}` = le joueur concerné.
+ * Répliques de Dédé, l'animatrice de l'émission. `{name}` = le joueur concerné, `{n}` = un nombre,
+ * `{zone}` = un quartier (ou un raton de la famille).
  * Choix déterministe (même réplique sur la télé et les téléphones pour un même évènement).
  */
 
@@ -51,6 +52,37 @@ export type LineKind =
   | 'lift'
   | 'ice'
   | 'luge'
+  // Les grandes tailles (spec grands plateaux §5).
+  | 'open_grand_m'
+  | 'open_mer_m'
+  | 'open_mer_l'
+  | 'open_kermesse_m'
+  | 'open_camping_m'
+  | 'open_ski_m'
+  | 'open_ski_l'
+  | 'spread'
+  | 'teaser_grand'
+  | 'teaser_mer'
+  | 'teaser_kermesse'
+  | 'teaser_camping'
+  | 'teaser_ski'
+  | 'gate_in'
+  | 'gate_miss'
+  | 'ferry'
+  | 'ferry_miss'
+  | 'ferry_back'
+  | 'halt'
+  | 'cabin'
+  | 'cabin_miss'
+  | 'piste'
+  | 'pic'
+  | 'descent'
+  | 'pack_steal'
+  | 'pack_drop'
+  | 'pack_none'
+  | 'pack_move'
+  | 'tide_up_many'
+  | 'tide_wash_isle'
 
 const LINES: Record<LineKind, string[]> = {
   intro: [
@@ -306,6 +338,72 @@ const LINES: Record<LineKind, string[]> = {
     'Youhou ! {name} dévale la Grande Luge jusqu’au Départ.',
     'La Grande Luge pour {name} ! Tenez bien vos bonnets.',
   ],
+
+  // --- Les grandes tailles : générique.
+  open_grand_m: [
+    'On est nombreux ce soir : j’ouvre les Coulisses et la Régie. Ne touchez à aucun bouton !',
+    'Grand format ! Les Coulisses à gauche, la Régie devant. Un aiguillage sur deux vous y envoie.',
+  ],
+  open_mer_m: [
+    'Vous êtes tant que ça ? Alors on prend le large : l’Île aux Mouettes et l’Île Coco sont ouvertes !',
+    'Grand format : deux îles de plus. Le bac est à quai une fois sur deux, à vous de tomber dessus.',
+  ],
+  open_mer_l: [
+    'Sept, huit… il me faut tout l’archipel ! Cinq îles, cinq bacs, et une marée pour tout le monde.',
+    'Format géant ! Mouettes, Coco, Piton, Pirates, Crabes : chacun son île pour commencer.',
+  ],
+  open_kermesse_m: [
+    'Ce soir la kermesse voit grand : le Train Fantôme et le Grand Huit sont ouverts. Et la Tombola a quatre guichets !',
+    'Grand format ! Passez le tourniquet… s’il veut bien tourner.',
+  ],
+  open_camping_m: [
+    'Le camping affiche complet : j’ouvre les sentiers. Riton a prévenu sa famille, méfiez-vous de Rita et du petit Ritou.',
+    'Grand format ! Le Sous-bois d’un côté, la Rivière de l’autre, et un raton dans chaque coin.',
+  ],
+  open_ski_m: [
+    'Vous êtes nombreux : j’ouvre Dédé 2500 ! Une cabine sur deux part vers la Combe aux Chamois, les autres vont aux Alpages.',
+    'Grand format ! On monte en télécabine, on redescend par la piste.',
+  ],
+  open_ski_l: [
+    'Format géant : tout le domaine est ouvert, jusqu’au Pic du Dédé. Là-haut, la Grande Descente vous attend !',
+    'Dédé 3000 est ouvert ! Le Glacier à gauche, la Crête des Aigles à droite, et le Pic au bout des deux.',
+  ],
+  spread: [
+    'Chacun son ponton pour commencer ! On se retrouve tous sur la Grande Île.',
+    'Tout le monde descend à sa gare ! Rendez-vous à la Station… ou au Pic.',
+  ],
+  teaser_grand: ['Derrière le rideau ? Les Coulisses. Je les ouvre à partir de 5 joueurs !'],
+  teaser_mer: ['Vous voyez ces îles dans la brume ? Revenez à 5, je mets le bac en service.'],
+  teaser_kermesse: ['La palissade ? Chut… c’est le Train Fantôme. Ouverture à 5 joueurs.'],
+  teaser_camping: ['Le sentier est fermé ce soir. À 5, je lève la barrière.'],
+  teaser_ski: ['La montagne derrière moi, c’est Dédé 2500. Il faut être 5 pour y monter !'],
+
+  // --- Portes et transports.
+  gate_in: ['{name} file vers {zone} !', 'Par ici, {name} : {zone}, c’est par là.', 'La porte est ouverte : {name} disparaît vers {zone}.'],
+  gate_miss: ['Fermé pour {name} ! Le prochain passera.', '{name} continue tout droit. Ce sera pour le suivant !'],
+  ferry: ['Le bac est à quai : {name} embarque pour {zone} !', 'Larguez les amarres ! {name} met le cap sur {zone}.', '{name} monte à bord. Gilet de sauvetage obligatoire !'],
+  ferry_miss: ['Le bac vient de partir… {name} reste sur la Grande Île.', 'Trop tard, {name} : le bac est au large. Il revient !'],
+  ferry_back: ['Fin de l’escale : la navette ramène {name} sur la Grande Île.', '{name} rentre au port, des coquillages plein les poches.'],
+  halt: ['Bienvenue sur {zone}, {name} : 5 pièces de bienvenue !', '{name} débarque : 5 pièces, cadeau de la maison.'],
+  cabin: ['Une cabine pour {name} ! Direction {zone}.', '{name} grimpe en télécabine. Ne vous penchez pas au-dehors !', 'Ça monte pour {name} : {zone}, tout le monde descend.'],
+  cabin_miss: ['La cabine vient de partir : {name} continue à pied.', 'Pas de cabine pour {name}, la suivante est pour le prochain.'],
+  piste: ['La piste est ouverte : {name} redescend à la Station tout schuss !', '{name} dévale la piste. Poussez-vous, les skieurs !', 'Retour à la Station pour {name}, les cheveux au vent.'],
+  pic: ['{name} est au Pic du Dédé ! Quelle vue… et quelle descente en perspective.', 'Le sommet pour {name} ! On plante le drapeau.'],
+  descent: [
+    'LA GRANDE DESCENTE ! {name} dévale toute la montagne jusqu’au Départ : 5 pièces à l’arrivée !',
+    '{name} s’élance du Pic… Rendez-vous en bas !',
+    'Du Pic à la Station d’une seule traite : chapeau, {name} !',
+  ],
+
+  // --- La famille Raton ({zone} = Rita ou Ritou).
+  pack_steal: ['{zone} fait les poches de {name} ! C’est de famille.', 'Tel père, telle fille : {zone} repart avec les pièces de {name}.'],
+  pack_drop: ['{zone} sursaute et lâche son sac : tout est pour {name} !', 'Merci {zone} ! {name} ramasse le butin.'],
+  pack_none: ['{zone} fouille {name}… rien. La relève n’est pas encore au point.'],
+  pack_move: ['Toute la famille Raton fait sa ronde… Cachez vos pièces !', 'Riton au camp, Rita au sous-bois, Ritou à la rivière : la tournée du soir.'],
+
+  // --- La marée sur plusieurs bancs.
+  tide_up_many: ['Marée haute sur tout l’archipel ! {n} à la baille, je note.', 'La mer monte partout à la fois : {n} baigneurs surpris !'],
+  tide_wash_isle: ['Le gué disparaît sous {name} ! 5 pièces pour les crabes.', '{name} cherchait le trésor… c’est la mer qui l’a trouvé.', '{name} n’a pas vu monter la mer… Plouf ! 5 pièces au fond de l’eau.'],
 }
 
 function hash(key: string): number {
@@ -318,9 +416,9 @@ function hash(key: string): number {
 }
 
 /** Réplique de Dédé pour un évènement (même `key` = même réplique partout). `{n}` = nombre de pièces. */
-export function dedeLine(kind: LineKind, key: string, name = '', n?: number): string {
+export function dedeLine(kind: LineKind, key: string, name = '', n?: number, zone = ''): string {
   const list = LINES[kind]
-  return list[hash(`${kind}:${key}`) % list.length].replace(/\{name\}/g, name).replace(/\{n\}/g, String(n ?? ''))
+  return list[hash(`${kind}:${key}`) % list.length].replace(/\{name\}/g, name).replace(/\{n\}/g, String(n ?? '')).replace(/\{zone\}/g, zone)
 }
 
 /** Nombre total de répliques (pour les docs / tests). */

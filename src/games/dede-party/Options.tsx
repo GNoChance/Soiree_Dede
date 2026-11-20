@@ -1,12 +1,30 @@
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { cn } from '@/lib/cn'
 import type { GameOptionsProps } from '../types'
-import { BOARDS, MAP_IDS } from './board'
+import { BOARDS, MAP_IDS, SIZED, SIZE_LABEL, sizeFor, type MapId, type SizeId } from './board'
 import { BoardThumb } from './BoardThumb'
 import { DP_DURATION, DP_ROUNDS, normalizeOptions, type DpMapChoice } from './setup'
 
+/** Pastille de format d'un plateau selon le nombre de joueurs du salon (rien en format classique). */
+function sizePill(map: MapId, players: number): string | null {
+  const size = sizeFor(map, players)
+  const b = SIZED[map][size]
+  if (size === 's' || !b) return null
+  const extra = size === 'l' ? (map === 'ski' ? 'tout le domaine, jusqu’au Pic' : 'l’archipel au complet') : `${b.quarters.length} quartiers en plus`
+  return `${SIZE_LABEL[size]} · ${b.cells.length} cases · ${extra}`
+}
+
+/** Format « Au hasard » : le plus grand format que le tirage peut donner (selon le nombre de joueurs). */
+function randomPill(players: number): string | null {
+  const sizes: SizeId[] = MAP_IDS.map((id) => sizeFor(id, players))
+  const top = sizes.includes('l') ? 'l' : sizes.includes('m') ? 'm' : null
+  if (top === 'm') return SIZE_LABEL.m
+  // À 7-8 joueurs, seuls la mer et le ski passent en format géant.
+  return top === 'l' ? `${SIZE_LABEL.m}, géant sur ${MAP_IDS.filter((id) => sizeFor(id, players) === 'l').map((id) => BOARDS[id].emoji).join(' et ')}` : null
+}
+
 /** Options (hôte) : plateau (défaut « Au hasard »), durée de l'émission + rappel du mode télé. */
-export function DedePartyOptions({ options, onChange }: GameOptionsProps) {
+export function DedePartyOptions({ options, onChange, playerCount }: GameOptionsProps) {
   const o = normalizeOptions(options)
   const pick = (map: DpMapChoice) => onChange({ ...options, map })
   const card = (selected: boolean) =>
@@ -30,6 +48,7 @@ export function DedePartyOptions({ options, onChange }: GameOptionsProps) {
                 </span>
                 <BoardThumb board={b} className="h-10 w-auto self-center" />
                 <span className={cn('text-xs font-bold', on ? 'opacity-80' : 'text-muted')}>{b.pitch}</span>
+                <FormatPill text={sizePill(id, playerCount)} />
               </button>
             )
           })}
@@ -42,6 +61,7 @@ export function DedePartyOptions({ options, onChange }: GameOptionsProps) {
               {MAP_IDS.map((id) => BOARDS[id].emoji).join('')}
             </span>
             <span className={cn('text-xs font-bold', o.map === 'random' ? 'opacity-80' : 'text-muted')}>Surprise : l’un des 5, jamais le même que la dernière fois.</span>
+            <FormatPill text={randomPill(playerCount)} />
           </button>
         </div>
       </div>
@@ -63,4 +83,9 @@ export function DedePartyOptions({ options, onChange }: GameOptionsProps) {
       </div>
     </div>
   )
+}
+
+function FormatPill({ text }: { text: string | null }) {
+  if (!text) return null
+  return <span className="rounded-chip border-2 border-ink bg-grape px-1.5 py-0.5 text-[11px] leading-tight font-extrabold text-white">🗺️ {text}</span>
 }

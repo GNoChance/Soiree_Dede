@@ -32,9 +32,29 @@ export interface ThemeCtx {
   TOP_Y: number
   halfX: number
   halfZ: number
-  /** Toiles de fond : plan du fond (z) et plan de droite (x). */
+  /** Toiles de fond : plan du fond (z) et plan de droite (x) — repoussées au-delà de l'emprise en grande taille. */
   zWall: number
   xWall: number
+  /**
+   * Emprise des cases ouvertes en coordonnées monde. L'origine reste au centre du plateau de base (taille S) à
+   * toutes les tailles : `grid(col, row)` est juste pour les quartiers (colonnes / lignes négatives ou > 10).
+   * Taille du tracé et quartiers : `board.size`, `board.quarters` (ouverts), `board.closed` (fermés : le
+   * voile générique et la plaque « 🔒 » sont posés par PartyScene), `board.alt` (altitude des cases, ski).
+   */
+  ext: { minX: number; maxX: number; minZ: number; maxZ: number }
+  /** Télé (plus de détails permis). */
+  tv: boolean
+  /**
+   * Décor « détail » (petits objets d'un quartier) : masqué au téléphone en grande taille quand il est à plus de
+   * 22 unités de la cible de la caméra, et en vue d'ensemble. `at` : position de référence (défaut : celle de l'objet).
+   */
+  detail: (obj: THREE.Object3D, at?: THREE.Vector3) => void
+  /** Socle (tapis) d'un quartier ouvert, posé par PartyScene : le thème peut le recolorer ou le masquer. */
+  socle: (id: string) => THREE.Group | null
+  /** Mon pion (téléphone, grande taille) : pour cadrer le raton ou le banc de MA zone pendant l'épilogue. */
+  focusId: () => string | null
+  /** Cible courante de la caméra (lecture seule). */
+  camTarget: () => THREE.Vector3
   /** Position monde d'une case / d'un point de grille (décimales permises). */
   cellPos: (i: number, out?: THREE.Vector3) => THREE.Vector3
   grid: (col: number, row: number, y?: number, out?: THREE.Vector3) => THREE.Vector3
@@ -79,6 +99,8 @@ export interface ThemeRuntime {
   focus?: (view: BoardView) => THREE.Vector3 | null
   /** Dé à faire rouler hors pion (dé de Riton). */
   dieAnchor?: (view: BoardView) => { pos: THREE.Vector3; value: number; t: number } | null
+  /** Plusieurs dés hors pion (la famille Raton : un dé au-dessus de chaque raton, 3 au plus) ; prioritaire sur dieAnchor. */
+  dieAnchors?: (view: BoardView) => Array<{ pos: THREE.Vector3; value: number; t: number }>
   /** Thème clair / sombre basculé. */
   applyTheme?: (dark: boolean) => void
 }

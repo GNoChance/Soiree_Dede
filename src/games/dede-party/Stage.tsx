@@ -3,7 +3,7 @@
  * (qui joue, ce qui vient d'arriver, la bulle de Dédé). Si WebGL est indisponible ou perdu : repli
  * automatique sur le plateau 2D (`Board`), même informations.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { hasTenueArt, tenueArtDir, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
 import { chibiUrl } from '@/data/characters'
@@ -14,6 +14,7 @@ import { serverNow } from '@/features/soiree/useServerClock'
 import { boardViewAt, type BoardView } from './anim'
 import { boardOf } from './board'
 import { Board } from './GameBoard'
+import { MiniMap, type GridBox } from './MiniMap'
 import type { Get } from './Parts'
 import type { PartyScene, ScenePlayer } from './scene3d/PartyScene'
 import type { DedePartyState } from './types'
@@ -48,15 +49,24 @@ interface StageProps {
   /** Contenu du milieu du plateau 2D (repli sans WebGL). */
   center?: ReactNode
   className?: string
+  /** Mon joueur (téléphone) : en grande taille, pendant le lancer, la caméra cadre mon pion (vue perso). */
+  meId?: string
+  /** Page de démo : la scène 3D une fois montée (mesures de performance). */
+  onScene?: (scene: PartyScene | null) => void
 }
 
-export function Stage({ s, view, get, big, top, bottom, center, className }: StageProps) {
+export function Stage({ s, view, get, big, top, bottom, center, className, meId, onScene }: StageProps) {
+  const onSceneRef = useRef(onScene)
+  useEffect(() => {
+    onSceneRef.current = onScene
+  }, [onScene])
   const host = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<PartyScene | null>(null)
   const [ready, setReady] = useState(false)
   const [flat, setFlat] = useState(() => !webglAvailable())
-  const board = boardOf(s.map)
+  const board = boardOf(s.map, s.size)
   const mapId = board.id
+  const size = board.size
   const sRef = useRef(s)
   useEffect(() => {
     sRef.current = s
@@ -94,7 +104,7 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
           dedeUrl: chibiSrc('dede', 'host', 'joie', false),
           dedeFallback: chibiUrl('dede', 'joie', 'default', false),
           big,
-          board: boardOf(mapId),
+          board: boardOf(mapId, size),
           onLost: () => setFlat(true),
         })
       })
@@ -103,6 +113,7 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
         if (!alive) return sc.dispose()
         scene = sc
         sceneRef.current = sc
+        onSceneRef.current?.(sc)
         sc.setPhase(sRef.current.phase)
         sc.setPlayers(playersRef.current)
         setReady(true)
@@ -117,11 +128,44 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
       scene?.dispose()
       setReady(false)
     }
-    // Le plateau ne change pas pendant une partie : la scène n'est recréée que si l'on change de plateau.
-  }, [flat, big, mapId])
+    // Le plateau ne change pas pendant une partie : la scène n'est recréée que si l'on change de plateau (ou de taille).
+  }, [flat, big, mapId, size])
+
+  // Vue perso (téléphone, grandes tailles) : la caméra cadre mon pion pendant le lancer.
+  const focusId = !big && size !== 's' && meId && s.players.includes(meId) ? meId : null
+  useEffect(() => {
+    if (ready) sceneRef.current?.setFocus(focusId)
+  }, [focusId, ready])
+
+  // Bouton « 🗺️ » (téléphone, grandes tailles) : mini-carte plein cadre et vue d'ensemble forcée.
+  const [mapOpen, setMapOpen] = useState(false)
+  const showMap = mapOpen && !big && size !== 's'
+  useEffect(() => {
+    if (ready) sceneRef.current?.setOverview(showMap)
+  }, [showMap, ready])
+  // Télé : mini-carte dans le coin (taille L : toujours ; taille M : pendant les déplacements), avec le cadre de la caméra.
+  const tvMap = Boolean(big) && !flat && (size === 'l' || (size === 'm' && s.phase === 'move'))
+  const frame = useViewFrame(sceneRef, tvMap && ready)
 
   if (flat) {
     // Repli 2D : tout est dans le plateau (le milieu porte qui joue et Dédé).
+    if (big && size !== 's') {
+      // Grandes tailles à la télé : le plateau entier à l'échelle, le milieu au-dessus.
+      return (
+        <div className="flex size-full flex-col items-center gap-2">
+          {center && (
+            <div className="shrink-0" style={{ zoom: 0.5 }}>
+              {center}
+            </div>
+          )}
+          <div className="flex min-h-0 w-full flex-1 items-center justify-center" style={{ containerType: 'size' }}>
+            <div style={{ width: `min(100cqw, calc(100cqh * ${board.cols} / ${board.rows}))` }}>
+              <Board s={s} view={view} get={get} big />
+            </div>
+          </div>
+        </div>
+      )
+    }
     if (big) {
       return (
         <div className="flex size-full items-center justify-center" style={{ containerType: 'size' }}>
@@ -133,7 +177,7 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
     }
     return (
       <div className="flex flex-col items-center gap-2">
-        <Board s={s} view={view} get={get} portrait center={center} />
+        <Board s={s} view={view} get={get} portrait center={center} meId={meId} />
         {bottom}
       </div>
     )
@@ -153,7 +197,57 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
         )}
       </AnimatePresence>
       {ready && top && <div className={cn('pointer-events-none absolute inset-x-0 top-0 flex justify-center', big ? 'p-4' : 'p-2')}>{top}</div>}
-      {ready && bottom && <div className={cn('pointer-events-none absolute inset-x-0 bottom-0 flex justify-center', big ? 'p-4' : 'p-2')}>{bottom}</div>}
+      {ready && bottom && <div className={cn('pointer-events-none absolute inset-x-0 bottom-0 flex justify-center', big ? 'p-4' : 'p-2', tvMap && 'pl-[332px]')}>{bottom}</div>}
+      {ready && tvMap && (
+        <div className="pointer-events-none absolute bottom-4 left-4 h-[190px] w-[300px]">
+          <MiniMap board={board} snap={view.snap} order={s.order} get={get} highlight={view.mover?.id ?? null} frame={frame} fit className="size-full" />
+        </div>
+      )}
+      {ready && !big && size !== 's' && (
+        <>
+          <AnimatePresence>
+            {showMap && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                className="absolute inset-0 z-20 flex flex-col gap-1 bg-paper/90 p-2 pt-14 backdrop-blur-[2px]"
+              >
+                <MiniMap board={board} snap={view.snap} order={s.order} get={get} meId={meId} highlight={view.mover?.id ?? null} orient="ccw" fit className="min-h-0 w-full flex-1" />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <button
+            type="button"
+            onClick={() => setMapOpen((x) => !x)}
+            className={cn('sticker-sm absolute top-2 right-2 z-30 flex h-11 min-w-11 items-center justify-center px-2 font-display text-2xl leading-none active:translate-y-0.5', showMap ? 'bg-sun text-[#1f1b2e]' : 'bg-surface')}
+            aria-label={showMap ? 'Revenir au plateau' : 'Voir la carte du plateau'}
+            aria-pressed={showMap}
+          >
+            {showMap ? '✕' : '🗺️'}
+          </button>
+        </>
+      )}
     </div>
   )
+}
+
+/** Cadre de la caméra (grille brute), relu ~5 fois par seconde tant que `on`. */
+function useViewFrame(sceneRef: RefObject<PartyScene | null>, on: boolean): GridBox | null {
+  const [frame, setFrame] = useState<GridBox | null>(null)
+  useEffect(() => {
+    if (!on) return
+    const read = () => {
+      const f = sceneRef.current?.viewFrame() ?? null
+      setFrame((old) => {
+        if (old === f) return old
+        if (old && f && old.c0 === f.c0 && old.r0 === f.r0 && old.c1 === f.c1 && old.r1 === f.r1) return old
+        return f ? { ...f } : null
+      })
+    }
+    read()
+    const id = window.setInterval(read, 200)
+    return () => clearInterval(id)
+  }, [sceneRef, on])
+  return on ? frame : null
 }

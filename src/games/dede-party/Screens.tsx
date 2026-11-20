@@ -10,14 +10,24 @@ import { withUnit } from '../le-plus-proche/setup'
 import { dedeLine } from './dede-lines'
 import { MG_ORDER, MINIGAMES } from './minigames'
 import { fmtSec } from './minigames/common'
-import { eventLabel, mechChip, type BoardView, type EpiView } from './anim'
-import { boardOf, type BoardDef } from './board'
+import { eventLabel, introLine, mechChip, type BoardView, type EpiView } from './anim'
+import { boardOf, SIZE_LABEL, type BoardDef } from './board'
 import { DedeHost, Die, type Get } from './Parts'
 import { RITON_DIE_MS, WASH_AT_MS, type DedePartyState, type DpMech, type DpMg, type DpMgResult } from './types'
 
 /** Générique : « Bienvenue dans Dédé Party ! », le plateau du soir et sa mécanique, les candidats. */
 export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?: boolean }) {
-  const b = boardOf(s.map)
+  const b = boardOf(s.map, s.size)
+  // Grande taille : une ligne de plus (« Grand format : l'Île aux Mouettes et l'Île Coco sont ouvertes ! »).
+  const opened = b.quarters.map((q) => q.name)
+  const sizeLine =
+    b.size === 'l' && b.id === 'mer'
+      ? 'Format géant : l’archipel au complet, chacun son île pour commencer !'
+      : b.size === 'l'
+        ? 'Format géant : tout le domaine est ouvert, jusqu’au Pic du Dédé !'
+        : b.size === 'm'
+          ? `${SIZE_LABEL.m} : ${opened.length > 1 ? `${opened.slice(0, -1).join(', ')} et ${opened[opened.length - 1]} sont ouverts` : `${opened[0]} est ouvert`} !`
+          : null
   return (
     <div className={cn('flex flex-col items-center text-center', big ? 'gap-4' : 'gap-3')}>
       <motion.h2
@@ -39,8 +49,9 @@ export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?
           Ce soir : {b.emoji} {b.name}
         </span>
         <span className={cn('font-bold leading-snug', big ? 'text-2xl' : 'text-sm')}>{b.rule}</span>
+        {sizeLine && <span className={cn('sticker-sm mt-1 bg-grape/25 px-2 py-0.5 font-display font-extrabold leading-snug', big ? 'text-2xl' : 'text-sm')}>{b.title ? `${b.title} · ` : ''}{sizeLine}</span>}
       </motion.div>
-      <DedeHost line={s.map ? dedeLine(`map_${b.id}` as const, String(s.players.length)) : dedeLine('intro', String(s.players.length))} size={big ? 150 : 80} big={big} expression="joie" />
+      <DedeHost line={introLine(s)} size={big ? 150 : 80} big={big} expression="joie" />
       <div className="flex flex-wrap justify-center gap-3">
         {s.order.map((id, i) => {
           const p = get(id)
@@ -307,8 +318,8 @@ export function AwardsScreen({ s, get, big }: { s: DedePartyState; get: Get; big
 }
 
 /** Puce de la mécanique du plateau (à côté du tour en cours) : marée, cagnotte, sac de Riton. */
-export function MechChip({ board, mech, big, className }: { board: BoardDef; mech: DpMech | undefined; big?: boolean; className?: string }) {
-  const chip = mechChip(board, mech)
+export function MechChip({ board, mech, big, className, meCell }: { board: BoardDef; mech: DpMech | undefined; big?: boolean; className?: string; meCell?: number }) {
+  const chip = mechChip(board, mech, meCell)
   if (!chip) return null
   return (
     <motion.span
@@ -319,6 +330,7 @@ export function MechChip({ board, mech, big, className }: { board: BoardDef; mec
       className={cn('sticker-sm inline-block px-2 py-0.5 text-center font-display font-extrabold leading-tight', chip.alert ? 'bg-tomato text-white' : 'bg-surface/95', big ? 'text-2xl' : 'text-sm', className)}
     >
       {chip.text}
+      {chip.sub && <span className={cn('block font-bold opacity-75', big ? 'text-lg' : 'text-[11px]')}>{chip.sub}</span>}
     </motion.span>
   )
 }
@@ -335,8 +347,9 @@ function epiText(epi: EpiView, get: Get): { title: string; detail: string | null
     }
   }
   const last = epi.events[0]
+  const family = d.pack?.length ? `🦝 La ronde des ratons${epi.t >= RITON_DIE_MS ? ` : 🎲 ${[d.die, ...d.pack.map((p) => p.die)].join(' · ')}` : '…'}` : null
   return {
-    title: `🦝 La ronde de Riton${epi.t >= RITON_DIE_MS ? ` : 🎲 ${d.die}` : '…'}`,
+    title: family ?? `🦝 La ronde de Riton${epi.t >= RITON_DIE_MS ? ` : 🎲 ${d.die}` : '…'}`,
     detail: last ? `${get(last.id ?? '').nickname} : ${eventLabel(last, (id) => get(id).nickname)}` : null,
   }
 }

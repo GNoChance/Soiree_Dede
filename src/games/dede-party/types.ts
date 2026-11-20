@@ -2,7 +2,7 @@
  * Types de Dédé Party (contrat : supabase/games/dede-party.sql).
  * Phases : intro -> roll -> move -> mg_intro -> mg_play -> mg_result -> roll … -> awards -> finished.
  */
-import type { MapId } from './boards/types'
+import type { MapId, SizeId } from './boards/types'
 
 export type DpPhase = 'intro' | 'roll' | 'move' | 'mg_intro' | 'mg_play' | 'mg_result' | 'awards' | 'finished' | 'aborted'
 
@@ -14,8 +14,9 @@ export interface DpEvent {
    * toll : péage de la Tombola (d ≤ 0, pot = cagnotte après) ; jackpot : gros lot (d, pot = 5) ;
    * riton : croisement de Riton (k steal | drop | none, d, sack après) ; tp : télésiège / verglas (k, from, to).
    * wash : pion emporté par la vague (front seulement, tiré de l'épilogue de la marée).
+   * ride : transport pris (front seulement : bac, télécabine, piste, luge ; k = véhicule, from → cell, text = nom).
    */
-  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card' | 'fork' | 'toll' | 'jackpot' | 'riton' | 'tp' | 'wash'
+  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card' | 'fork' | 'toll' | 'jackpot' | 'riton' | 'tp' | 'wash' | 'ride'
   /** Pièces gagnées / perdues (start, clap, pub ; pickpocket, Téléthon). */
   d?: number
   /** Étoile : prix payé, nouvelles cases des étoiles (aussi carte « changement de décor »), achat pile sur la case. */
@@ -33,6 +34,10 @@ export interface DpEvent {
   sack?: number
   /** Riton : steal | drop | none ; tp : lift | ice. */
   k?: string
+  /** Départ : bonus d'une Halte (ponton, gare : +5 en y débarquant). */
+  halt?: boolean
+  /** Croisement d'un raton : 0 (absent) = Riton, 1 = Rita, 2 = Ritou (`mech.pack[who − 1]`). */
+  who?: number
   exact?: boolean
   need?: number
   /** Carte : id, texte, gain du tireur, dé relancé, joueur visé… */
@@ -68,6 +73,8 @@ export interface DpMech {
   /** Le Camping : case de Riton et contenu de son sac. */
   riton?: number
   sack?: number
+  /** Le Camping en grande taille : la famille Raton (Rita, Ritou), chacun sa case et son sac. */
+  pack?: Array<{ c: number; sack: number }>
 }
 
 export interface DpRitonHit {
@@ -80,8 +87,17 @@ export interface DpRitonHit {
 
 /** Épilogue du tour (joué après le dernier pion, EPI_MS). */
 export type DpEpi =
-  | { t: 'tide'; tide: 0 | 1; washed: Array<{ id: string; from: number; d: number }>; stars?: number[]; after: DpSnap }
-  | { t: 'riton'; die: number; from: number; path: number[]; hits: DpRitonHit[]; after: DpSnap }
+  | { t: 'tide'; tide: 0 | 1; washed: Array<{ id: string; from: number; d: number; to?: number }>; stars?: number[]; after: DpSnap }
+  | { t: 'riton'; die: number; from: number; path: number[]; hits: DpRitonHit[]; pack?: DpPackRound[]; after: DpSnap }
+
+/** Ronde d'un raton de la famille (Rita, Ritou) pendant l'épilogue : en même temps que celle de Riton. */
+export interface DpPackRound {
+  who: number
+  die: number
+  from: number
+  path: number[]
+  hits: DpRitonHit[]
+}
 
 export interface DpSnap {
   pos: Record<string, number>
@@ -219,6 +235,8 @@ export interface DedePartyState {
   sw: number[]
   /** Plateau de la partie (absent : partie lancée avant les 5 plateaux = Grand Plateau). */
   map?: MapId
+  /** Taille du plateau, figée au lancement (absente : partie lancée avant les grandes tailles = s). */
+  size?: SizeId
   mech?: DpMech
   /** Épilogue du tour (null quand le tour n'en a pas). */
   epi?: DpEpi | null

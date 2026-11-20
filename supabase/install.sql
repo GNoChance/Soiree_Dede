@@ -8406,7 +8406,9 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 -- JEU « dede-party » (Dédé Party, 5 plateaux) — idempotent.
 -- Dépend de schema.sql (game_action, start_match, finish_match).
 -- Conception : docs/superpowers/specs/2026-11-19-dede-party-design.md (section « Décisions ») et
--- docs/superpowers/specs/2026-11-20-dede-party-plateaux-design.md (les 5 plateaux).
+-- docs/superpowers/specs/2026-11-20-dede-party-plateaux-design.md (les 5 plateaux) et
+-- docs/superpowers/specs/2026-11-20-dede-party-grands-plateaux-design.md (tailles S / M / L selon le nombre de
+-- joueurs : quartiers, portes « un pion sur deux », transports, haltes, étoiles par zone, départs répartis).
 --
 -- Party game de plateau sur l'un des 5 plateaux (state.map) : grand (Le Grand Plateau, aiguillages qui
 -- basculent), mer (Dédé-sur-Mer, la marée), kermesse (la Tombola), camping (Riton le raton), ski (Dédé 2000,
@@ -8427,7 +8429,7 @@ revoke all on function public.game_dede_kart_action(jsonb, jsonb, uuid, boolean,
 create or replace function public._dp_const()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price":15,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":8,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000,"epi_s":4,"tide_low":2,"tide_high":1,"wash":5,"toll":3,"pot_seed":5,"riton_steal":5}'::jsonb $$;
+as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price":15,"start_coins":10,"start_bonus":5,"clap":3,"pub":3,"gains":[10,6,4,2],"roll_s":15,"move_s":5,"intro_s":8,"intro_m":10,"intro_l":12,"mg_intro_s":8,"mg_result_s":8,"awards_s":12,"star_cap":30,"chrono_target":7000,"epi_s":4,"tide_low":2,"tide_high":1,"wash":5,"toll":3,"pot_seed":5,"riton_steal":5}'::jsonb $$;
 
 -- Les plateaux sans paramètre (un seul plateau) disparaissent : tout prend désormais le plateau en paramètre.
 drop function if exists public._dp_board();
@@ -8440,63 +8442,143 @@ returns jsonb language sql immutable
 set search_path = public, extensions
 as $$ select '["grand","mer","kermesse","camping","ski"]'::jsonb $$;
 
--- Type de chaque case du plateau p_map (index 0 = Départ) ; plateau absent ou inconnu = Grand Plateau
--- (parties lancées avant les 5 plateaux). Dupliqué avec src/games/dede-party/boards/<id>.ts (CELLS) :
--- synchro vérifiée par tools/sql-tests/dede-party.mjs.
---   grand    : boucle 0-35, « La Scène » 36-40 (aiguillage 13, retour 15), « Tunnel de la pub » 41-46 (aiguillage 22, retour 25).
---   mer      : boucle 0-35, Banc de sable 36-44 (embranchement 12 commandé par la marée, retour 14).
---   kermesse : nœud papillon de 40 cases, Tombola en 13 et 33.
---   camping  : contour d'une croix, 36 cases.
---   ski      : escargot de 49 cases (télésièges / verglas), Grande Luge 48 → 0.
-create or replace function public._dp_board(p_map text)
+-- >>> tracés des plateaux : généré par tools/dede-party/write-sizes.mjs (S : boards/<id>.ts ; M / L : grands-plateaux-sim.mjs), ne pas éditer à la main.
+-- Tailles servies par plateau (spec grands plateaux §1.1 et §8).
+create or replace function public._dp_sizes()
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select case p_map
-  when 'mer' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","pub","clap","loge","env","clap","pub","loge","clap","pub","env","clap","loge","pub","clap","env","loge","clap","pub","clap","env","loge","pub","clap","clap","clap","env","clap","loge","clap","env","clap","clap"]'
-  when 'kermesse' then '["start","clap","loge","clap","pub","env","loge","clap","pub","clap","loge","clap","env","tombola","clap","loge","clap","pub","env","clap","loge","clap","pub","clap","env","loge","clap","pub","clap","env","loge","clap","pub","tombola","clap","env","loge","clap","pub","clap"]'
-  when 'camping' then '["start","clap","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap"]'
-  when 'ski' then '["start","clap","clap","lift","loge","pub","lift","env","clap","loge","pub","clap","lift","clap","env","lift","loge","pub","clap","env","clap","lift","loge","pub","clap","env","clap","pub","loge","clap","env","clap","pub","loge","clap","env","ice","clap","pub","loge","clap","env","clap","ice","pub","clap","ice","clap","loge"]'
+as $$ select '{"grand":["s","m"],"mer":["s","m","l"],"kermesse":["s","m"],"camping":["s","m"],"ski":["s","m","l"]}'::jsonb $$;
+
+-- Clé « plateau:taille » d'un tracé : plateau absent ou inconnu → grand (parties lancées avant les 5 plateaux) ;
+-- taille absente, inconnue ou que le plateau n'a pas → s (parties lancées avant les grandes tailles).
+create or replace function public._dp_key(p_map text, p_size text)
+returns text language sql immutable
+set search_path = public, extensions
+as $$
+  select m || ':' || case when coalesce(public._dp_sizes()->m, '[]'::jsonb) ? coalesce(p_size, '') then p_size else 's' end
+    from (select case when public._dp_maps() ? coalesce(p_map, '') then p_map else 'grand' end m) x
+$$;
+
+-- Type de chaque case (index 0 = Départ) du plateau p_map à la taille p_size. Dupliqué avec CELLS / CELLS_M / CELLS_L
+-- de src/games/dede-party/boards/<id>.ts : synchro vérifiée par tools/sql-tests/dede-party.mjs.
+create or replace function public._dp_board(p_map text, p_size text default 's')
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$ select case public._dp_key(p_map, p_size)
+  when 'grand:m' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","clap","pub","clap","env","loge","clap","pub","loge","clap","env","clap","clap","clap","env","loge","clap","pub","loge","clap","env","loge","pub","clap","clap","env","loge","clap","clap","pub","clap","pub","env","pub","clap","clap","clap","loge","clap","env","clap","pub","clap","loge","clap","env","clap","clap","clap","loge","clap","env","clap","pub","clap","loge","clap","env","clap","clap","clap","clap","env","pub","clap","loge","clap","env","pub","clap","env","loge","pub","clap","env","pub","clap","loge","clap","env","pub","clap","env","loge","pub","clap","env","clap"]'
+  when 'mer:s' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","pub","clap","loge","env","clap","pub","loge","clap","pub","env","clap","loge","pub","clap","env","loge","clap","pub","clap","env","loge","pub","clap","clap","clap","env","clap","loge","clap","env","clap","clap"]'
+  when 'mer:m' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","pub","clap","loge","env","clap","pub","loge","clap","pub","env","clap","loge","pub","clap","env","loge","clap","pub","clap","env","loge","pub","clap","clap","clap","env","clap","loge","clap","env","clap","clap","halt","loge","clap","pub","clap","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","env","clap","halt","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap"]'
+  when 'mer:l' then '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","pub","clap","loge","env","clap","pub","loge","clap","pub","env","clap","loge","pub","clap","env","loge","clap","pub","clap","env","loge","pub","clap","clap","clap","env","clap","loge","clap","env","clap","clap","halt","loge","clap","pub","clap","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","env","clap","halt","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","halt","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","halt","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","pub","env","clap","clap","env","loge","clap","clap","clap","halt","loge","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","clap","clap","pub","env","loge","clap","env","clap","pub","loge","clap","clap","loge","clap","clap","clap","clap","env","clap","loge","clap"]'
+  when 'kermesse:s' then '["start","clap","loge","clap","pub","env","loge","clap","pub","clap","loge","clap","env","tombola","clap","loge","clap","pub","env","clap","loge","clap","pub","clap","env","loge","clap","pub","clap","env","loge","clap","pub","tombola","clap","env","loge","clap","pub","clap"]'
+  when 'kermesse:m' then '["start","clap","loge","clap","pub","env","loge","clap","pub","clap","loge","clap","env","tombola","clap","loge","clap","pub","env","clap","loge","clap","pub","clap","env","loge","clap","pub","clap","env","loge","clap","pub","tombola","clap","env","loge","clap","pub","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","pub","clap","clap","loge","tombola","env","pub","clap","loge","clap","env","clap","pub","clap","clap","loge","clap","env","pub","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","pub","clap","clap","tombola","clap","env","pub","clap","loge","clap","env","clap","pub","clap","clap","loge","clap","clap"]'
+  when 'camping:s' then '["start","clap","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap"]'
+  when 'camping:m' then '["start","clap","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","env","clap","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap","env","pub","loge","clap","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","clap","clap","clap","loge","clap","env","pub","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","clap","clap","clap","loge","clap","env","pub","clap","loge","clap","env","clap","clap","clap","clap","loge","clap","env","pub","clap","loge","clap"]'
+  when 'ski:s' then '["start","clap","clap","lift","loge","pub","lift","env","clap","loge","pub","clap","lift","clap","env","lift","loge","pub","clap","env","clap","lift","loge","pub","clap","env","clap","pub","loge","clap","env","clap","pub","loge","clap","env","ice","clap","pub","loge","clap","env","clap","ice","pub","clap","ice","clap","loge"]'
+  when 'ski:m' then '["start","clap","clap","lift","loge","pub","lift","env","clap","loge","pub","clap","lift","clap","env","lift","loge","pub","clap","env","clap","lift","loge","pub","clap","env","clap","pub","loge","clap","env","clap","pub","loge","clap","env","ice","clap","pub","loge","clap","env","clap","ice","pub","clap","ice","clap","loge","halt","clap","loge","clap","env","pub","lift","loge","clap","clap","clap","lift","clap","clap","loge","clap","env","clap","clap","ice","clap","env","clap","pub","clap","clap","loge","clap","halt","clap","loge","clap","env","pub","lift","loge","clap","clap","clap","lift","clap","clap","loge","clap","env","clap","clap","ice","clap","env","clap","pub","clap","clap","loge","clap"]'
+  when 'ski:l' then '["start","clap","clap","lift","loge","pub","lift","env","clap","loge","pub","clap","lift","clap","env","lift","loge","pub","clap","env","clap","lift","loge","pub","clap","env","clap","pub","loge","clap","env","clap","pub","loge","clap","env","ice","clap","pub","loge","clap","env","clap","ice","pub","clap","ice","clap","loge","halt","clap","loge","clap","env","pub","lift","loge","clap","clap","clap","lift","clap","clap","loge","clap","env","clap","clap","ice","clap","env","clap","pub","clap","clap","loge","clap","halt","clap","loge","clap","env","pub","lift","loge","clap","clap","clap","lift","clap","clap","loge","clap","env","clap","clap","ice","clap","env","clap","pub","clap","clap","loge","clap","halt","clap","loge","clap","lift","pub","clap","loge","clap","lift","clap","pub","clap","clap","loge","clap","env","clap","clap","loge","lift","env","clap","pub","clap","clap","loge","clap","lift","pub","clap","loge","clap","env","ice","pub","clap","clap","loge","clap","env","pub","clap","loge","ice","env","clap","pub","clap","loge","halt","clap","loge","clap","lift","pub","clap","loge","clap","lift","clap","pub","clap","clap","loge","clap","env","clap","clap","loge","lift","env","clap","pub","clap","clap","loge","clap","lift","pub","clap","loge","clap","env","ice","pub","clap","clap","loge","clap","env","pub","clap","loge","ice","env","clap","pub","clap"]'
   else '["start","clap","pub","loge","clap","env","clap","loge","pub","clap","env","loge","clap","clap","pub","clap","env","loge","clap","pub","loge","clap","env","clap","clap","clap","env","loge","clap","pub","loge","clap","env","loge","pub","clap","clap","env","loge","clap","clap","pub","clap","pub","env","pub","clap"]'
   end::jsonb $$;
 
--- Case suivante de chaque case. Un tableau [tout droit, détour] = embranchement : l'aiguillage
--- (state.sw, dans l'ordre des embranchements) choisit (et bascule, ou suit la marée). Dupliqué avec NEXT.
-create or replace function public._dp_next(p_map text)
+-- Case suivante de chaque case. Un tableau [tout droit, détour] = embranchement : l'aiguillage (state.sw, dans
+-- l'ordre des embranchements) choisit (et bascule, ou suit la marée). Dupliqué avec NEXT / NEXT_M / NEXT_L.
+create or replace function public._dp_next(p_map text, p_size text default 's')
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select case p_map
-  when 'mer' then '[1,2,3,4,5,6,7,8,9,10,11,12,[13,36],14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,41,42,43,44,14]'
-  when 'kermesse' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,0]'
-  when 'camping' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0]'
-  when 'ski' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,0]'
+as $$ select case public._dp_key(p_map, p_size)
+  when 'grand:m' then '[1,2,3,4,[5,47],6,7,8,9,10,11,12,13,[14,36],15,16,17,18,19,20,21,22,[23,41],24,25,26,27,28,[29,73],30,31,32,33,34,35,0,37,38,39,40,15,42,43,44,45,46,25,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,7,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,32]'
+  when 'mer:s' then '[1,2,3,4,5,6,7,8,9,10,11,12,[13,36],14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,41,42,43,44,14]'
+  when 'mer:m' then '[1,2,3,4,[5,45],6,7,8,9,[10,73],11,12,[13,36],14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,41,42,43,44,14,46,47,48,49,[50,68],51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,8,69,70,71,72,51,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,11]'
+  when 'mer:l' then '[1,2,3,4,[5,45],6,7,8,9,[10,73],11,12,[13,36],14,15,16,17,18,19,20,[21,100],22,23,24,25,26,[27,131],28,29,30,31,[32,167],33,34,35,0,37,38,39,40,41,42,43,44,14,46,47,48,49,[50,68],51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,8,69,70,71,72,51,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,11,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,22,132,133,134,135,136,137,138,139,140,141,142,143,[144,160],145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,28,161,162,163,164,165,166,145,168,169,170,171,172,173,174,175,176,177,178,[179,194],180,181,182,183,184,185,186,187,188,189,190,191,192,193,33,195,196,197,198,199,200,180]'
+  when 'kermesse:s' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,0]'
+  when 'kermesse:m' then '[1,2,3,[4,40],5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,[27,71],28,29,30,31,32,33,34,35,36,37,38,39,0,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,5,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,28]'
+  when 'camping:s' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0]'
+  when 'camping:m' then '[1,2,3,4,5,6,7,[8,36],9,10,11,12,13,14,15,16,[17,67],18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,9,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,18]'
+  when 'ski:s' then '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,0]'
+  when 'ski:m' then '[1,2,3,4,5,6,7,8,9,10,11,[12,49],13,77,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,0,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,14,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,18]'
+  when 'ski:l' then '[1,2,3,4,5,6,7,8,9,10,11,[12,49],13,77,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,0,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,[14,105],78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,[18,155],106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,[131,20],132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,0,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,[181,24],182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,154]'
   else '[1,2,3,4,5,6,7,8,9,10,11,12,13,[14,36],15,16,17,18,19,20,21,22,[23,41],24,25,26,27,28,29,30,31,32,33,34,35,0,37,38,39,40,15,42,43,44,45,46,25]'
   end::jsonb $$;
 
 -- Case précédente (carte « recule », ronde de Riton) : à un retour d'embranchement, par la grande boucle ;
--- au ski, 0 → 48 (la Grande Luge à l'envers). Dupliqué avec PREV.
-create or replace function public._dp_prev(p_map text)
+-- au ski, 0 → 48 (la Grande Luge à l'envers). Dupliqué avec PREV / PREV_M / PREV_L.
+create or replace function public._dp_prev(p_map text, p_size text default 's')
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select case p_map
-  when 'mer' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,12,36,37,38,39,40,41,42,43]'
-  when 'kermesse' then '[39,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38]'
-  when 'camping' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]'
-  when 'ski' then '[48,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
+as $$ select case public._dp_key(p_map, p_size)
+  when 'grand:m' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,13,36,37,38,39,22,41,42,43,44,45,4,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,28,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98]'
+  when 'mer:s' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,12,36,37,38,39,40,41,42,43]'
+  when 'mer:m' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,12,36,37,38,39,40,41,42,43,4,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,49,68,69,70,71,9,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98]'
+  when 'mer:l' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,12,36,37,38,39,40,41,42,43,4,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,49,68,69,70,71,9,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,20,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,26,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,143,160,161,162,163,164,165,31,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,178,194,195,196,197,198,199]'
+  when 'kermesse:s' then '[39,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38]'
+  when 'kermesse:m' then '[39,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,3,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,26,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98]'
+  when 'camping:s' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]'
+  when 'camping:m' then '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,7,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,16,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98]'
+  when 'ski:s' then '[48,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
+  when 'ski:m' then '[48,0,1,2,3,4,5,6,7,8,9,10,11,12,76,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,11,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,13,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103]'
+  when 'ski:l' then '[48,0,1,2,3,4,5,6,7,8,9,10,11,12,76,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,11,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,13,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,76,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,104,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202]'
   else '[35,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,13,36,37,38,39,22,41,42,43,44,45]'
   end::jsonb $$;
 
--- Fiche de la mécanique du plateau (miroir de EXTRA dans boards/<id>.ts) : numéro, mécanique, mode de
--- chaque embranchement (toggle : bascule à chaque pion ; tide : suit la marée), données propres.
-create or replace function public._dp_map(p_map text)
+-- Fiche de la mécanique (miroir de EXTRA / EXTRA_M / EXTRA_L) : numéro, mécanique, mode de chaque embranchement
+-- (toggle : bascule à chaque pion ; tide : suit la marée), données propres ; grandes tailles : size, stars (zones
+-- d'étoiles), starts (haltes de départ), banks (bancs de marée), pack (ratons), tp (téléporteurs).
+create or replace function public._dp_map(p_map text, p_size text default 's')
 returns jsonb language sql immutable
 set search_path = public, extensions
-as $$ select case p_map
-  when 'mer' then '{"no":2,"mech":"tide","forks":["tide"],"bank":[36,37,38,39,40,41,42,43,44],"wash_to":14}'
-  when 'kermesse' then '{"no":3,"mech":"tombola","forks":[]}'
-  when 'camping' then '{"no":4,"mech":"riton","forks":[],"riton_start":18}'
-  when 'ski' then '{"no":5,"mech":"tp","forks":[],"tp":{"3":37,"6":40,"12":42,"15":45,"21":47,"36":2,"43":13,"46":20}}'
+as $$ select case public._dp_key(p_map, p_size)
+  when 'grand:m' then '{"no":1,"mech":"forks","forks":["toggle","toggle","toggle","toggle"],"size":"m","stars":[{"n":0,"loges":[3,7,11,17,20,27,30,33,38]},{"n":1,"loges":[49,55,61,67]},{"n":1,"loges":[77,83,89,95]}]}'
+  when 'mer:s' then '{"no":2,"mech":"tide","forks":["tide"],"bank":[36,37,38,39,40,41,42,43,44],"wash_to":14}'
+  when 'mer:m' then '{"no":2,"mech":"tide","forks":["toggle","toggle","tide","tide"],"size":"m","stars":[{"n":0,"loges":[3,7,11,15,19,24,28,33,40]},{"n":1,"loges":[46,50,55,58,62,67,70]},{"n":1,"loges":[74,78,83,86,90,95,98]}],"banks":[{"cells":[36,37,38,39,40,41,42,43,44],"wash_to":14,"end":45},{"cells":[68,69,70,71,72],"wash_to":51,"end":73}]}'
+  when 'mer:l' then '{"no":2,"mech":"tide","forks":["toggle","toggle","tide","toggle","toggle","toggle","tide","tide","tide"],"size":"l","stars":[{"n":0,"loges":[3,7,11,15,19,24,28,33,40]},{"n":1,"loges":[46,50,55,58,62,67,70]},{"n":1,"loges":[74,78,83,86,90,95,98]},{"n":1,"loges":[101,105,110,113,117,122,125,129]},{"n":1,"loges":[132,136,141,144,148,153,156,163]},{"n":1,"loges":[168,172,177,184,189,192,199]}],"starts":[45,73,100,131,167],"banks":[{"cells":[36,37,38,39,40,41,42,43,44],"wash_to":14,"end":45},{"cells":[68,69,70,71,72],"wash_to":51,"end":73},{"cells":[160,161,162,163,164,165,166],"wash_to":145,"end":167},{"cells":[194,195,196,197,198,199,200],"wash_to":180,"end":201}]}'
+  when 'kermesse:s' then '{"no":3,"mech":"tombola","forks":[]}'
+  when 'kermesse:m' then '{"no":3,"mech":"tombola","forks":["toggle","toggle"],"size":"m","stars":[{"n":0,"loges":[2,6,10,15,20,25,30,36]},{"n":1,"loges":[42,47,54,59,66]},{"n":1,"loges":[73,78,90,97]}]}'
+  when 'camping:s' then '{"no":4,"mech":"riton","forks":[],"riton_start":18}'
+  when 'camping:m' then '{"no":4,"mech":"riton","forks":["toggle","toggle"],"riton_start":18,"size":"m","stars":[{"n":0,"loges":[3,8,13,18,23,28,33]},{"n":1,"loges":[38,43,50,55,62]},{"n":1,"loges":[69,74,81,86,93,98]}],"pack":[{"name":"Rita","start":51,"path":[66,65,64,63,62,61,60,59,58,57,56,55,54,53,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38,37,36]},{"name":"Ritou","start":83,"path":[99,98,97,96,95,94,93,92,91,90,89,88,87,86,85,84,83,82,81,80,79,78,77,76,75,74,73,72,71,70,69,68,67]}]}'
+  when 'ski:s' then '{"no":5,"mech":"tp","forks":[],"tp":{"3":37,"6":40,"12":42,"15":45,"21":47,"36":2,"43":13,"46":20}}'
+  when 'ski:m' then '{"no":5,"mech":"tp","forks":["toggle"],"tp":{"3":37,"6":40,"12":42,"15":45,"21":47,"36":2,"43":13,"46":20,"55":71,"60":66,"68":58,"83":99,"88":94,"96":86},"size":"m","stars":[{"n":0,"loges":[4,9,16,22,28,33,39,48]},{"n":1,"loges":[51,56,63,75]},{"n":1,"loges":[79,84,91,103]}]}'
+  when 'ski:l' then '{"no":5,"mech":"tp","forks":["toggle","toggle","toggle","toggle","toggle"],"tp":{"3":37,"6":40,"12":42,"15":45,"21":47,"36":2,"43":13,"46":20,"55":71,"60":66,"68":58,"83":99,"88":94,"96":86,"109":127,"114":122,"125":137,"133":151,"139":123,"149":135,"159":177,"164":172,"175":187,"183":201,"189":173,"199":185},"size":"l","stars":[{"n":0,"loges":[4,9,16,22,28,33,39,48]},{"n":1,"loges":[51,56,63,75]},{"n":1,"loges":[79,84,91,103]},{"n":2,"loges":[107,112,119,124,131,136,143,148,154]},{"n":2,"loges":[157,162,169,174,181,186,193,198]}],"starts":[49,77,105,155]}'
   else '{"no":1,"mech":"forks","forks":["toggle","toggle"]}'
   end::jsonb $$;
+-- <<< tracés des plateaux
+
+-- Taille d'une partie (spec grands plateaux §1.1), figée au lancement : l si 7 ou 8 joueurs et que le plateau
+-- a une taille l (mer, ski) ; sinon m dès 5 joueurs ; sinon s. p_wanted (option de test `size`) la force si
+-- le plateau la possède ; absente, inconnue ou trop grande pour le plateau → la règle.
+create or replace function public._dp_size(p_map text, p_players integer, p_wanted text)
+returns text language sql immutable
+set search_path = public, extensions
+as $$
+  select case
+    when coalesce(public._dp_sizes()->p_map, '[]'::jsonb) ? coalesce(p_wanted, '') then p_wanted
+    when p_players >= 7 and coalesce(public._dp_sizes()->p_map, '[]'::jsonb) ? 'l' then 'l'
+    when p_players >= 5 and coalesce(public._dp_sizes()->p_map, '[]'::jsonb) ? 'm' then 'm'
+    else 's' end
+$$;
+
+-- Bancs de marée de la partie (Dédé-sur-Mer) : [{cells, wash_to, end}, …]. Fiches M / L : `banks` ;
+-- fiche S : le Banc de sable seul, fabriqué depuis bank / wash_to. Autres plateaux : [].
+create or replace function public._dp_banks(p_map text, p_size text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select case
+    when jsonb_typeof(f->'banks') = 'array' then f->'banks'
+    when jsonb_typeof(f->'bank') = 'array' then jsonb_build_array(jsonb_build_object('cells', f->'bank', 'wash_to', f->'wash_to',
+      'end', (select max(x::integer) + 1 from jsonb_array_elements_text(f->'bank') x)))
+    else '[]'::jsonb end
+    from (select public._dp_map(p_map, p_size) f) x
+$$;
+
+-- Cases noyées (marée haute) : toutes les cases de tous les bancs ; sinon [].
+create or replace function public._dp_wet(p_state jsonb)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select case when coalesce(p_state->>'map', 'grand') = 'mer' and coalesce((p_state->'mech'->>'tide')::integer, 0) = 1
+    then coalesce((select jsonb_agg(c) from jsonb_array_elements(public._dp_banks('mer', coalesce(p_state->>'size', 's'))) b,
+                         jsonb_array_elements(b->'cells') c), '[]'::jsonb)
+    else '[]'::jsonb end
+$$;
 
 -- Les 12 cartes « Enveloppe surprise » (effet immédiat, sans choix).
 create or replace function public._dp_cards()
@@ -8599,8 +8681,10 @@ begin
   return p_state;
 end $$;
 
--- L'étoile de la case p_from déménage dans une autre Loge libre (sans étoile) du plateau, tirée au sort.
--- Dédé-sur-Mer à marée haute : jamais sur une Loge du Banc de sable (la Loge du Phare est sous l'eau).
+-- L'étoile de la case p_from déménage dans une autre Loge libre (sans étoile) tirée au sort : du plateau en
+-- taille S ; de SA ZONE (fiche `stars` : la base ou un quartier) en grande taille. Dédé-sur-Mer à marée haute :
+-- jamais sur une Loge d'un banc (la Loge du Phare, celles des îles sont sous l'eau). Plus de Loge libre :
+-- l'étoile reste où elle est.
 drop function if exists public._dp_move_star(jsonb);
 create or replace function public._dp_move_star(p_state jsonb, p_from integer)
 returns jsonb language plpgsql
@@ -8608,14 +8692,18 @@ set search_path = public, extensions
 as $$
 declare
   v_map  text := coalesce(p_state->>'map', 'grand');
-  v_wet  jsonb := case when v_map = 'mer' and coalesce((p_state->'mech'->>'tide')::integer, 0) = 1
-                       then coalesce(public._dp_map(v_map)->'bank', '[]'::jsonb) else '[]'::jsonb end;
+  v_size text := coalesce(p_state->>'size', 's');
+  v_wet  jsonb := public._dp_wet(p_state);
+  v_zone jsonb;
   v_cell integer;
 begin
+  select z->'loges' into v_zone from jsonb_array_elements(public._dp_map(v_map, v_size)->'stars') z
+   where (z->'loges') @> to_jsonb(p_from) limit 1;
   select (o - 1)::integer into v_cell
-    from jsonb_array_elements_text(public._dp_board(v_map)) with ordinality t(c, o)
+    from jsonb_array_elements_text(public._dp_board(v_map, v_size)) with ordinality t(c, o)
    where c = 'loge' and not (p_state->'star_cells') @> to_jsonb((o - 1)::integer)
      and not v_wet @> to_jsonb((o - 1)::integer)
+     and (v_zone is null or v_zone @> to_jsonb((o - 1)::integer))
    order by random() limit 1;
   return jsonb_set(p_state, '{star_cells}',
     (select jsonb_agg(case when x::integer = p_from then coalesce(v_cell, p_from) else x::integer end order by o)
@@ -8650,15 +8738,23 @@ begin
     'ev', jsonb_build_object('t', 'star', 'cost', v_price, 'stars', p_state->'star_cells', 'exact', p_exact));
 end $$;
 
--- Le Camping : p_pid croise Riton. Sac plein : Riton lâche tout (le pion empoche le sac) ; sac vide : il
--- pique 5 pièces (ce que le pion a) ; pion sans pièce : rien. Renvoie {state, ev:{t:'riton', k, d, sack}}.
-create or replace function public._dp_riton_hit(p_state jsonb, p_pid text)
+-- Le Camping : p_pid croise un raton : p_who = 0 Riton (mech.sack), p_who ≥ 1 le raton pack[p_who − 1] de la
+-- fiche (Rita, Ritou : mech.pack[p_who − 1].sack). Sac plein : il lâche tout (le pion empoche le sac) ; sac vide :
+-- il pique 5 pièces (ce que le pion a) ; pion sans pièce : rien. Renvoie {state, ev:{t:'riton', k, d, sack[, who]}}
+-- (who seulement pour Rita et Ritou : les évènements de Riton gardent leur forme).
+drop function if exists public._dp_riton_hit(jsonb, text);
+create or replace function public._dp_riton_hit(p_state jsonb, p_pid text, p_who integer default 0)
 returns jsonb language plpgsql
 set search_path = public, extensions
 as $$
 declare
-  v_sack  integer := coalesce((p_state->'mech'->>'sack')::integer, 0);
+  v_path  text[] := case when p_who > 0 then array['mech', 'pack', (p_who - 1)::text, 'sack'] else array['mech', 'sack'] end;
+  v_sack  integer := coalesce((p_state #>> v_path)::integer, 0);
   v_coins integer := coalesce((p_state->'coins'->>p_pid)::integer, 0);
+  v_name  text := case when p_who > 0
+                       then coalesce(public._dp_map(coalesce(p_state->>'map', 'grand'), coalesce(p_state->>'size', 's'))->'pack'->(p_who - 1)->>'name', 'Riton')
+                       else 'Riton' end;
+  v_tag   jsonb := case when p_who > 0 then jsonb_build_object('who', p_who) else '{}'::jsonb end;
   v_n     integer;
 begin
   if v_sack > 0 then
@@ -8666,27 +8762,28 @@ begin
     v_n := (p_state->'coins'->>p_pid)::integer - v_coins;
     p_state := public._dp_stat(p_state, p_pid, 'loot', v_n);
     if v_n > coalesce((p_state->'stats'->p_pid->'best_card'->>'gain')::integer, 0) then
-      p_state := jsonb_set(p_state, array['stats', p_pid, 'best_card'], jsonb_build_object('card', 'riton', 'text', 'Le sac de Riton', 'gain', v_n), true);
+      p_state := jsonb_set(p_state, array['stats', p_pid, 'best_card'], jsonb_build_object('card', 'riton', 'text', 'Le sac de ' || v_name, 'gain', v_n), true);
     end if;
-    p_state := jsonb_set(p_state, '{mech,sack}', '0'::jsonb, true);
-    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'drop', 'd', v_n, 'sack', 0));
+    p_state := jsonb_set(p_state, v_path, '0'::jsonb, true);
+    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'drop', 'd', v_n, 'sack', 0) || v_tag);
   elsif v_coins > 0 then
     v_n := least((public._dp_const()->>'riton_steal')::integer, v_coins);
     p_state := public._dp_coins(p_state, p_pid, -v_n, 'riton');
-    p_state := jsonb_set(p_state, '{mech,sack}', to_jsonb(v_n), true);
+    p_state := jsonb_set(p_state, v_path, to_jsonb(v_n), true);
     p_state := public._dp_stat(p_state, p_pid, 'robbed', 1);
-    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'steal', 'd', -v_n, 'sack', v_n));
+    return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'steal', 'd', -v_n, 'sack', v_n) || v_tag);
   end if;
-  return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'none', 'd', 0, 'sack', 0));
+  return jsonb_build_object('state', p_state, 'ev', jsonb_build_object('t', 'riton', 'k', 'none', 'd', 0, 'sack', 0) || v_tag);
 end $$;
 
 -- Fait marcher le pion de p_pid de p_n cases (p_dir = 1 en avant, -1 en arrière) sur le plateau de la partie.
 -- En avant : suit _dp_next(map) ; à un embranchement « toggle », l'aiguillage choisit puis bascule ; à un
 -- embranchement « tide » (mer), la voie est 1 − marée, sans bascule (évènement fork sur la première case de
 -- la voie prise). En arrière : _dp_prev(map), sans toucher aux aiguillages.
--- Sur chaque case franchie, dans l'ordre : Départ (+5, en avant) → mécanique du plateau (péage de la
--- Tombola en avant et sans s'y arrêter ; croisement de Riton, dans les deux sens) → étoile (au passage
--- comme à l'arrêt). Renvoie {state, steps:[{cell, ev:[...]}]}.
+-- Sur chaque case franchie, dans l'ordre : Départ ou Halte (+5, en avant ; Halte : évènement start + halt) →
+-- mécanique du plateau (péage de la Tombola en avant et sans s'y arrêter ; croisement de Riton ou d'un raton de
+-- la famille, dans les deux sens) → étoile (au passage comme à l'arrêt). Un transport (bac, télécabine, piste,
+-- Grande Descente) est une liaison comme une autre : 1 pas. Renvoie {state, steps:[{cell, ev:[...]}]}.
 create or replace function public._dp_walk(p_state jsonb, p_pid text, p_n integer, p_dir integer)
 returns jsonb language plpgsql
 set search_path = public, extensions
@@ -8694,10 +8791,12 @@ as $$
 declare
   c       jsonb := public._dp_const();
   v_map   text := coalesce(p_state->>'map', 'grand');
-  v_board jsonb := public._dp_board(v_map);
-  v_next  jsonb := public._dp_next(v_map);
-  v_prev  jsonb := public._dp_prev(v_map);
-  v_modes jsonb := coalesce(public._dp_map(v_map)->'forks', '[]'::jsonb);
+  v_size  text := coalesce(p_state->>'size', 's');
+  v_board jsonb := public._dp_board(v_map, v_size);
+  v_next  jsonb := public._dp_next(v_map, v_size);
+  v_prev  jsonb := public._dp_prev(v_map, v_size);
+  v_modes jsonb := coalesce(public._dp_map(v_map, v_size)->'forks', '[]'::jsonb);
+  v_who   integer;
   v_nx    jsonb;
   v_fork  integer;
   v_way   integer;
@@ -8735,10 +8834,11 @@ begin
     end if;
     p_state := jsonb_set(p_state, array['pos', p_pid], to_jsonb(v_pos));
     p_state := jsonb_set(p_state, array['dist', p_pid], to_jsonb(coalesce((p_state->'dist'->>p_pid)::integer, 0) + p_dir));
-    if p_dir > 0 and v_pos = 0 then
+    if p_dir > 0 and (v_pos = 0 or v_board->>v_pos = 'halt') then
       v_old := (p_state->'coins'->>p_pid)::integer;
       p_state := public._dp_coins(p_state, p_pid, (c->>'start_bonus')::integer, 'start');
-      v_ev := v_ev || jsonb_build_object('t', 'start', 'd', (p_state->'coins'->>p_pid)::integer - v_old);
+      v_ev := v_ev || (jsonb_build_object('t', 'start', 'd', (p_state->'coins'->>p_pid)::integer - v_old)
+                       || case when v_pos = 0 then '{}'::jsonb else '{"halt":true}'::jsonb end);
     end if;
     -- La Kermesse : péage de la Tombola (en avant, sans s'y arrêter ; pièces versées dans la cagnotte).
     if v_map = 'kermesse' and p_dir > 0 and k < p_n and v_board->>v_pos = 'tombola' then
@@ -8750,11 +8850,19 @@ begin
       end if;
       v_ev := v_ev || jsonb_build_object('t', 'toll', 'd', -v_n, 'pot', (p_state->'mech'->>'pot')::integer);
     end if;
-    -- Le Camping : marcher sur la case de Riton = le croiser (avant comme arrière).
-    if v_map = 'camping' and v_pos = (p_state->'mech'->>'riton')::integer then
-      v_r := public._dp_riton_hit(p_state, p_pid);
-      p_state := v_r->'state';
-      v_ev := v_ev || (v_r->'ev');
+    -- Le Camping : marcher sur la case de Riton (ou d'un raton de la famille) = le croiser (avant comme arrière).
+    if v_map = 'camping' then
+      if v_pos = (p_state->'mech'->>'riton')::integer then
+        v_r := public._dp_riton_hit(p_state, p_pid, 0);
+        p_state := v_r->'state';
+        v_ev := v_ev || (v_r->'ev');
+      end if;
+      for v_who in select o::integer from jsonb_array_elements(coalesce(p_state->'mech'->'pack', '[]'::jsonb)) with ordinality t(x, o)
+                    where (x->>'c')::integer = v_pos loop
+        v_r := public._dp_riton_hit(p_state, p_pid, v_who);
+        p_state := v_r->'state';
+        v_ev := v_ev || (v_r->'ev');
+      end loop;
     end if;
     v_r := public._dp_star_check(p_state, p_pid, v_pos, k = p_n);
     p_state := v_r->'state';
@@ -8782,8 +8890,9 @@ as $$
 declare
   c        jsonb := public._dp_const();
   v_map    text := coalesce(p_state->>'map', 'grand');
+  v_size   text := coalesce(p_state->>'size', 's');
   v_cell   integer := (p_state->'pos'->>p_pid)::integer;
-  v_type   text := public._dp_board(v_map)->>v_cell;
+  v_type   text := public._dp_board(v_map, v_size)->>v_cell;
   v_to     integer;
   v_ev     jsonb := '[]'::jsonb;
   v_steps  jsonb := '[]'::jsonb;
@@ -8824,7 +8933,7 @@ begin
   elsif v_type in ('lift', 'ice') then
     -- Dédé 2000 : pile sur un télésiège (on monte) ou une plaque de verglas (on glisse). Saut sans case
     -- franchie : pas d'effet de la case d'arrivée, mais l'étoile s'achète si elle y est (pile dessus).
-    v_to := (public._dp_map(v_map)->'tp'->>(v_cell::text))::integer;
+    v_to := (public._dp_map(v_map, v_size)->'tp'->>(v_cell::text))::integer;
     if v_to is not null then
       p_state := jsonb_set(p_state, array['pos', p_pid], to_jsonb(v_to));
       p_state := jsonb_set(p_state, array['dist', p_pid], to_jsonb(coalesce((p_state->'dist'->>p_pid)::integer, 0) + v_to - v_cell));
@@ -8972,12 +9081,17 @@ end $$;
 
 -- Épilogue du tour (après le dernier pion) : l'évènement du plateau, publié dans state.epi (null s'il n'y a
 -- rien à montrer). Renvoie {state, server}.
---   mer     : la marée (cycle 2 tours basse / 1 tour haute). Quand elle monte, les pions du Banc de sable
---             sont emportés (ordre de passage) en wash_to, −5 pièces ; une étoile du Banc déménage.
---             Épilogue seulement les tours où la marée change : {t:'tide', tide, washed:[{id, from, d}], stars?, after}.
+--   mer     : la marée (cycle 2 tours basse / 1 tour haute), une seule horloge pour TOUS les bancs (le Banc de
+--             sable, + 1 en M, + 3 en L). Quand elle monte, les pions de chaque banc sont emportés (ordre de
+--             passage) vers le wash_to de leur banc, −5 pièces ; les étoiles des bancs déménagent (dans leur zone).
+--             Chaque embranchement « tide » suit la mer (sw = 1 − tide) ; les bacs (toggle) ne bougent pas.
+--             Épilogue seulement les tours où la marée change : {t:'tide', tide, washed:[{id, from, d[, to]}], stars?, after}
+--             (to : case d'arrivée, en grande taille seulement — en S c'est toujours wash_to).
 --   camping : la ronde de Riton (1 dé, à contresens, après tous les dés du tour), à chaque tour ; chaque pion
 --             posé sur une case où il arrive est croisé (ordre des cases, puis ordre de passage) :
---             {t:'riton', die, from, path, hits:[{id, cell, k, d, sack}], after}.
+--             {t:'riton', die, from, path, hits:[{id, cell, k, d, sack}], after}. Grande taille : puis un dé par
+--             raton de la famille (fiche pack, dans l'ordre), chacun avance sur sa ronde fermée (path, cyclique) ;
+--             ils trottent EN MÊME TEMPS à l'écran : epi.pack = [{who, die, from, path, hits}, …].
 create or replace function public._dp_epilogue(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql
 set search_path = public, extensions
@@ -8985,70 +9099,114 @@ as $$
 declare
   c       jsonb := public._dp_const();
   v_map   text := coalesce(p_state->>'map', 'grand');
-  v_fiche jsonb := public._dp_map(v_map);
+  v_size  text := coalesce(p_state->>'size', 's');
+  v_fiche jsonb := public._dp_map(v_map, v_size);
+  v_banks jsonb := public._dp_banks(v_map, v_size);
+  v_big   boolean := v_size <> 's';
   v_epi   jsonb := null;
   v_tide  integer;
   v_in    integer;
   v_list  jsonb := '[]'::jsonb;
   v_path  jsonb := '[]'::jsonb;
+  v_packs jsonb := '[]'::jsonb;
+  v_ring  jsonb;
   v_moved boolean := false;
+  v_bank  jsonb;
   v_cell  integer;
   v_from  integer;
   v_die   integer;
   v_old   integer;
-  v_end   integer;
+  v_idx   integer;
   v_r     jsonb;
   pl      text;
   k       integer;
+  w       integer;
 begin
   if v_map = 'mer' then
     v_tide := coalesce((p_state->'mech'->>'tide')::integer, 0);
     v_in := coalesce((p_state->'mech'->>'tide_in')::integer, 1) - 1;
     if v_in > 0 then
       p_state := jsonb_set(p_state, '{mech}', jsonb_build_object('tide', v_tide, 'tide_in', v_in));
-    elsif v_tide = 0 then
-      -- La mer monte : le Banc se ferme, la vague emporte les traînards.
-      p_state := p_state || jsonb_build_object('mech', jsonb_build_object('tide', 1, 'tide_in', (c->>'tide_high')::integer), 'sw', '[0]'::jsonb);
-      select max(x::integer) + 1 into v_end from jsonb_array_elements_text(v_fiche->'bank') x;
-      for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
-        v_cell := (p_state->'pos'->>pl)::integer;
-        if (v_fiche->'bank') @> to_jsonb(v_cell) then
-          v_old := (p_state->'coins'->>pl)::integer;
-          p_state := public._dp_coins(p_state, pl, -(c->>'wash')::integer, 'wash');
-          p_state := jsonb_set(p_state, array['pos', pl], v_fiche->'wash_to');
-          p_state := jsonb_set(p_state, array['dist', pl], to_jsonb(coalesce((p_state->'dist'->>pl)::integer, 0) + v_end - v_cell));
-          p_state := public._dp_stat(p_state, pl, 'washed', 1);
-          v_list := v_list || jsonb_build_object('id', pl, 'from', v_cell, 'd', (p_state->'coins'->>pl)::integer - v_old);
-        end if;
-      end loop;
-      for v_cell in select x::integer from jsonb_array_elements_text(p_state->'star_cells') x where (v_fiche->'bank') @> to_jsonb(x::integer) loop
-        p_state := public._dp_move_star(p_state, v_cell);
-        v_moved := true;
-      end loop;
-      v_epi := jsonb_build_object('t', 'tide', 'tide', 1, 'washed', v_list);
-      if v_moved then v_epi := v_epi || jsonb_build_object('stars', p_state->'star_cells'); end if;
     else
-      -- La mer redescend : le Banc rouvre.
-      p_state := p_state || jsonb_build_object('mech', jsonb_build_object('tide', 0, 'tide_in', (c->>'tide_low')::integer), 'sw', '[1]'::jsonb);
-      v_epi := jsonb_build_object('t', 'tide', 'tide', 0, 'washed', '[]'::jsonb);
+      v_tide := 1 - v_tide;
+      -- Chaque embranchement de marée suit la mer ; les bacs gardent leur position.
+      p_state := p_state || jsonb_build_object(
+        'mech', jsonb_build_object('tide', v_tide, 'tide_in', (c->>(case when v_tide = 1 then 'tide_high' else 'tide_low' end))::integer),
+        'sw', coalesce((select jsonb_agg(case when m = 'tide' then to_jsonb(1 - v_tide) else coalesce(p_state->'sw'->((o - 1)::integer), '0'::jsonb) end order by o)
+                          from jsonb_array_elements_text(v_fiche->'forks') with ordinality t(m, o)), '[]'::jsonb));
+      if v_tide = 1 then
+        -- La mer monte : les bancs se ferment, la vague emporte les traînards.
+        for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
+          v_cell := (p_state->'pos'->>pl)::integer;
+          v_bank := null;
+          select b into v_bank from jsonb_array_elements(v_banks) b where (b->'cells') @> to_jsonb(v_cell) limit 1;
+          if v_bank is not null then
+            v_old := (p_state->'coins'->>pl)::integer;
+            p_state := public._dp_coins(p_state, pl, -(c->>'wash')::integer, 'wash');
+            p_state := jsonb_set(p_state, array['pos', pl], v_bank->'wash_to');
+            p_state := jsonb_set(p_state, array['dist', pl], to_jsonb(coalesce((p_state->'dist'->>pl)::integer, 0) + (v_bank->>'end')::integer - v_cell));
+            p_state := public._dp_stat(p_state, pl, 'washed', 1);
+            v_list := v_list || (jsonb_build_object('id', pl, 'from', v_cell, 'd', (p_state->'coins'->>pl)::integer - v_old)
+                                 || case when v_big then jsonb_build_object('to', v_bank->'wash_to') else '{}'::jsonb end);
+          end if;
+        end loop;
+        for v_cell in select x::integer from jsonb_array_elements_text(p_state->'star_cells') x
+                       where public._dp_wet(p_state) @> to_jsonb(x::integer) loop
+          p_state := public._dp_move_star(p_state, v_cell);
+          v_moved := true;
+        end loop;
+        v_epi := jsonb_build_object('t', 'tide', 'tide', 1, 'washed', v_list);
+        if v_moved then v_epi := v_epi || jsonb_build_object('stars', p_state->'star_cells'); end if;
+      else
+        -- La mer redescend : les bancs rouvrent.
+        v_epi := jsonb_build_object('t', 'tide', 'tide', 0, 'washed', '[]'::jsonb);
+      end if;
     end if;
   elsif v_map = 'camping' then
     select d.p_server, d.v into p_server, v_die from public._dp_die(p_server) d;
     v_from := coalesce((p_state->'mech'->>'riton')::integer, (v_fiche->>'riton_start')::integer);
     v_cell := v_from;
     for k in 1 .. v_die loop
-      v_cell := (public._dp_prev(v_map)->>v_cell)::integer;
+      v_cell := (public._dp_prev(v_map, v_size)->>v_cell)::integer;
       v_path := v_path || to_jsonb(v_cell);
       p_state := jsonb_set(p_state, '{mech,riton}', to_jsonb(v_cell), true);
       for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
         if (p_state->'pos'->>pl)::integer = v_cell then
-          v_r := public._dp_riton_hit(p_state, pl);
+          v_r := public._dp_riton_hit(p_state, pl, 0);
           p_state := v_r->'state';
           v_list := v_list || (((v_r->'ev') - 't') || jsonb_build_object('id', pl, 'cell', v_cell));
         end if;
       end loop;
     end loop;
     v_epi := jsonb_build_object('t', 'riton', 'die', v_die, 'from', v_from, 'path', v_path, 'hits', v_list);
+    -- La famille Raton (grande taille) : un dé par raton, chacun sur sa ronde fermée.
+    w := 0;
+    for v_ring in select x from jsonb_array_elements(coalesce(v_fiche->'pack', '[]'::jsonb)) x loop
+      w := w + 1;
+      select d.p_server, d.v into p_server, v_die from public._dp_die(p_server) d;
+      v_from := coalesce((p_state->'mech'->'pack'->(w - 1)->>'c')::integer, (v_ring->>'start')::integer);
+      v_cell := v_from;
+      v_path := '[]'::jsonb;
+      v_list := '[]'::jsonb;
+      v_idx := null;
+      select (o - 1)::integer into v_idx from jsonb_array_elements_text(v_ring->'path') with ordinality t(x, o) where x::integer = v_from limit 1;
+      v_idx := coalesce(v_idx, 0);
+      for k in 1 .. v_die loop
+        v_idx := (v_idx + 1) % jsonb_array_length(v_ring->'path');
+        v_cell := (v_ring->'path'->>v_idx)::integer;
+        v_path := v_path || to_jsonb(v_cell);
+        p_state := jsonb_set(p_state, array['mech', 'pack', (w - 1)::text, 'c'], to_jsonb(v_cell), true);
+        for pl in select x from jsonb_array_elements_text(p_state->'order') x loop
+          if (p_state->'pos'->>pl)::integer = v_cell then
+            v_r := public._dp_riton_hit(p_state, pl, w);
+            p_state := v_r->'state';
+            v_list := v_list || (((v_r->'ev') - 't' - 'who') || jsonb_build_object('id', pl, 'cell', v_cell));
+          end if;
+        end loop;
+      end loop;
+      v_packs := v_packs || jsonb_build_object('who', w, 'die', v_die, 'from', v_from, 'path', v_path, 'hits', v_list);
+    end loop;
+    if jsonb_array_length(v_packs) > 0 then v_epi := v_epi || jsonb_build_object('pack', v_packs); end if;
   end if;
   if v_epi is not null then v_epi := v_epi || jsonb_build_object('after', public._dp_snap(p_state)); end if;
   return jsonb_build_object('state', p_state || jsonb_build_object('epi', v_epi), 'server', p_server);
@@ -9489,7 +9647,9 @@ begin
     'loot', coalesce((s->>'loot')::integer, 0),
     'lifts', coalesce((s->>'lifts')::integer, 0),
     'slides', coalesce((s->>'slides')::integer, 0),
-    'map_no', coalesce((public._dp_map(coalesce(p_state->>'map', 'grand'))->>'no')::integer, 1));
+    'map_no', coalesce((public._dp_map(coalesce(p_state->>'map', 'grand'))->>'no')::integer, 1),
+    -- Taille du plateau (1 = s, 2 = m, 3 = l) : pour un futur trophée « plateau géant ».
+    'size_no', case coalesce(p_state->>'size', 's') when 'l' then 3 when 'm' then 2 else 1 end);
 end $$;
 
 -- Fin de partie : placement = rang (étoiles puis pièces), points = n − rang + 1, won = rang 1.
@@ -9563,6 +9723,12 @@ declare
   v_state  jsonb;
   v_zero   jsonb;
   v_star   jsonb;
+  v_size   text;
+  v_fiche  jsonb;
+  v_n      integer := coalesce(cardinality(p_players), 0);
+  v_pos    jsonb;
+  v_spots  jsonb;
+  v_zone   jsonb;
 begin
   if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 8 then raise exception 'too_many_players'; end if;
@@ -9573,18 +9739,30 @@ begin
   -- Plateau : celui demandé, sinon tiré au sort parmi les 5. État initial de sa mécanique.
   v_map := case when jsonb_typeof(p_options->'map') = 'string' and public._dp_maps() ? (p_options->>'map')
                 then p_options->>'map' else public._dp_maps()->>floor(random() * 5)::integer end;
-  if v_map = 'grand' then
-    v_sw := jsonb_build_array(floor(random() * 2)::integer, floor(random() * 2)::integer);
-  elsif v_map = 'mer' then
+  -- Taille (spec grands plateaux §1.1) : selon le nombre de joueurs, figée pour toute la partie ; p_options.size
+  -- (tests, page de démo) la force si le plateau la possède.
+  v_size := public._dp_size(v_map, v_n, case when jsonb_typeof(p_options->'size') = 'string' then p_options->>'size' end);
+  v_fiche := public._dp_map(v_map, v_size);
+  if v_map = 'mer' then
     -- Phase de la marée tirée parmi 3 (sinon tout le monde se fait rincer au même tour à chaque partie).
     v_mech := (array['{"tide":0,"tide_in":2}', '{"tide":0,"tide_in":1}', '{"tide":1,"tide_in":1}'])[1 + floor(random() * 3)::integer]::jsonb;
-    v_sw := jsonb_build_array(1 - (v_mech->>'tide')::integer);
-    if (v_mech->>'tide')::integer = 1 then v_wet := public._dp_map('mer')->'bank'; end if;
+    if (v_mech->>'tide')::integer = 1 then
+      select coalesce(jsonb_agg(x), '[]'::jsonb) into v_wet
+        from jsonb_array_elements(public._dp_banks(v_map, v_size)) b, jsonb_array_elements(b->'cells') x;
+    end if;
   elsif v_map = 'kermesse' then
     v_mech := jsonb_build_object('pot', (c->>'pot_seed')::integer);
   elsif v_map = 'camping' then
-    v_mech := jsonb_build_object('riton', (public._dp_map('camping')->>'riton_start')::integer, 'sack', 0);
+    v_mech := jsonb_build_object('riton', (v_fiche->>'riton_start')::integer, 'sack', 0);
+    -- La famille Raton (grande taille) : Rita, Ritou, chacun sa case et son sac.
+    if jsonb_typeof(v_fiche->'pack') = 'array' then
+      v_mech := v_mech || jsonb_build_object('pack', (select jsonb_agg(jsonb_build_object('c', (x->>'start')::integer, 'sack', 0) order by o)
+                                                        from jsonb_array_elements(v_fiche->'pack') with ordinality t(x, o)));
+    end if;
   end if;
+  -- Un aiguillage par embranchement : toggle → 0 ou 1 au hasard ; tide → 1 − marée (la voie du banc est ouverte à marée basse).
+  select coalesce(jsonb_agg(case when m = 'tide' then 1 - coalesce((v_mech->>'tide')::integer, 0) else floor(random() * 2)::integer end order by o), '[]'::jsonb)
+    into v_sw from jsonb_array_elements_text(coalesce(v_fiche->'forks', '[]'::jsonb)) with ordinality t(m, o);
 
   -- Questions : on ne garde que les entrées bien formées.
   select coalesce(jsonb_agg(jsonb_build_object('prompt', q->'prompt', 'answer', q->'answer',
@@ -9603,12 +9781,33 @@ begin
    where jsonb_typeof(q) = 'string';
 
   select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
-  -- 1 à 3 étoiles en jeu selon le nombre de joueurs, chacune sur sa Loge du plateau (jamais sous l'eau).
-  select jsonb_agg(i order by i) into v_star
-    from (select (o - 1)::integer i from jsonb_array_elements_text(public._dp_board(v_map)) with ordinality t(x, o)
-           where x = 'loge' and not v_wet @> to_jsonb((o - 1)::integer) order by random()
-           limit (c->'star_count'->>(cardinality(p_players) - 2))::integer) z;
+  if jsonb_typeof(v_fiche->'stars') = 'array' then
+    -- Grande taille : des étoiles par zone (la base : 2 ou 3 selon le nombre de joueurs ; chaque quartier : n).
+    v_star := '[]'::jsonb;
+    for v_zone in select x from jsonb_array_elements(v_fiche->'stars') x loop
+      v_star := v_star || coalesce((select jsonb_agg(i order by i)
+        from (select l::integer i from jsonb_array_elements_text(v_zone->'loges') l
+               where not v_wet @> to_jsonb(l::integer) order by random()
+               limit case when (v_zone->>'n')::integer = 0 then greatest(2, (c->'star_count'->>(v_n - 2))::integer)
+                          else (v_zone->>'n')::integer end) z), '[]'::jsonb);
+    end loop;
+  else
+    -- 1 à 3 étoiles en jeu selon le nombre de joueurs, chacune sur sa Loge du plateau (jamais sous l'eau).
+    select jsonb_agg(i order by i) into v_star
+      from (select (o - 1)::integer i from jsonb_array_elements_text(public._dp_board(v_map, v_size)) with ordinality t(x, o)
+             where x = 'loge' and not v_wet @> to_jsonb((o - 1)::integer) order by random()
+             limit (c->'star_count'->>(v_n - 2))::integer) z;
+  end if;
   select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
+  -- Départs : tout le monde au Départ ; en taille L, par deux sur ceil(n / 2) haltes tirées au sort (le joueur de
+  -- rang k dans l'ordre de passage part de la halte k mod nb), sans bonus de halte au placement.
+  v_pos := v_zero;
+  if jsonb_typeof(v_fiche->'starts') = 'array' then
+    select jsonb_agg(x) into v_spots
+      from (select x from jsonb_array_elements(v_fiche->'starts') x order by random() limit ceil(v_n / 2.0)::integer) z;
+    select jsonb_object_agg(x, v_spots->(((o - 1)::integer) % jsonb_array_length(v_spots))) into v_pos
+      from jsonb_array_elements_text(v_order) with ordinality t(x, o);
+  end if;
 
   v_state := jsonb_build_object(
     'game', 'dede-party',
@@ -9618,12 +9817,14 @@ begin
     'rounds', v_rounds,
     'total_rounds', v_rounds,
     'order', v_order,
-    'pos', v_zero,
+    'pos', v_pos,
     'dist', v_zero,
     'coins', (select jsonb_object_agg(p::text, (c->>'start_coins')::integer) from unnest(p_players) p),
     'stars', v_zero,
     'star_cells', v_star,
     'map', v_map,
+    -- Taille du plateau (s, m, l), figée au lancement (absente : partie lancée avant les grandes tailles = s).
+    'size', v_size,
     'mech', v_mech,
     -- Un aiguillage par embranchement du plateau (mer : tenu par la marée, 1 − tide).
     'sw', v_sw,
@@ -9643,7 +9844,8 @@ begin
     'results', null,
     'forced', false,
     'stats', (select jsonb_object_agg(p::text, '{"pubs":0,"broke":0,"coins_earned":0,"envelopes":0,"star_exact":0,"stars_bought":0,"mg_wins":0,"mg_streak":0,"mg_streak_max":0,"doubles":0,"washed":0,"toll_paid":0,"jackpots":0,"jackpot_best":0,"robbed":0,"loot":0,"lifts":0,"slides":0}'::jsonb) from unnest(p_players) p),
-    'deadline', now() + make_interval(secs => (c->>'intro_s')::integer));
+    -- Générique : 8 s (S), 10 s (M : on survole les quartiers), 12 s (L : et on dépose les pions sur leurs haltes).
+    'deadline', now() + make_interval(secs => (c->>(case v_size when 'l' then 'intro_l' when 'm' then 'intro_m' else 'intro_s' end))::integer));
 
   return jsonb_build_object(
     'state', v_state,
@@ -9732,12 +9934,17 @@ end $$;
 
 revoke all on function public._dp_const() from public, anon, authenticated;
 revoke all on function public._dp_maps() from public, anon, authenticated;
-revoke all on function public._dp_board(text) from public, anon, authenticated;
-revoke all on function public._dp_next(text) from public, anon, authenticated;
-revoke all on function public._dp_prev(text) from public, anon, authenticated;
-revoke all on function public._dp_map(text) from public, anon, authenticated;
+revoke all on function public._dp_sizes() from public, anon, authenticated;
+revoke all on function public._dp_key(text, text) from public, anon, authenticated;
+revoke all on function public._dp_size(text, integer, text) from public, anon, authenticated;
+revoke all on function public._dp_banks(text, text) from public, anon, authenticated;
+revoke all on function public._dp_wet(jsonb) from public, anon, authenticated;
+revoke all on function public._dp_board(text, text) from public, anon, authenticated;
+revoke all on function public._dp_next(text, text) from public, anon, authenticated;
+revoke all on function public._dp_prev(text, text) from public, anon, authenticated;
+revoke all on function public._dp_map(text, text) from public, anon, authenticated;
 revoke all on function public._dp_star_check(jsonb, text, integer, boolean) from public, anon, authenticated;
-revoke all on function public._dp_riton_hit(jsonb, text) from public, anon, authenticated;
+revoke all on function public._dp_riton_hit(jsonb, text, integer) from public, anon, authenticated;
 revoke all on function public._dp_epilogue(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dp_cards() from public, anon, authenticated;
 revoke all on function public._dp_kinds() from public, anon, authenticated;

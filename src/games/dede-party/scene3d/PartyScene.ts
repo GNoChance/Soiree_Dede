@@ -18,12 +18,14 @@
  */
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
-import type { BoardView } from '../anim'
+import type { BoardView, Leap } from '../anim'
 import { DICE_MS } from '../anim'
-import { CELL_INFO, isJump, linksOf, zoneOf, type BoardDef, type CellType } from '../board'
+import { boardOf, CELL_INFO, isJump, linksOf, quarterOf, transportOf, zoneOf, type BoardDef, type CellType, type GateLook, type Quarter } from '../board'
+import { altOfRow } from '../boards/ski'
 import type { DpEvent } from '../types'
-import { makeBeam, makeCarpet, makeCellTop, makeDieFace, makeFloor, makeGlow, makeLabel, makeSparkle, shade } from './textures'
+import { makeBeam, makeCarpet, makeCellTop, makeDieFace, makeFloor, makeGlow, makeLabel, makePlate, makeSparkle, shade } from './textures'
 import { THEMES } from './themes'
+import { freeze, freezeLocal } from './themes/kit'
 import type { Palette, ThemeCtx, ThemeDef, ThemeRuntime } from './themes/types'
 
 export interface ScenePlayer {
@@ -72,6 +74,19 @@ const rand = (i: number) => {
   return x - Math.floor(x)
 }
 
+/** Habillage animé d'une porte : bac, cabine, barrière, tourniquet, portique (suit `sw`). */
+interface GateRig {
+  look: GateLook
+  root: THREE.Group
+  /** Partie mobile (bac, cabine, bras, tourniquet) et ses deux positions (voie 0 / voie 1). */
+  part: THREE.Object3D
+  a: THREE.Vector3
+  b: THREE.Vector3
+  /** Panneau du portique / voyant du tourniquet (vert = ouvert). */
+  lamp: THREE.MeshToonMaterial | null
+  k: number
+}
+
 interface Pawn {
   id: string
   group: THREE.Group
@@ -118,9 +133,9 @@ interface FloatLabel {
   h: number
 }
 
-const LEAP_H: Record<'lift' | 'ice' | 'luge', number> = { lift: 2.6, ice: 1.1, luge: 3.9 }
-const LEAP_LABEL: Record<'lift' | 'ice' | 'luge', [string, string]> = { lift: ['🚡 Télésiège !', '#B5E61D'], ice: ['🧊 Glissade !', '#DFF3FF'], luge: ['🛷 Grande Luge !', '#ffffff'] }
-const LEAP_TRAIL: Record<'lift' | 'ice' | 'luge', string> = { lift: '#fff2c4', ice: '#dff3ff', luge: '#ffffff' }
+const LEAP_H: Record<Leap, number> = { lift: 2.6, ice: 1.1, luge: 3.9, boat: 0.35, cabin: 3.2, slide: 1.2 }
+const LEAP_LABEL: Record<Leap, [string, string]> = { lift: ['🚡 Télésiège !', '#B5E61D'], ice: ['🧊 Glissade !', '#DFF3FF'], luge: ['🛷 Grande Luge !', '#ffffff'], boat: ['⛴️ En bac !', '#9be7ff'], cabin: ['🚠 Télécabine !', '#FFD166'], slide: ['⛷️ Piste !', '#ffffff'] }
+const LEAP_TRAIL: Record<Leap, string> = { lift: '#fff2c4', ice: '#dff3ff', luge: '#ffffff', boat: '#e8fbff', cabin: '#fff6e5', slide: '#ffffff' }
 
 export class PartyScene {
   private host: HTMLElement
@@ -130,8 +145,8 @@ export class PartyScene {
   private rt: ThemeRuntime = {}
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
-  private camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 140)
-  private fitCam = new THREE.PerspectiveCamera(FOV, 1, 0.5, 140)
+  private camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 320)
+  private fitCam = new THREE.PerspectiveCamera(FOV, 1, 0.5, 320)
   private disposables: Array<{ dispose: () => void }> = []
   private cleanups: Array<() => void> = []
   private disposed = false
@@ -151,6 +166,11 @@ export class PartyScene {
   private halfZ: number
   private zWall: number
   private xWall: number
+  /** Grande taille (M / L) : géométrie allégée, ombres et décor au loin gérés par zone. */
+  private big: boolean
+  /** Emprise des cases ouvertes en coordonnées monde (taille S : ±halfX, ±halfZ) et son centre. */
+  private ext: { minX: number; maxX: number; minZ: number; maxZ: number }
+  private center = new THREE.Vector3()
 
   // lumières / thème
   private hemi!: THREE.HemisphereLight
@@ -161,12 +181,30 @@ export class PartyScene {
   private beamMats: THREE.MeshBasicMaterial[] = []
 
   // plateau
-  private tiles: Array<{ group: THREE.Group; bump: number }> = []
-  private tops: THREE.Mesh[] = []
+  /** Cases instanciées : un corps et un dessus par type (≤ 18 appels de dessin pour tout le plateau). */
+  private tiles: Array<{ type: CellType; k: number; bump: number }> = []
+  private tileBodies = new Map<CellType, THREE.InstancedMesh>()
+  private tileTops = new Map<CellType, THREE.InstancedMesh>()
+  private bumped = new Set<number>()
   private links: Array<[number, number]> = []
   private roadIn!: THREE.InstancedMesh
   private forkLinks: number[][] = []
-  private signs: Array<{ arrow: THREE.Group; ang: number; vel: number; way: number; wiggle: number }> = []
+  private signs: Array<{ at: THREE.Vector3; ang: number; vel: number; way: number; wiggle: number; gate: GateRig | null }> = []
+  /** Flèches des panneaux : instanciées (corps jaune ou bleu marée + contour encre), une instance par porte. */
+  private arrows: { body: THREE.InstancedMesh; ink: THREE.InstancedMesh; tide: THREE.InstancedMesh; tideInk: THREE.InstancedMesh; slot: Array<[boolean, number]> } | null = null
+  /** Liseré des 12 prochaines cases de mon trajet probable (vue perso). */
+  private route!: THREE.InstancedMesh
+  /** Véhicule à bord duquel voyage le pion en vedette (bac, cabine, luge), créé à la demande. */
+  private rides = new Map<string, THREE.Group>()
+  /** Décor « détail » des quartiers : masqué au loin (téléphone, grande taille). */
+  private details: Array<{ obj: THREE.Object3D; at: THREE.Vector3 }> = []
+  private detailTick = 0
+  /** Socles des quartiers ouverts, voiles des quartiers fermés. */
+  private socles = new Map<string, THREE.Group>()
+  /** Décor fixe des portes (pieds, poteaux, gares), fusionné en un seul lot. */
+  private gateStatic = new THREE.Group()
+  private dots: Array<{ p: THREE.Vector3; color: string; r: number }> = []
+  private veils: Array<{ q: Quarter; group: THREE.Group; clouds: THREE.Sprite[]; mats: THREE.Material[] }> = []
   private bulbs!: THREE.InstancedMesh
   private bulbTick = -1
   private chaseUntil = 0
@@ -191,6 +229,8 @@ export class PartyScene {
   private ringGeo!: THREE.TorusGeometry
   private ringMat!: THREE.MeshBasicMaterial
   private stars: Star[] = []
+  private starInst: { body: THREE.InstancedMesh; hull: THREE.InstancedMesh } | null = null
+  private pawnInst: { base: THREE.InstancedMesh; ink: THREE.InstancedMesh } | null = null
   private starGeo!: THREE.ExtrudeGeometry
   private starMat!: THREE.MeshToonMaterial
   private starBeamGeo!: THREE.CylinderGeometry
@@ -223,6 +263,22 @@ export class PartyScene {
   private camDist = 30
   private overviewDist = 30
   private camSnap = true
+  private focusId: string | null = null
+  private tilesOriented = false
+  private frameAvg = 16
+  private slowFor = 0
+  private quality = 0
+  private shadowAt = new THREE.Vector3(1e9, 0, 0)
+  private shadowT = 0
+  private frameTick = 0
+  /** Générique : début (survol des quartiers) ; transport en cours (plan de traversée). */
+  private introT0 = -1
+  private introShown = -1
+  private rideKey = ''
+  private rideMid = new THREE.Vector3()
+  private rideDist = 26
+  private forceOverview = false
+  private frameRect: { c0: number; r0: number; c1: number; r1: number } | null = null
   private shakeK = 0
   private tmp = new THREE.Vector3()
   private tmp2 = new THREE.Vector3()
@@ -235,10 +291,25 @@ export class PartyScene {
     this.opts = opts
     this.board = opts.board
     this.theme = THEMES[opts.board.id] ?? THEMES.grand
-    this.halfX = ((this.board.cols - 1) / 2) * S
-    this.halfZ = ((this.board.rows - 1) / 2) * S
-    this.zWall = -this.halfZ - 6.3
-    this.xWall = this.halfX + 6.3
+    // Repère monde : l'origine reste au centre du plateau de base (taille S) à toutes les tailles, les quartiers
+    // s'étendent autour (colonnes / lignes négatives ou au-delà de 10) ; le décor existant reste juste.
+    const base = boardOf(this.board.id)
+    this.halfX = ((base.cols - 1) / 2) * S
+    this.halfZ = ((base.rows - 1) / 2) * S
+    this.big = this.board.size !== 's'
+    const c0 = Math.min(0, this.board.col0)
+    const r0 = Math.min(0, this.board.row0)
+    this.ext = {
+      minX: (c0 - (base.cols - 1) / 2) * S,
+      maxX: (Math.max(base.cols - 1, this.board.col0 + this.board.cols - 1) - (base.cols - 1) / 2) * S,
+      minZ: (r0 - (base.rows - 1) / 2) * S,
+      maxZ: (Math.max(base.rows - 1, this.board.row0 + this.board.rows - 1) - (base.rows - 1) / 2) * S,
+    }
+    this.center.set((this.ext.minX + this.ext.maxX) / 2, 0, (this.ext.minZ + this.ext.maxZ) / 2)
+    this.zWall = this.ext.minZ - 6.3
+    this.xWall = this.ext.maxX + 6.3
+    // Dédé 2500 / 3000 : la toile du fond passe derrière toute la montagne (jusqu'au Pic, ligne −13).
+    if (this.big && this.board.id === 'ski') this.zWall = Math.min(this.zWall, -14 * S - this.halfZ - 2)
     this.dark = document.documentElement.classList.contains('dark')
     this.pal = this.dark ? this.theme.palette.dark : this.theme.palette.light
     const cores = navigator.hardwareConcurrency || 4
@@ -271,6 +342,7 @@ export class PartyScene {
     this.buildCenter()
     this.buildStudio()
     this.buildActors()
+    this.buildVeils()
     this.rt = this.theme.build(this.ctx())
     this.applyTheme()
 
@@ -328,13 +400,15 @@ export class PartyScene {
 
   /** Position monde d'un point de grille (colonne, ligne ; décimales permises). */
   private grid(col: number, row: number, y = 0, out = new THREE.Vector3()): THREE.Vector3 {
-    return out.set((col - (this.board.cols - 1) / 2) * S, y, (row - (this.board.rows - 1) / 2) * S)
+    return out.set(col * S - this.halfX, y, row * S - this.halfZ)
   }
 
+  /** Position monde d'une case (au sol de sa terrasse : altitude des lacets de Dédé 2000). */
   private cellPos(i: number, out = new THREE.Vector3()): THREE.Vector3 {
     const n = this.board.cells.length
-    const [col, row] = this.board.xy[((i % n) + n) % n]
-    return this.grid(col, row, 0, out)
+    const k = ((i % n) + n) % n
+    const [col, row] = this.board.xy[k]
+    return this.grid(col, row, this.board.alt?.[k] ?? 0, out)
   }
 
   /** Ce que les thèmes peuvent utiliser. */
@@ -373,6 +447,14 @@ export class PartyScene {
       cheer: (k) => (this.cheerK = Math.max(this.cheerK, k)),
       ola: (sec) => (this.olaUntil = this.time + sec),
       chase: (sec) => (this.chaseUntil = this.time + sec),
+      ext: { ...this.ext },
+      tv: Boolean(this.opts.big),
+      detail: (obj, at) => {
+        this.details.push({ obj, at: at ?? obj.getWorldPosition(new THREE.Vector3()) })
+      },
+      socle: (id) => this.socles.get(id) ?? null,
+      focusId: () => this.focusId,
+      camTarget: () => this.camT,
     }
   }
 
@@ -387,27 +469,39 @@ export class PartyScene {
     const size = this.opts.big ? 2048 : 1024
     this.sun.shadow.mapSize.set(size, size)
     const cam = this.sun.shadow.camera
-    cam.left = -(this.halfX + 6.5)
-    cam.right = this.halfX + 8.5
-    cam.top = this.halfZ + 7.8
-    cam.bottom = -(this.halfZ + 7.8)
+    if (!this.big) {
+      cam.left = -(this.halfX + 6.5)
+      cam.right = this.halfX + 8.5
+      cam.top = this.halfZ + 7.8
+      cam.bottom = -(this.halfZ + 7.8)
+    } else {
+      // Grande taille : une carte d'ombre cadrée sur la cible de la caméra (téléphone ± 14, télé ± 24 en L,
+      // toute l'emprise en M), recadrée quand la cible bouge (updateShadow).
+      const R = this.shadowR()
+      cam.left = -R
+      cam.right = R
+      cam.top = R
+      cam.bottom = -R
+    }
     cam.near = 2
-    cam.far = 40
+    cam.far = 60
     this.sun.shadow.bias = -0.0015
     this.sun.shadow.radius = 4
     this.scene.add(this.sun, this.sun.target)
   }
 
   private buildGround() {
-    const floorGeo = this.track(new THREE.CircleGeometry(60, 48))
+    // Sol : un grand disque centré sur l'emprise (assez grand pour les plateaux géants).
+    const halfDiag = Math.hypot(this.ext.maxX - this.ext.minX, this.ext.maxZ - this.ext.minZ) / 2
+    const floorGeo = this.track(new THREE.CircleGeometry(Math.max(60, 1.6 * halfDiag + 10), 48))
     floorGeo.rotateX(-Math.PI / 2)
     this.floorMat = this.toon('#ffffff')
     const floor = new THREE.Mesh(floorGeo, this.floorMat)
-    floor.position.y = -0.2
+    floor.position.set(this.center.x, -0.2, this.center.z)
     floor.receiveShadow = true
     this.scene.add(floor)
 
-    // Tapis du plateau (bord encre + dessus à pois).
+    // Tapis du plateau de base (bord encre + dessus à pois).
     const w = this.halfX * 2 + 2.3
     const d = this.halfZ * 2 + 2.3
     const inkGeo = this.track(new RoundedBoxGeometry(w + 0.36, 0.2, d + 0.36, 4, 0.1))
@@ -418,13 +512,36 @@ export class PartyScene {
     const geo = this.track(new RoundedBoxGeometry(w, 0.2, d, 4, 0.1))
     this.carpetMat = this.toon('#ffffff')
     // Seul le dessus porte les pois : UV planaires recalculés.
-    const pos = geo.getAttribute('position')
-    const uv = geo.getAttribute('uv') as THREE.BufferAttribute
-    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 4, pos.getZ(i) / 4)
+    const planarUv = (g: THREE.BufferGeometry) => {
+      const pos = g.getAttribute('position')
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute
+      for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 4, pos.getZ(i) / 4)
+    }
+    planarUv(geo)
     const carpet = new THREE.Mesh(geo, this.carpetMat)
     carpet.position.y = -0.08
     carpet.receiveShadow = true
     this.scene.add(carpet)
+
+    // Quartiers ouverts : un socle chacun (le tapis du quartier), que le thème peut recolorer ou masquer.
+    for (const q of this.board.quarters) {
+      const a = this.grid(q.box.c0 - 0.75, q.box.r0 - 0.75)
+      const b = this.grid(q.box.c1 + 0.75, q.box.r1 + 0.75)
+      const qw = b.x - a.x
+      const qd = b.z - a.z
+      const g = new THREE.Group()
+      const qInk = new THREE.Mesh(this.track(new THREE.BoxGeometry(qw + 0.3, 0.18, qd + 0.3)), this.inkFront)
+      qInk.position.y = -0.13
+      const qGeo = this.track(new THREE.BoxGeometry(qw, 0.18, qd))
+      planarUv(qGeo)
+      const top = new THREE.Mesh(qGeo, this.carpetMat)
+      top.position.y = -0.09
+      top.receiveShadow = true
+      g.add(qInk, top)
+      g.position.set((a.x + b.x) / 2, 0, (a.z + b.z) / 2)
+      this.scene.add(g)
+      this.socles.set(q.id, g)
+    }
 
     // Guirlande d'ampoules autour du tapis.
     const pts: Array<[number, number]> = []
@@ -448,10 +565,23 @@ export class PartyScene {
     return zoneOf(this.board, j)?.road ?? zoneOf(this.board, i)?.road ?? this.pal.road
   }
 
+  /** Matrice d'une case instanciée (corps ou dessus), enfoncée de `dip` (pion qui se pose). */
+  private setTile(i: number, dip = 0) {
+    const t = this.tiles[i]
+    const p = this.cellPos(i, this.tmp)
+    this.tmpM.makeTranslation(p.x, p.y + TILE_H / 2 + 0.02 - dip, p.z)
+    this.tileBodies.get(t.type)!.setMatrixAt(t.k, this.tmpM)
+    this.tmpQ.setFromAxisAngle(this.tmp2.set(0, 1, 0), this.portrait ? -Math.PI / 2 : 0)
+    this.tmpM.compose(this.tmp.set(p.x, p.y + TOP_Y + 0.006 - dip, p.z), this.tmpQ, this.tmp2.set(1, 1, 1))
+    this.tileTops.get(t.type)!.setMatrixAt(t.k, this.tmpM)
+  }
+
   private buildBoard() {
     const b = this.board
     const n = b.cells.length
-    // Tracé : ruban encre + ruban clair (pas de ruban pour les sauts) ; la voie ouverte des aiguillages s'allume.
+    // Géométrie allégée en grande taille au téléphone (et en L partout) : ≤ 150 triangles par case.
+    const lite = this.big && (!this.opts.big || b.size === 'l')
+    // Tracé : ruban encre + ruban clair (pas de ruban pour les transports) ; la voie ouverte des aiguillages s'allume.
     this.links = linksOf(b).filter(([i, j]) => !isJump(b, i, j))
     const inkGeo = this.track(new THREE.BoxGeometry(S, 0.06, 0.52))
     const inGeo = this.track(new THREE.BoxGeometry(S, 0.06, 0.26))
@@ -474,23 +604,29 @@ export class PartyScene {
     const a = new THREE.Vector3()
     const c = new THREE.Vector3()
     const q = new THREE.Quaternion()
-    const one = new THREE.Vector3(1, 1, 1)
-    const up = new THREE.Vector3(0, 1, 0)
+    const xAxis = new THREE.Vector3(1, 0, 0)
+    const dir = new THREE.Vector3()
+    const scale = new THREE.Vector3()
     this.links.forEach(([i, j], k) => {
       this.cellPos(i, a)
       this.cellPos(j, c)
       const mid = a.clone().add(c).multiplyScalar(0.5)
-      q.setFromAxisAngle(up, -Math.atan2(c.z - a.z, c.x - a.x))
-      this.tmpM.compose(mid.clone().setY(0.05), q, one)
+      // Pente (lacets de la montagne) : le ruban suit la terrasse.
+      dir.copy(c).sub(a)
+      const len = dir.length()
+      q.setFromUnitVectors(xAxis, dir.normalize())
+      scale.set(len / S, 1, 1)
+      this.tmpM.compose(mid.clone().setY(mid.y + 0.05), q, scale)
       roadInk.setMatrixAt(k, this.tmpM)
-      this.tmpM.compose(mid.clone().setY(0.065), q, one)
+      this.tmpM.compose(mid.clone().setY(mid.y + 0.065), q, scale)
       this.roadIn.setMatrixAt(k, this.tmpM)
       this.roadIn.setColorAt(k, this.tmpC.set(this.roadColor(k)))
       const ci = chev.indexOf(k)
       if (ci >= 0) {
-        this.tmpM.compose(mid.clone().setY(0.212), q, one)
+        scale.set(1, 1, 1)
+        this.tmpM.compose(mid.clone().setY(mid.y + 0.212), q, scale)
         chevInk.setMatrixAt(ci, this.tmpM)
-        this.tmpM.compose(mid.clone().setY(0.218), q, one)
+        this.tmpM.compose(mid.clone().setY(mid.y + 0.218), q, scale)
         chevIn.setMatrixAt(ci, this.tmpM)
       }
     })
@@ -498,40 +634,202 @@ export class PartyScene {
     for (const m of [roadInk, this.roadIn, chevInk, chevIn]) m.frustumCulled = false
     this.scene.add(roadInk, this.roadIn, chevInk, chevIn)
 
-    // Cases : socle encre (instancié), corps coloré arrondi, dessus illustré.
-    const slabGeo = this.track(new RoundedBoxGeometry(TILE + 0.16, 0.2, TILE + 0.16, 3, 0.09))
+    // Cases : socle encre (instancié), corps coloré, dessus illustré — corps et dessus instanciés PAR TYPE.
+    const slabGeo = this.track(lite ? new THREE.BoxGeometry(TILE + 0.16, 0.2, TILE + 0.16) : new RoundedBoxGeometry(TILE + 0.16, 0.2, TILE + 0.16, 3, 0.09))
     const slabs = new THREE.InstancedMesh(slabGeo, this.inkFront, n)
     slabs.castShadow = true
     slabs.frustumCulled = false
-    const bodyGeo = this.track(new RoundedBoxGeometry(TILE, TILE_H, TILE, 3, 0.1))
+    const bodyGeo = this.track(new RoundedBoxGeometry(TILE, TILE_H, TILE, lite ? 1 : 3, 0.1))
     const topGeo = this.track(new THREE.PlaneGeometry(TILE * 0.94, TILE * 0.94))
     topGeo.rotateX(-Math.PI / 2)
     const types = (Object.keys(CELL_INFO) as CellType[]).filter((t) => b.cells.includes(t))
-    const bodyMat = Object.fromEntries(types.map((t) => [t, this.toon(shade(CELL_INFO[t].color, -0.22))])) as unknown as Record<CellType, THREE.Material>
-    const topMat = Object.fromEntries(
-      types.map((t) => [t, this.track(new THREE.MeshToonMaterial({ map: this.track(makeCellTop(t, this.maxAniso)), gradientMap: this.ramp, transparent: true, alphaTest: 0.4 }))]),
-    ) as unknown as Record<CellType, THREE.Material>
-    for (let i = 0; i < n; i++) {
-      const p = this.cellPos(i)
-      this.tmpM.makeTranslation(p.x, 0.1, p.z)
-      slabs.setMatrixAt(i, this.tmpM)
-      const g = new THREE.Group()
-      g.position.copy(p)
-      const body = new THREE.Mesh(bodyGeo, bodyMat[b.cells[i]])
-      body.position.y = TILE_H / 2 + 0.02
+    for (const t of types) {
+      const count = b.cells.filter((x) => x === t).length
+      const body = new THREE.InstancedMesh(bodyGeo, this.toon(shade(CELL_INFO[t].color, -0.22)), count)
       body.castShadow = true
-      const top = new THREE.Mesh(topGeo, topMat[b.cells[i]])
-      top.position.y = TOP_Y + 0.006
-      this.tops.push(top)
-      g.add(body, top)
-      this.scene.add(g)
-      this.tiles.push({ group: g, bump: 0 })
+      body.frustumCulled = false
+      const topMat = this.track(new THREE.MeshToonMaterial({ map: this.track(makeCellTop(t, this.maxAniso)), gradientMap: this.ramp, transparent: true, alphaTest: 0.4 }))
+      const top = new THREE.InstancedMesh(topGeo, topMat, count)
+      top.frustumCulled = false
+      this.tileBodies.set(t, body)
+      this.tileTops.set(t, top)
+      this.scene.add(body, top)
+    }
+    const used = new Map<CellType, number>()
+    for (let i = 0; i < n; i++) {
+      const t = b.cells[i]
+      const k = used.get(t) ?? 0
+      used.set(t, k + 1)
+      this.tiles.push({ type: t, k, bump: 0 })
+      const p = this.cellPos(i)
+      this.tmpM.makeTranslation(p.x, p.y + 0.1, p.z)
+      slabs.setMatrixAt(i, this.tmpM)
+      this.setTile(i)
     }
     this.scene.add(slabs)
+
+    // Vue perso : liseré clair sur les 12 prochaines cases de mon trajet probable.
+    const ringShape = new THREE.Shape()
+    const R = TILE * 0.62
+    ringShape.moveTo(-R, -R)
+    ringShape.lineTo(R, -R)
+    ringShape.lineTo(R, R)
+    ringShape.lineTo(-R, R)
+    ringShape.closePath()
+    const hole = new THREE.Path()
+    const r = TILE * 0.5
+    hole.moveTo(-r, -r)
+    hole.lineTo(-r, r)
+    hole.lineTo(r, r)
+    hole.lineTo(r, -r)
+    hole.closePath()
+    ringShape.holes.push(hole)
+    const ringGeo = this.track(new THREE.ShapeGeometry(ringShape))
+    ringGeo.rotateX(-Math.PI / 2)
+    this.route = new THREE.InstancedMesh(ringGeo, this.track(new THREE.MeshBasicMaterial({ color: '#fffbe0', transparent: true, opacity: 0.85, depthWrite: false })), 12)
+    this.route.count = 0
+    this.route.frustumCulled = false
+    this.route.renderOrder = 2
+    this.scene.add(this.route)
+  }
+
+  /** Habillage d'une porte selon son `look` : bac, cabine, barrière, tourniquet, portique de piste. */
+  private buildGateRig(look: GateLook, cell: number, way1: number, at: THREE.Vector3): GateRig | null {
+    if (look === 'switch') return null
+    const root = new THREE.Group()
+    const o = this.cellPos(cell)
+    const t = this.cellPos(way1)
+    const ink = (geo: THREE.BufferGeometry, color: string, grow = 1.08) => this.inked(this.track(geo), this.toon(color), grow)
+    let part: THREE.Object3D
+    let a = new THREE.Vector3()
+    let b = new THREE.Vector3()
+    let lamp: THREE.MeshToonMaterial | null = null
+    if (look === 'boat') {
+      // Le bac : coque, cabine, cheminée rayée. Voie 1 (à quai) : contre l'embarcadère ; voie 0 : au ponton de l'île.
+      const boat = new THREE.Group()
+      const hull = ink(new THREE.BoxGeometry(1.15, 0.28, 0.55), '#EF476F')
+      hull.position.y = 0.14
+      const cab = ink(new THREE.BoxGeometry(0.5, 0.32, 0.42), '#fff6e5')
+      cab.position.set(-0.1, 0.44, 0)
+      const chim = ink(new THREE.CylinderGeometry(0.08, 0.08, 0.36, 10), '#ffffff', 1.2)
+      chim.position.set(0.18, 0.62, 0)
+      const band = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.085, 0.085, 0.1, 10)), this.toon('#EF476F'))
+      band.position.set(0.18, 0.7, 0)
+      boat.add(hull, cab, chim, band)
+      part = boat
+      const dirv = t.clone().sub(o).setY(0).normalize()
+      a = t.clone().sub(dirv.clone().multiplyScalar(S * 0.95)).setY(0.08)
+      b = o.clone().add(dirv.clone().multiplyScalar(S * 0.95)).setY(0.08)
+      boat.rotation.y = -Math.atan2(dirv.z, dirv.x)
+      freezeLocal(this.ctx(), boat)
+      this.scene.add(boat)
+      // Ligne de bouées pointillée entre l'embarcadère et le ponton.
+      this.dotted(o, t, '#FFD166', 0.09)
+      return { look, root: boat, part, a, b, lamp, k: -1 }
+    }
+    if (look === 'cabin') {
+      // Télécabine : deux gares, un câble, une cabine rouge (voie 1 : elle attend en bas).
+      const top = t.clone().setY(t.y + 2.4)
+      const bottom = o.clone().setY(o.y + 2.4)
+      for (const p of [o, t]) {
+        const st = ink(new THREE.BoxGeometry(0.7, 0.6, 0.7), '#8d6e63')
+        st.position.copy(p).add(this.tmp.set(0.55, 0.3, -0.55))
+        const roof = ink(new THREE.ConeGeometry(0.62, 0.4, 4), '#EF476F')
+        roof.position.copy(st.position).setY(st.position.y + 0.5)
+        roof.rotation.y = Math.PI / 4
+        this.gateStatic.add(st, roof)
+      }
+      const cable = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.025, 0.025, 1, 6)), this.inkFront)
+      const mid = bottom.clone().add(top).multiplyScalar(0.5)
+      cable.position.copy(mid)
+      cable.scale.y = bottom.distanceTo(top)
+      cable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(bottom).normalize())
+      this.gateStatic.add(cable)
+      for (const k of [0.25, 0.5, 0.75]) {
+        const p = bottom.clone().lerp(top, k)
+        const pylon = ink(new THREE.CylinderGeometry(0.06, 0.09, p.y, 6), '#9aa0a6', 1.2)
+        pylon.position.set(p.x, p.y / 2, p.z)
+        this.gateStatic.add(pylon)
+      }
+      const cabin = new THREE.Group()
+      const box = ink(new RoundedBoxGeometry(0.55, 0.5, 0.45, 2, 0.1), '#EF476F')
+      box.position.y = -0.35
+      const win = new THREE.Mesh(this.track(new THREE.BoxGeometry(0.57, 0.18, 0.3)), this.toon('#bde0fe'))
+      win.position.y = -0.28
+      const hook = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 5)), this.inkFront)
+      hook.position.y = -0.05
+      cabin.add(box, win, hook)
+      freezeLocal(this.ctx(), cabin)
+      this.scene.add(cabin)
+      return { look, root: cabin, part: cabin, a: bottom, b: top, lamp, k: -1 }
+    }
+    root.position.copy(at)
+    this.scene.add(root)
+    const d = t.clone().sub(o).setY(0).normalize()
+    root.rotation.y = -Math.atan2(d.z, d.x) + Math.PI / 2
+    if (look === 'gate') {
+      // Barrière levante rouge et blanche (voie 1 : levée).
+      const post = ink(new THREE.BoxGeometry(0.18, 0.7, 0.18), '#5b4a3a')
+      post.position.set(-0.55, 0.35, 0)
+      const arm = new THREE.Group()
+      arm.position.set(-0.55, 0.62, 0)
+      for (let k = 0; k < 4; k++) {
+        const seg = new THREE.Mesh(this.track(new THREE.BoxGeometry(0.3, 0.09, 0.09)), this.toon(k % 2 ? '#ffffff' : '#EF476F'))
+        seg.position.x = 0.15 + k * 0.3
+        arm.add(seg)
+      }
+      root.add(post, arm)
+      part = arm
+      a = new THREE.Vector3(0, 0, 0)
+      b = new THREE.Vector3(0, 0, 1.25)
+      return { look, root, part, a, b, lamp, k: -1 }
+    }
+    if (look === 'turnstile') {
+      // Tourniquet : moyeu, trois bras, voyant (vert = il tourne pour le prochain).
+      const hub = ink(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 10), '#c0c6cf', 1.15)
+      hub.position.set(0.55, 0.4, 0)
+      const arms = new THREE.Group()
+      arms.position.set(0.55, 0.62, 0)
+      for (let k = 0; k < 3; k++) {
+        const arm = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6)), this.toon('#c0c6cf'))
+        arm.rotation.z = Math.PI / 2
+        arm.position.x = 0.3
+        const holder = new THREE.Group()
+        holder.rotation.y = (k * Math.PI * 2) / 3
+        holder.add(arm)
+        arms.add(holder)
+      }
+      lamp = this.toon('#06D6A0', { emissive: '#06D6A0', emissiveIntensity: 0.6 })
+      const bulb = new THREE.Mesh(this.track(new THREE.SphereGeometry(0.09, 10, 8)), lamp)
+      bulb.position.set(0.55, 0.88, 0)
+      root.add(hub, arms, bulb)
+      return { look, root, part: arms, a, b, lamp, k: -1 }
+    }
+    // Portique de piste : deux poteaux, un panneau vert « ouverte » / rouge « fermée ».
+    for (const x of [-0.5, 0.5]) {
+      const pole = ink(new THREE.CylinderGeometry(0.05, 0.05, 1.3, 6), '#fff6e5', 1.2)
+      pole.position.set(x, 0.65, 0)
+      root.add(pole)
+    }
+    lamp = this.toon('#06D6A0', { emissive: '#06D6A0', emissiveIntensity: 0.4 })
+    const panel = this.inked(this.track(new THREE.BoxGeometry(1.15, 0.32, 0.06)), lamp, 1.06)
+    panel.position.y = 1.25
+    root.add(panel)
+    return { look, root, part: panel, a, b, lamp, k: -1 }
+  }
+
+  /** Pointillés (bouées, piquets) entre deux points : un InstancedMesh de petites sphères. */
+  private dotted(from: THREE.Vector3, to: THREE.Vector3, color: string, r: number) {
+    const len = from.distanceTo(to)
+    const n = Math.max(2, Math.round(len / 0.55))
+    for (let k = 0; k < n; k++) {
+      const p = from.clone().lerp(to, (k + 0.5) / n)
+      p.y = Math.max(from.y, to.y) * ((k + 0.5) / n) + 0.12
+      this.dots.push({ p, color, r })
+    }
   }
 
   private buildForks() {
-    if (!this.board.forks.length) return
     const shape = new THREE.Shape()
     shape.moveTo(-0.5, -0.17)
     shape.lineTo(0.05, -0.17)
@@ -553,20 +851,69 @@ export class PartyScene {
     const footMat = this.toon('#EF476F')
     this.board.forks.forEach((f) => {
       const o = this.cellPos(f.cell)
-      const d = f.ways.map((c) => this.cellPos(c).sub(o).normalize())
+      // Les voies d'un transport partent loin : on ne garde que la direction (le panneau reste près de sa case).
+      const d = f.ways.map((c) => this.cellPos(c).sub(o).setY(0).normalize())
       const at = o.clone().add(d[0].clone().add(d[1]).multiplyScalar(S * 0.5))
-      const g = new THREE.Group()
-      g.position.copy(at)
+      // Poteau et pied : décor fixe, fusionné avec celui des autres portes (budget des appels de dessin).
       const pole = this.inked(poleGeo, poleMat, 1.25)
-      pole.position.y = 0.7
+      pole.position.copy(at).setY(at.y + 0.7)
       const foot = this.inked(footGeo, footMat, 1.12)
-      foot.position.y = 0.06
-      const arrow = this.inked(geo, f.mode === 'tide' ? tideMat : mat, 1.14)
-      arrow.position.y = 1.5
-      g.add(foot, pole, arrow)
-      this.scene.add(g)
-      this.signs.push({ arrow, ang: 0, vel: 0, way: -1, wiggle: 0 })
+      foot.position.copy(at).setY(at.y + 0.06)
+      this.gateStatic.add(foot, pole)
+      const side = at.clone().add(d[0].clone().sub(d[1]).multiplyScalar(-0.35))
+      this.signs.push({ at: at.clone(), ang: 0, vel: 0, way: -1, wiggle: 0, gate: this.buildGateRig(f.look ?? 'switch', f.cell, f.ways[1], side) })
     })
+    // Transports hors porte (navettes, passage obligé, pistes) : le trajet en pointillés.
+    for (const [from, to] of this.board.jumps) {
+      if (this.board.forks.some((f) => f.cell === from && f.ways[1] === to && f.look && f.look !== 'switch' && f.look !== 'piste')) continue
+      const kind = transportOf(this.board, from, to)?.kind
+      if (!kind || kind === 'luge') continue
+      // Télécabine sans porte (passage obligé des Alpages) : une gare en bas (entre les cases 13 et 14), une en haut.
+      if (kind === 'cabin') {
+        const lo = this.cellPos(from)
+        if (this.board.id === 'ski' && from === 13) lo.lerp(this.cellPos(14), 0.5).add(this.tmp.set(0, 0, -0.9))
+        for (const p of [lo, this.cellPos(to).add(this.tmp.set(0.55, 0, -0.55))]) {
+          const st = this.inked(this.track(new THREE.BoxGeometry(0.8, 0.65, 0.7)), this.toon('#8d6e63'), 1.08)
+          st.position.copy(p).setY(p.y + 0.33)
+          const roof = this.inked(this.track(new THREE.ConeGeometry(0.66, 0.42, 4)), this.toon('#EF476F'), 1.08)
+          roof.position.copy(p).setY(p.y + 0.86)
+          roof.rotation.y = Math.PI / 4
+          this.gateStatic.add(st, roof)
+        }
+      }
+      this.dotted(this.cellPos(from), this.cellPos(to), kind === 'boat' ? '#FFD166' : kind === 'cabin' ? '#2b2545' : '#EF476F', kind === 'cabin' ? 0.05 : 0.08)
+    }
+    if (this.gateStatic.children.length) this.scene.add(freeze(this.ctx(), this.gateStatic))
+    // Tous les pointillés (bouées, câbles, piquets) : un seul maillage instancié.
+    if (this.dots.length) {
+      const m = new THREE.InstancedMesh(this.track(new THREE.SphereGeometry(1, 8, 6)), this.toon('#ffffff'), this.dots.length)
+      this.dots.forEach((d, k) => {
+        this.tmpM.compose(d.p, this.tmpQ.identity(), this.tmp.set(d.r, d.r, d.r))
+        m.setMatrixAt(k, this.tmpM)
+        m.setColorAt(k, this.tmpC.set(d.color))
+      })
+      this.scene.add(m)
+    }
+    // Flèches : 4 maillages instanciés pour toutes les portes.
+    const isTide = this.board.forks.map((f) => f.mode === 'tide')
+    const nT = isTide.filter(Boolean).length
+    const nA = isTide.length - nT
+    const inst = (m: THREE.Material, n: number) => {
+      const x = new THREE.InstancedMesh(geo, m, Math.max(1, n))
+      x.count = n
+      x.frustumCulled = false
+      this.scene.add(x)
+      return x
+    }
+    let a = 0
+    let t = 0
+    this.arrows = {
+      body: inst(mat, nA),
+      ink: inst(this.inkBack, nA),
+      tide: inst(tideMat, nT),
+      tideInk: inst(this.inkBack, nT),
+      slot: isTide.map((x) => [x, x ? t++ : a++] as [boolean, number]),
+    }
   }
 
   /** L'estrade de Dédé (placée par `board.dede`) ; un thème sans `stageColors` la construit lui-même. */
@@ -585,13 +932,15 @@ export class PartyScene {
       t3.position.y = 0.62
       g.add(t1, t2, t3)
       // Petites étoiles dorées posées sur la première marche.
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < (this.big && !this.opts.big ? 0 : 6); i++) {
         const a = (i / 6) * Math.PI * 2 + 0.4
         const s = this.sprite(this.sparkleTex, { color: GOLD })
         s.scale.setScalar(0.42)
         s.position.set(Math.cos(a) * 1.48, 0.5, Math.sin(a) * 1.48)
         g.add(s)
       }
+      // Les trois marches : un seul lot (le thème peut faire bouger l'estrade, elle bouge d'un bloc).
+      freezeLocal(this.ctx(), g)
     }
     this.scene.add(g)
     this.stage = g
@@ -611,7 +960,8 @@ export class PartyScene {
 
   /** Toile de fond (rideaux drapés), gradins et public, tours de projecteurs (côtés lointains de la caméra). */
   private buildStudio() {
-    const { zWall, xWall, halfX, halfZ } = this
+    const { zWall, xWall } = this
+    const { minX, maxX, minZ, maxZ } = this.ext
     this.curtainMat = this.toon('#ffffff', { side: THREE.DoubleSide })
     const curtain = (len: number) => {
       const geo = this.track(new THREE.PlaneGeometry(len, 8, Math.round(len * 5), 1))
@@ -620,10 +970,10 @@ export class PartyScene {
       geo.computeVertexNormals()
       return new THREE.Mesh(geo, this.curtainMat)
     }
-    const lenA = xWall + halfX + 7
+    const lenA = xWall - minX + 7
     const wallA = curtain(lenA)
     wallA.position.set(xWall - lenA / 2, 3.8, zWall)
-    const lenB = halfZ + 6 - zWall
+    const lenB = maxZ + 6 - zWall
     const wallB = curtain(lenB)
     wallB.rotation.y = -Math.PI / 2
     wallB.position.set(xWall, 3.8, zWall + lenB / 2)
@@ -633,19 +983,31 @@ export class PartyScene {
     const stepMat = this.toon('#5b3fa8')
     const stepMat2 = this.toon('#7353c9')
     const seats: Array<{ x: number; y: number; z: number }> = []
+    // Grande taille : les gradins font le tour de l'emprise, public plafonné (téléphone 120, télé 200) ;
+    // à Dédé 2000, la montagne remplace le gradin du fond.
+    const back = !(this.big && this.board.id === 'ski')
+    // Gradins et tours de projecteurs : décor fixe, fusionné en un lot (budget des appels de dessin).
+    const studio = new THREE.Group()
+    const cap = this.opts.big ? 200 : 120
+    const lenX = maxX - minX
+    const lenZ = maxZ - minZ
+    const pitch = Math.max(0.92, ((back ? lenX : 0) + lenZ) / (cap / 3))
     for (let r = 0; r < 3; r++) {
       const h = 0.5 + r * 0.5
-      const za = -halfZ - 2.5 - r * 1.05
-      const a = new THREE.Mesh(this.track(new THREE.BoxGeometry(halfX * 2 + 1, h, 1.05)), r % 2 === 0 ? stepMat : stepMat2)
-      a.position.set(0, h / 2 - 0.2, za)
-      a.castShadow = true
-      const xb = halfX + 2.5 + r * 1.05
-      const b = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.05, h, halfZ * 2 + 1)), r % 2 === 0 ? stepMat : stepMat2)
-      b.position.set(xb, h / 2 - 0.2, 0)
+      const za = minZ - 2.5 - r * 1.05
+      if (back) {
+        const a = new THREE.Mesh(this.track(new THREE.BoxGeometry(lenX + 1, h, 1.05)), r % 2 === 0 ? stepMat : stepMat2)
+        a.position.set((minX + maxX) / 2, h / 2 - 0.2, za)
+        a.castShadow = true
+        studio.add(a)
+        for (let x = minX + (r % 2) * 0.45; x <= maxX; x += pitch) seats.push({ x, y: h - 0.2, z: za })
+      }
+      const xb = maxX + 2.5 + r * 1.05
+      const b = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.05, h, lenZ + 1)), r % 2 === 0 ? stepMat : stepMat2)
+      b.position.set(xb, h / 2 - 0.2, (minZ + maxZ) / 2)
       b.castShadow = true
-      this.scene.add(a, b)
-      for (let x = -halfX + (r % 2) * 0.45; x <= halfX; x += 0.92) seats.push({ x, y: h - 0.2, z: za })
-      for (let z = -halfZ + (r % 2) * 0.45; z <= halfZ; z += 0.92) seats.push({ x: xb, y: h - 0.2, z })
+      studio.add(b)
+      for (let z = minZ + (r % 2) * 0.45; z <= maxZ; z += pitch) seats.push({ x: xb, y: h - 0.2, z })
     }
     const headGeo = this.track(new THREE.SphereGeometry(0.27, 12, 9))
     const bodyGeo = this.track(new THREE.CylinderGeometry(0.2, 0.3, 0.5, 10))
@@ -669,25 +1031,31 @@ export class PartyScene {
     const beamGeo = this.track(new THREE.CylinderGeometry(0.16, 1.5, 1, 18, 1, true))
     beamGeo.translate(0, -0.5, 0)
     const spots: Array<[number, number, string]> = [
-      [-halfX - 2.2, zWall + 1.3, '#FFD166'],
-      [halfX * 0.25, zWall + 1.0, '#FF8FA3'],
+      [minX - 2.2, zWall + 1.3, '#FFD166'],
+      [minX + lenX * 0.62, zWall + 1.0, '#FF8FA3'],
       [xWall - 1.2, zWall + 1.3, '#4CC9F0'],
-      [xWall - 1.0, halfZ * 0.3, '#FFD166'],
-      [xWall - 1.3, halfZ + 3.4, '#8B5CF6'],
+      [xWall - 1.0, minZ + lenZ * 0.65, '#FFD166'],
+      [xWall - 1.3, maxZ + 3.4, '#8B5CF6'],
     ]
+    const lamps = new THREE.InstancedMesh(headGeo2, lampMat, spots.length)
     spots.forEach(([x, z, col], i) => {
       const tower = new THREE.Mesh(towerGeo, towerMat)
       tower.position.set(x, 4.3, z)
-      const lamp = new THREE.Mesh(headGeo2, lampMat)
-      lamp.position.set(x, 8.9, z)
-      this.scene.add(tower, lamp)
+      studio.add(tower)
+      this.tmpM.makeTranslation(x, 8.9, z)
+      lamps.setMatrixAt(i, this.tmpM)
       const mat = this.track(new THREE.MeshBasicMaterial({ map: this.beamTex, color: col, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, opacity: 0.3 }))
       this.beamMats.push(mat)
       const mesh = new THREE.Mesh(beamGeo, mat)
       mesh.renderOrder = 3
+      // Téléphone, grande taille : pas de faisceaux (budget des appels de dessin).
+      mesh.visible = !(this.big && !this.opts.big)
       this.scene.add(mesh)
       this.beams.push({ mesh, src: new THREE.Vector3(x, 8.7, z), aim: new THREE.Vector3(0, 0, 0), ph: i * 1.7 })
     })
+    const frozen = freeze(this.ctx(), studio)
+    frozen.traverse((o) => (o.castShadow = true))
+    this.scene.add(frozen, lamps)
 
     // Pastille de lumière sous le pion en vedette (poursuite).
     const spotGeo = this.track(new THREE.PlaneGeometry(3.2, 3.2))
@@ -839,6 +1207,9 @@ export class PartyScene {
         sprite.center.set(0.5, 0.05)
         sprite.position.y = 0.12
         sprite.visible = false
+        // Socles dessinés par deux maillages instanciés communs (pawnInst) : ceux-ci ne portent que la transformation.
+        base.visible = false
+        ink.visible = false
         group.add(ink, base, ring, sprite)
         this.scene.add(group)
         pw = { id: p.id, group, sprite, base, ring, cur: new THREE.Vector3(), scale: 1, arc: null, landAt: -1e9, placed: false }
@@ -854,10 +1225,28 @@ export class PartyScene {
     }
   }
 
+  /** Vue perso (téléphone, grandes tailles, phase de lancer) : la caméra cadre ce pion ; null = vue d'ensemble. */
+  setFocus(id: string | null) {
+    this.focusId = id
+  }
+
+  /** Bouton « 🗺️ » : force la vue d'ensemble (true) ou rend la main à la caméra automatique (false). */
+  setOverview(force: boolean) {
+    this.forceOverview = force
+  }
+
+  /** Ce que filme la caméra, en coordonnées de grille du plateau (cadre blanc de la mini-carte), ou null. */
+  viewFrame(): { c0: number; r0: number; c1: number; r1: number } | null {
+    return this.frameRect
+  }
+
   /** Phase du jeu : choisit le cadrage quand aucun pion n'est en vedette. */
   setPhase(phase: string) {
     if (phase === this.phase) return
     this.phase = phase
+    // Générique d'une grande taille : survol des quartiers ouverts (plaques au passage).
+    this.introT0 = phase === 'intro' ? this.time : -1
+    this.introShown = -1
   }
 
   /* ------------------------------ boucle ------------------------------ */
@@ -868,6 +1257,7 @@ export class PartyScene {
     if (w === this.width && h === this.height) return
     this.width = w
     this.height = h
+    const wasPortrait = this.portrait
     this.portrait = h > w * 1.02
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
@@ -875,7 +1265,12 @@ export class PartyScene {
     this.overviewDist = this.fitDistance()
     this.camSnap = true
     // Les emojis des cases se lisent depuis la caméra (portrait : un quart de tour).
-    for (const t of this.tops) t.rotation.y = this.portrait ? -Math.PI / 2 : 0
+    if (wasPortrait !== this.portrait || !this.tilesOriented) {
+      this.tilesOriented = true
+      for (let i = 0; i < this.tiles.length; i++) this.setTile(i)
+      for (const m of this.tileBodies.values()) m.instanceMatrix.needsUpdate = true
+      for (const m of this.tileTops.values()) m.instanceMatrix.needsUpdate = true
+    }
     this.setFog()
   }
 
@@ -892,18 +1287,15 @@ export class PartyScene {
     cam.lookAt(target)
   }
 
-  /** Distance de la vue d'ensemble : tout le plateau tient dans le cadre (marge en haut pour le décor). */
-  private fitDistance(): number {
+  /** Distance à laquelle un rectangle du sol (monde) tient dans le cadre, vu depuis `target`. */
+  private fitRect(x0: number, x1: number, z0: number, z1: number, top: number, target: THREE.Vector3, az: number, el: number, hiMax = 200): number {
     const cam = this.fitCam
     cam.aspect = this.camera.aspect
     cam.updateProjectionMatrix()
-    const mx = this.halfX + 1.25
-    const mz = this.halfZ + 1.25
     const pts: THREE.Vector3[] = []
-    for (const x of [-mx, mx]) for (const z of [-mz, mz]) for (const y of [0, 1.7]) pts.push(new THREE.Vector3(x, y, z))
-    const target = new THREE.Vector3(0, 0.3, 0)
+    for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [0, top]) pts.push(new THREE.Vector3(x, y, z))
     const fits = (d: number) => {
-      this.place(cam, target, this.baseAz(), this.overviewEl(), d)
+      this.place(cam, target, az, el, d)
       cam.updateMatrixWorld()
       return pts.every((p) => {
         const v = this.tmp.copy(p).project(cam)
@@ -911,14 +1303,27 @@ export class PartyScene {
         return Math.abs(v.z) < 1 && Math.abs(v.x) <= 0.96 && v.y >= -0.95 && v.y <= (this.portrait ? 0.72 : 0.8)
       })
     }
-    let lo = 8
-    let hi = 90
-    for (let i = 0; i < 16; i++) {
+    let lo = 4
+    let hi = hiMax
+    for (let i = 0; i < 18; i++) {
       const mid = (lo + hi) / 2
       if (fits(mid)) hi = mid
       else lo = mid
     }
     return hi
+  }
+
+  /** Distance de la vue d'ensemble : toutes les cases ouvertes tiennent dans le cadre (marge en haut pour le décor). */
+  private fitDistance(): number {
+    const top = 1.7 + Math.max(0, ...(this.board.alt ?? [0]))
+    const { minX, maxX, minZ, maxZ } = this.ext
+    return this.fitRect(minX - 1.25, maxX + 1.25, minZ - 1.25, maxZ + 1.25, top, this.overviewTarget(), this.baseAz(), this.overviewEl())
+  }
+
+  /** Cible de la vue d'ensemble : le centre de l'emprise (et de la montagne). */
+  private overviewTarget(out = new THREE.Vector3()) {
+    const alt = this.board.alt
+    return out.set(this.center.x, 0.3 + (alt ? Math.max(...alt) * 0.35 : 0), this.center.z)
   }
 
   private frame = (now: number) => {
@@ -928,9 +1333,11 @@ export class PartyScene {
       this.lastT = now
       return
     }
-    const dt = Math.min(0.05, (now - this.lastT) / 1000)
+    const raw = now - this.lastT
+    const dt = Math.min(0.05, raw / 1000)
     this.lastT = now
     this.time += dt
+    this.adaptQuality(raw)
     const view = this.opts.getView()
     this.updateBoard(view, dt)
     this.updateStars(view)
@@ -939,21 +1346,62 @@ export class PartyScene {
     this.updateDice(view, dt)
     this.updateFx(dt)
     this.updateDecor(view, dt)
+    this.updateVeils(dt)
     this.rt.update?.(view, dt)
     this.updateCamera(view, dt)
+    this.updateShadow(view)
+    this.updateDetails()
+    this.updateFrameRect()
     this.primed = true
     this.renderer.render(this.scene, this.camera)
+  }
+
+  /**
+   * Budget du téléphone : si la moyenne dépasse 33 ms par image pendant 2 s, résolution 1,25, puis 1,0, puis
+   * ombres coupées (jamais de remontée en cours de partie). La télé n'est pas concernée.
+   */
+  private adaptQuality(raw: number) {
+    if (raw > 0 && raw < 500) this.frameAvg = this.frameAvg * 0.95 + raw * 0.05
+    if (this.opts.big || this.time < 3) return
+    if (this.frameAvg > 33) {
+      this.slowFor += Math.min(0.05, raw / 1000)
+      if (this.slowFor > 2) {
+        this.slowFor = 0
+        this.quality++
+        if (this.quality === 1) this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
+        else if (this.quality === 2) this.renderer.setPixelRatio(1)
+        else if (this.quality === 3) {
+          this.renderer.shadowMap.enabled = false
+          this.scene.traverse((o) => {
+            const m = (o as THREE.Mesh).material as THREE.Material | undefined
+            if (m) m.needsUpdate = true
+          })
+        }
+        this.width = 0
+        this.resize()
+      }
+    } else this.slowFor = 0
   }
 
   /* ------------------------------ plateau ------------------------------ */
 
   private updateBoard(view: BoardView, dt: number) {
-    for (const t of this.tiles) {
-      if (t.bump <= 0.001) continue
-      t.bump = Math.max(0, t.bump - dt * 5)
-      t.group.position.y = -0.09 * Math.sin(t.bump * Math.PI)
+    // Case qui s'enfonce quand un pion s'y pose : seule la matrice de son instance bouge.
+    if (this.bumped.size) {
+      const dirty = new Set<CellType>()
+      for (const i of this.bumped) {
+        const t = this.tiles[i]
+        t.bump = Math.max(0, t.bump - dt * 5)
+        this.setTile(i, 0.09 * Math.sin(t.bump * Math.PI))
+        dirty.add(t.type)
+        if (t.bump <= 0.001) this.bumped.delete(i)
+      }
+      for (const ty of dirty) {
+        this.tileBodies.get(ty)!.instanceMatrix.needsUpdate = true
+        this.tileTops.get(ty)!.instanceMatrix.needsUpdate = true
+      }
     }
-    // Aiguillages : flèche (ressort) + voie ouverte allumée.
+    // Aiguillages : flèche (ressort) + voie ouverte allumée + habillage de la porte (bac, cabine, barrière…).
     let colors = false
     this.signs.forEach((sg, k) => {
       const f = this.board.forks[k]
@@ -976,23 +1424,296 @@ export class PartyScene {
       sg.vel += (diff * 90 - sg.vel * 9) * dt
       sg.ang += sg.vel * dt
       sg.wiggle = Math.max(0, sg.wiggle - dt * 1.6)
-      sg.arrow.rotation.y = sg.ang
       const s = 1 + 0.35 * Math.sin(sg.wiggle * Math.PI) + 0.04 * Math.sin(this.time * 4 + k)
-      sg.arrow.scale.setScalar(s)
-      sg.arrow.position.y = 1.5 + 0.06 * Math.sin(this.time * 2.4 + k * 2)
+      if (this.arrows) {
+        const [tide, slot] = this.arrows.slot[k]
+        this.tmpQ.setFromAxisAngle(this.tmp.set(0, 1, 0), sg.ang)
+        const p = this.tmp2.copy(sg.at).setY(sg.at.y + 1.5 + 0.06 * Math.sin(this.time * 2.4 + k * 2))
+        this.tmpM.compose(p, this.tmpQ, this.tmp.set(s, s, s))
+        ;(tide ? this.arrows.tide : this.arrows.body).setMatrixAt(slot, this.tmpM)
+        this.tmpM.compose(p, this.tmpQ, this.tmp.set(s * 1.14, s * 1.14, s * 1.14))
+        ;(tide ? this.arrows.tideInk : this.arrows.ink).setMatrixAt(slot, this.tmpM)
+      }
+      if (sg.gate) this.updateGate(sg.gate, way, dt, k)
     })
     if (colors && this.roadIn.instanceColor) this.roadIn.instanceColor.needsUpdate = true
+    if (this.arrows) for (const m of [this.arrows.body, this.arrows.ink, this.arrows.tide, this.arrows.tideInk]) m.instanceMatrix.needsUpdate = true
+  }
+
+  /** La porte suit son aiguillage : voie 1 = le véhicule est là / la barrière levée ; voie 0 = parti / baissée. */
+  private updateGate(g: GateRig, way: number, dt: number, k: number) {
+    const goal = way === 1 ? 1 : 0
+    g.k = g.k < 0 ? goal : g.k + (goal - g.k) * (1 - Math.exp(-dt * 2.2))
+    const t = this.time
+    if (g.look === 'boat' || g.look === 'cabin') {
+      // Le bac traverse (voie 1 : à quai, à l'embarcadère) ; la cabine monte et redescend le long du câble.
+      if (g.look === 'boat') {
+        g.part.position.copy(g.a.clone().lerp(g.b, g.k))
+        g.part.position.y = 0.08 + Math.sin(t * 1.7 + k) * 0.04
+        g.part.rotation.z = Math.sin(t * 1.3 + k) * 0.05
+      } else {
+        g.part.position.copy(g.b.clone().lerp(g.a, g.k))
+        g.part.rotation.z = Math.sin(t * 2 + k) * 0.06
+      }
+    } else if (g.look === 'gate') g.part.rotation.z = g.k * 1.25
+    else if (g.look === 'turnstile') {
+      if (goal === 1) g.part.rotation.y += dt * 1.6
+      g.lamp?.color.set(goal === 1 ? '#06D6A0' : '#EF476F')
+      g.lamp?.emissive.set(goal === 1 ? '#06D6A0' : '#EF476F')
+    } else if (g.look === 'piste') {
+      g.lamp?.color.set(goal === 1 ? '#06D6A0' : '#EF476F')
+      g.lamp?.emissive.set(goal === 1 ? '#06D6A0' : '#EF476F')
+    }
+  }
+
+  /* ------------------------------ grandes tailles ------------------------------ */
+
+  /** Demi-côté de la carte d'ombre en grande taille : téléphone ± 14, télé ± 24 en L, toute l'emprise en M. */
+  private shadowR() {
+    if (!this.opts.big) return 14
+    if (this.board.size === 'l') return 24
+    return Math.max(this.ext.maxX - this.ext.minX, this.ext.maxZ - this.ext.minZ) / 2 + 8
+  }
+
+  /** Grande taille : la carte d'ombre suit la cible de la caméra (recadrée quand elle bouge de plus de 2 unités). */
+  private updateShadow(view: BoardView) {
+    if (!this.big) return
+    const moving = Boolean(view.mover?.walking)
+    const at = this.opts.big && this.board.size === 'm' ? this.center : this.camT
+    if (this.shadowAt.distanceTo(at) > 2 || (moving && this.time - this.shadowT > 0.25)) {
+      this.shadowAt.copy(at)
+      this.shadowT = this.time
+      this.sun.target.position.set(at.x, 0, at.z)
+      this.sun.position.set(at.x - 7, 15, at.z + 9)
+      this.sun.target.updateMatrixWorld()
+      this.sun.updateMatrixWorld()
+      this.renderer.shadowMap.needsUpdate = true
+    }
+  }
+
+  /**
+   * Décor « détail » des quartiers (téléphone, grande taille) : masqué au-delà de 22 unités de la cible de la
+   * caméra et en vue d'ensemble ; toujours visible à la télé.
+   */
+  private updateDetails() {
+    if (!this.details.length || this.opts.big || !this.big) return
+    if (++this.detailTick % 8 !== 0) return
+    const wide = this.mode === 'overview'
+    for (const d of this.details) d.obj.visible = !wide && d.at.distanceTo(this.camT) < 22
+  }
+
+  /** Ce que filme la caméra, en coordonnées de grille (pour le cadre de la mini-carte). */
+  private updateFrameRect() {
+    if (!this.big || ++this.frameTick % 6 !== 0) return
+    const ray = new THREE.Raycaster()
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const hit = new THREE.Vector3()
+    let c0 = Infinity
+    let c1 = -Infinity
+    let r0 = Infinity
+    let r1 = -Infinity
+    for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      ray.setFromCamera(new THREE.Vector2(x, y), this.camera)
+      if (!ray.ray.intersectPlane(plane, hit)) {
+        // Coin au-dessus de l'horizon : on borne à la distance de la caméra.
+        hit.copy(ray.ray.direction).setY(0).normalize().multiplyScalar(this.camDist * 2).add(this.camera.position)
+      }
+      const c = (hit.x + this.halfX) / S
+      const r = (hit.z + this.halfZ) / S
+      c0 = Math.min(c0, c)
+      c1 = Math.max(c1, c)
+      r0 = Math.min(r0, r)
+      r1 = Math.max(r1, r)
+    }
+    this.frameRect = { c0, r0, c1, r1 }
+  }
+
+  /**
+   * Quartiers fermés : une silhouette (socle pâle, sans cases ni ruban), un voile selon le thème (rideau, brume
+   * de mer, palissade, brume de forêt, nuages) et une plaque « 🔒 … · à 5 joueurs » / « à 7 joueurs ».
+   */
+  private buildVeils() {
+    for (const q of this.board.closed) {
+      const g = new THREE.Group()
+      const a = this.grid(q.box.c0 - 0.6, q.box.r0 - 0.6)
+      const b = this.grid(q.box.c1 + 0.6, q.box.r1 + 0.6)
+      const w = b.x - a.x
+      const d = b.z - a.z
+      const cx = (a.x + b.x) / 2
+      const cz = (a.z + b.z) / 2
+      const mats: THREE.Material[] = []
+      const ghost = (color: string, opacity: number) => {
+        const m = this.track(new THREE.MeshToonMaterial({ color, gradientMap: this.ramp, transparent: true, opacity, depthWrite: false }))
+        mats.push(m)
+        return m
+      }
+      // Silhouette : le socle du quartier, à 35 % d'opacité.
+      const base = new THREE.Mesh(this.track(new THREE.BoxGeometry(w, 0.14, d)), ghost(this.pal.carpet, 0.35))
+      base.position.set(cx, -0.1, cz)
+      g.add(base)
+      const clouds: THREE.Sprite[] = []
+      const fog = (color: string, n: number, h: number) => {
+        for (let k = 0; k < n; k++) {
+          const s = this.sprite(this.glowTex, { color, opacity: 0.85, depthWrite: false })
+          s.scale.set(Math.max(w, d) * 0.75, Math.max(w, d) * 0.4, 1)
+          s.position.set(cx + (rand(k + q.cells[0]) - 0.5) * w * 0.6, h + k * 0.5, cz + (rand(k + 7 + q.cells[0]) - 0.5) * d * 0.6)
+          s.userData.base = s.position.clone()
+          clouds.push(s)
+          g.add(s)
+        }
+      }
+      // Côté tourné vers le plateau de base : là où l'on pose rideau / palissade.
+      const toBase = new THREE.Vector3(-cx, 0, -cz)
+      const alongX = Math.abs(toBase.x) < Math.abs(toBase.z)
+      const edge = alongX ? new THREE.Vector3(cx, 0, cz + Math.sign(toBase.z) * d * 0.5) : new THREE.Vector3(cx + Math.sign(toBase.x) * w * 0.5, 0, cz)
+      const span = alongX ? w : d
+      // La palissade est posée un peu en retrait, côté quartier (elle ne cache pas la rangée de cases voisine).
+      edge.add(new THREE.Vector3(cx, 0, cz).sub(edge).setY(0).normalize().multiplyScalar(0.6))
+      // Montagne : le voile se pose sur la neige, à l'altitude du secteur.
+      if (this.board.id === 'ski') g.position.y = altOfRow(q.box.r0)
+      if (q.veil === 'curtain') {
+        const geo = this.track(new THREE.PlaneGeometry(span, 3.2, Math.round(span * 4), 1))
+        const p = geo.getAttribute('position')
+        for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(p.getX(i) * 3.4) * 0.2)
+        geo.computeVertexNormals()
+        const curtain = new THREE.Mesh(geo, this.track(new THREE.MeshToonMaterial({ color: '#c1121f', gradientMap: this.ramp, side: THREE.DoubleSide })))
+        curtain.position.copy(edge).setY(1.6)
+        curtain.rotation.y = alongX ? 0 : Math.PI / 2
+        const glow = this.sprite(this.glowTex, { color: '#FFD166', opacity: 0.5, blending: THREE.AdditiveBlending })
+        glow.position.copy(edge).setY(0.15)
+        glow.scale.set(span * 0.8, 0.6, 1)
+        g.add(curtain, glow)
+        fog('#2b2545', 2, 1.4)
+      } else if (q.veil === 'fence') {
+        // Palissade de chantier rayée orange et blanc.
+        const n = Math.max(4, Math.round(span / 0.5))
+        const boards = new THREE.InstancedMesh(this.track(new THREE.BoxGeometry(0.42, 0.85, 0.08)), this.toon('#ffffff'), n)
+        for (let k = 0; k < n; k++) {
+          const t = (k + 0.5) / n - 0.5
+          this.tmp.copy(edge).add(alongX ? this.tmp2.set(t * span, 0.42, 0) : this.tmp2.set(0, 0.42, t * span))
+          this.tmpQ.setFromAxisAngle(this.tmp2.set(0, 1, 0), alongX ? 0 : Math.PI / 2)
+          this.tmpM.compose(this.tmp, this.tmpQ, this.tmp2.set(1, 1, 1))
+          boards.setMatrixAt(k, this.tmpM)
+          boards.setColorAt(k, this.tmpC.set(k % 2 ? '#ffffff' : '#FF8C42'))
+        }
+        g.add(boards)
+        // Les attractions sous des bâches gris-bleu.
+        const tarp = new THREE.Mesh(this.track(new THREE.ConeGeometry(Math.min(w, d) * 0.35, 2.4, 4)), ghost('#7d8fa8', 0.85))
+        tarp.position.set(cx, 1.2, cz)
+        tarp.rotation.y = Math.PI / 4
+        g.add(tarp)
+      } else if (q.veil === 'forest') {
+        fog('#3b4a3a', 3, 0.9)
+        // Deux yeux de chouette qui clignent dans le noir.
+        const eyes = new THREE.Group()
+        for (const s of [-0.16, 0.16]) {
+          const e = this.sprite(this.glowTex, { color: '#ffe066', blending: THREE.AdditiveBlending })
+          e.scale.setScalar(0.32)
+          e.position.x = s
+          eyes.add(e)
+        }
+        eyes.position.set(cx, 1.6, cz)
+        eyes.userData.owl = true
+        g.add(eyes)
+      } else if (q.veil === 'clouds') {
+        fog('#ffffff', 4, 2.2)
+      } else {
+        fog('#eaf6ff', 3, 0.8)
+      }
+      // La plaque « 🔒 … · à N joueurs ».
+      const pl = makePlate(`🔒 ${q.emoji} ${q.name} · à ${q.opens === 'm' ? 5 : 7} joueurs`, '#ffffff')
+      const plate = this.sprite(this.track(pl.tex), { depthTest: false })
+      plate.scale.set(0.62 * pl.aspect, 0.62, 1)
+      plate.position.set(cx, 2.6, cz)
+      plate.renderOrder = 5
+      g.add(plate)
+      this.scene.add(g)
+      this.veils.push({ q, group: g, clouds, mats })
+    }
+  }
+
+  /** Voiles des quartiers fermés : la brume dérive, la chouette cligne. */
+  private updateVeils(dt: number) {
+    if (!this.veils.length) return
+    void dt
+    for (const v of this.veils) {
+      v.clouds.forEach((c, k) => {
+        const b = c.userData.base as THREE.Vector3
+        c.position.set(b.x + Math.sin(this.time * 0.15 + k * 2) * 1.2, b.y + Math.sin(this.time * 0.4 + k) * 0.15, b.z + Math.cos(this.time * 0.12 + k) * 0.8)
+        ;(c.material as THREE.SpriteMaterial).opacity = 0.55 + 0.25 * Math.sin(this.time * 0.3 + k)
+      })
+      for (const o of v.group.children) if (o.userData.owl) o.visible = Math.sin(this.time * 1.3) > -0.85
+    }
+  }
+
+  /** Les 12 prochaines cases de mon trajet probable (aiguillages dans leur état actuel ; marée : voie ouverte). */
+  private routeAhead(from: number, sw: number[], n = 12): number[] {
+    const out: number[] = []
+    const ways = [...sw]
+    let c = from
+    for (let k = 0; k < n; k++) {
+      const nx = this.board.next[c]
+      if (Array.isArray(nx)) {
+        const fi = this.board.forks.findIndex((f) => f.cell === c)
+        const w = ways[fi] === 1 ? 1 : 0
+        if (fi >= 0 && this.board.forks[fi].mode === 'toggle') ways[fi] = 1 - w
+        c = nx[w]
+      } else c = nx
+      out.push(c)
+    }
+    return out
+  }
+
+  /** Véhicule d'un transport (créé à la demande) : bac, cabine, luge / planche de glisse. */
+  private rideOf(kind: Leap): THREE.Group | null {
+    if (kind === 'lift' || kind === 'ice') return null
+    let g = this.rides.get(kind)
+    if (g) return g
+    g = new THREE.Group()
+    const ink = (geo: THREE.BufferGeometry, color: string, grow = 1.08) => this.inked(this.track(geo), this.toon(color), grow)
+    if (kind === 'boat') {
+      const hull = ink(new THREE.BoxGeometry(1.3, 0.3, 0.7), '#EF476F')
+      hull.position.y = -0.05
+      const rail = ink(new THREE.BoxGeometry(1.3, 0.08, 0.72), '#fff6e5')
+      rail.position.y = 0.14
+      const chim = ink(new THREE.CylinderGeometry(0.09, 0.09, 0.45, 10), '#ffffff', 1.2)
+      chim.position.set(-0.45, 0.4, 0)
+      g.add(hull, rail, chim)
+    } else if (kind === 'cabin') {
+      const box = ink(new RoundedBoxGeometry(0.95, 0.85, 0.8, 2, 0.14), '#EF476F')
+      box.position.y = 0.42
+      const hook = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6)), this.inkFront)
+      hook.position.y = 1.2
+      g.add(box, hook)
+      ;(box.children[0] as THREE.Mesh).material = this.toon('#EF476F', { transparent: true, opacity: 0.55 })
+    } else {
+      const sled = ink(new THREE.BoxGeometry(0.9, 0.08, 0.42), kind === 'slide' ? '#4CC9F0' : '#EF476F')
+      sled.position.y = -0.02
+      g.add(sled)
+    }
+    g.visible = false
+    this.scene.add(g)
+    this.rides.set(kind, g)
+    return g
   }
 
   /* ------------------------------ étoiles ------------------------------ */
 
   private makeStar(cell: number): Star {
     const group = new THREE.Group()
-    const mesh = new THREE.Mesh(this.starGeo, this.starMat)
-    const hull = new THREE.Mesh(this.starGeo, this.inkBack)
-    hull.scale.set(1.13, 1.13, 1.5)
+    // L'étoile elle-même (et son contour) est dessinée par deux maillages instanciés communes à toutes les
+    // étoiles (starInst) : `spin` ne porte que sa transformation.
     const spin = new THREE.Group()
-    spin.add(mesh, hull)
+    if (!this.starInst) {
+      const body = new THREE.InstancedMesh(this.starGeo, this.starMat, 12)
+      const hull = new THREE.InstancedMesh(this.starGeo, this.inkBack, 12)
+      for (const m of [body, hull]) {
+        m.count = 0
+        m.frustumCulled = false
+        this.scene.add(m)
+      }
+      this.starInst = { body, hull }
+    }
     const glow = this.sprite(this.glowTex, { color: '#ffe066', blending: THREE.AdditiveBlending, opacity: 0.75 })
     glow.scale.setScalar(2.3)
     const beamMat = this.track(new THREE.MeshBasicMaterial({ map: this.beamTex, color: '#ffe066', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, opacity: 0.4 }))
@@ -1000,7 +1721,8 @@ export class PartyScene {
     beam.rotation.x = Math.PI
     beam.renderOrder = 3
     const sparkles: THREE.Sprite[] = []
-    for (let i = 0; i < 3; i++) {
+    // Téléphone, grande taille : pas d'étincelles (jusqu'à 9 étoiles en jeu, budget des appels de dessin).
+    for (let i = 0; i < (this.big && !this.opts.big ? 0 : 3); i++) {
       const s = this.sprite(this.sparkleTex, { color: '#fffbe0', blending: THREE.AdditiveBlending })
       sparkles.push(s)
       group.add(s)
@@ -1009,7 +1731,7 @@ export class PartyScene {
     this.scene.add(group, beam)
     const st: Star = { group, mesh: spin, glow, beam, sparkles, cell, move: null }
     const p = this.cellPos(cell)
-    group.position.set(p.x, 1.55, p.z)
+    group.position.set(p.x, p.y + 1.55, p.z)
     return st
   }
 
@@ -1028,7 +1750,7 @@ export class PartyScene {
         st.cell = cell
       }
       const home = this.cellPos(cell, this.tmp)
-      const bob = 1.55 + Math.sin(this.time * 2.2 + i * 2.1) * 0.12
+      const bob = home.y + 1.55 + Math.sin(this.time * 2.2 + i * 2.1) * 0.12
       let scale = 1
       let beamK = 1
       if (st.move) {
@@ -1062,9 +1784,26 @@ export class PartyScene {
         s.position.set(Math.cos(a) * 0.75, Math.sin(a * 1.3) * 0.35, Math.sin(a) * 0.75)
         s.scale.setScalar(scale * (0.2 + 0.16 * Math.abs(Math.sin(this.time * 5 + k * 2))))
       })
-      st.beam.position.set(st.group.position.x, TOP_Y + 2.75, st.group.position.z)
+      st.beam.position.set(st.group.position.x, home.y + TOP_Y + 2.75, st.group.position.z)
       ;(st.beam.material as THREE.MeshBasicMaterial).opacity = (this.dark ? 0.42 : 0.2) * beamK * (0.85 + 0.15 * Math.sin(this.time * 3 + i))
     })
+    // Les étoiles visibles, dans les deux maillages instanciés.
+    if (this.starInst) {
+      let n = 0
+      const hullS = new THREE.Matrix4().makeScale(1.13, 1.13, 1.5)
+      this.stars.forEach((st) => {
+        if (!st.group.visible || n >= 12) return
+        st.group.updateMatrixWorld(true)
+        this.starInst!.body.setMatrixAt(n, st.mesh.matrixWorld)
+        this.tmpM.multiplyMatrices(st.mesh.matrixWorld, hullS)
+        this.starInst!.hull.setMatrixAt(n, this.tmpM)
+        n++
+      })
+      for (const m of [this.starInst.body, this.starInst.hull]) {
+        m.count = n
+        m.instanceMatrix.needsUpdate = true
+      }
+    }
   }
 
   /* ------------------------------ pions ------------------------------ */
@@ -1097,7 +1836,7 @@ export class PartyScene {
         const tx = base.x + Math.cos(a) * r
         const tz = base.z + Math.sin(a) * r
         const isStar = m?.id === id
-        const goal = this.tmp2.set(tx, TOP_Y, tz)
+        const goal = this.tmp2.set(tx, base.y + TOP_Y, tz)
         if (!pw.placed) {
           pw.cur.copy(goal)
           pw.placed = true
@@ -1132,9 +1871,12 @@ export class PartyScene {
         const a = this.cellPos(m.cell, this.tmp)
         let x = a.x
         let z = a.z
+        let ground = a.y
         let y = 0
         let squash = 0
         let spin = 0
+        let ride: THREE.Group | null = null
+        let heading = 0
         if (m.rolling) {
           // Pendant les dés : le pion trépigne.
           squash = Math.sin(this.time * 14) * 0.07
@@ -1142,43 +1884,87 @@ export class PartyScene {
           const b = this.cellPos(m.next, this.tmp2)
           const f = m.frac
           const leap = m.leap
+          const vehicle = leap === 'boat' || leap === 'cabin' || leap === 'slide' || leap === 'luge'
           if (leap) {
-            // Télésiège, verglas, Grande Luge : étiquette au décollage, grande cloche, traînée.
+            // Télésiège, verglas, transport : étiquette au décollage, grande cloche ou trajet à bord, traînée.
             const key = `${m.idx}:${m.id}:${m.hops}`
             if (key !== this.leapKey) {
               this.leapKey = key
               if (this.primed) {
-                const [txt, bg] = LEAP_LABEL[leap]
+                const [txt, bg] = leap === 'luge' && m.cell !== 48 ? (['🚩 Grande Descente !', '#ffffff'] as [string, string]) : LEAP_LABEL[leap]
                 this.label(txt, bg, this.headOf(pw, new THREE.Vector3()), 0)
                 this.cheerK = Math.max(this.cheerK, leap === 'ice' ? 0.4 : 0.8)
               }
             }
           }
-          // 0-18 % : s'accroupit ; ensuite : bond en cloche, étiré.
+          // 0-18 % : s'accroupit (ou embarque) ; ensuite : bond en cloche, ou le trajet dans le véhicule.
           if (f < 0.18) squash = 0.34 * Math.sin((f / 0.18) * Math.PI * 0.5)
           else {
             const g = (f - 0.18) / 0.82
-            const e = easeInOut(g)
+            const e = vehicle && leap !== 'luge' ? g * g * (3 - 2 * g) : easeInOut(g)
             x = lerp(a.x, b.x, e)
             z = lerp(a.z, b.z, e)
+            ground = lerp(a.y, b.y, e)
             y = Math.sin(g * Math.PI) * (leap ? LEAP_H[leap] : 0.85)
-            squash = 0.34 * (1 - Math.min(1, g * 5)) - 0.3 * Math.sin(g * Math.PI)
+            if (leap === 'boat') y = 0.12 + Math.sin(this.time * 6) * 0.05 + Math.sin(g * Math.PI) * 0.25
+            squash = vehicle && leap !== 'luge' ? 0 : 0.34 * (1 - Math.min(1, g * 5)) - 0.3 * Math.sin(g * Math.PI)
             if (leap === 'ice') spin = g * Math.PI * 4
-            if (leap && this.time - this.trailT > 0.035) {
+            if (vehicle) {
+              ride = this.rideOf(leap)
+              heading = -Math.atan2(b.z - a.z, b.x - a.x)
+            }
+            if (leap && this.time - this.trailT > (leap === 'boat' ? 0.06 : 0.035)) {
               this.trailT = this.time
-              this.spawn('dust', this.tmp2.set(x, TOP_Y + y + 0.3, z).clone(), new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.2, (Math.random() - 0.5) * 0.6), 0.55, leap === 'luge' ? 0.42 : 0.32, null, LEAP_TRAIL[leap])
+              this.spawn('dust', this.tmp2.set(x, ground + (leap === 'boat' ? 0.1 : TOP_Y + y + 0.3), z).clone(), new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.2, (Math.random() - 0.5) * 0.6), 0.55, leap === 'luge' ? 0.42 : 0.32, null, LEAP_TRAIL[leap])
             }
           }
         }
+        // Le véhicule du transport en cours (les autres restent au garage).
+        for (const [, g] of this.rides) if (g !== ride) g.visible = false
+        if (ride) {
+          ride.visible = true
+          ride.position.set(x, ground + TOP_Y + y - 0.02, z)
+          ride.rotation.y = heading
+          ride.rotation.z = Math.sin(this.time * 3) * 0.04
+        }
         const since = (now - pw.landAt) / 1000
         if (since < 0.3 && (m.next === null || m.frac < 0.18)) squash += 0.4 * Math.exp(-since * 12)
-        pw.cur.set(x, TOP_Y, z)
+        pw.cur.set(x, ground + TOP_Y, z)
         pw.placed = true
         pw.arc = null
         pw.scale = lerp(pw.scale, 1.18, 1 - Math.exp(-dt * 10))
-        this.poseePawn(pw, x, TOP_Y + y, z, squash, true, spin)
+        this.poseePawn(pw, x, ground + TOP_Y + y, z, squash, true, spin)
       }
+    } else for (const [, g] of this.rides) g.visible = false
+    this.drawPawnBases()
+  }
+
+  /** Socles des pions (corps coloré + bord encre) : 2 appels de dessin pour tous les pions. */
+  private drawPawnBases() {
+    if (!this.pawnInst) {
+      const base = new THREE.InstancedMesh(this.baseGeo, this.toon('#ffffff'), 8)
+      const ink = new THREE.InstancedMesh(this.baseInkGeo, this.inkFront, 8)
+      for (const m of [base, ink]) {
+        m.frustumCulled = false
+        this.scene.add(m)
+      }
+      this.pawnInst = { base, ink }
     }
+    let n = 0
+    for (const p of this.players) {
+      const pw = this.pawns.get(p.id)
+      if (!pw || n >= 8) continue
+      pw.group.updateMatrixWorld(true)
+      this.pawnInst.base.setMatrixAt(n, pw.base.matrixWorld)
+      this.pawnInst.base.setColorAt(n, this.tmpC.set(p.color))
+      this.pawnInst.ink.setMatrixAt(n, (pw.base.parent!.children[0] as THREE.Object3D).matrixWorld)
+      n++
+    }
+    for (const m of [this.pawnInst.base, this.pawnInst.ink]) {
+      m.count = n
+      m.instanceMatrix.needsUpdate = true
+    }
+    if (this.pawnInst.base.instanceColor) this.pawnInst.base.instanceColor.needsUpdate = true
   }
 
   private poseePawn(pw: Pawn, x: number, y: number, z: number, squash: number, star: boolean, spin: number) {
@@ -1232,9 +2018,12 @@ export class PartyScene {
       this.hopCount = m.hops
       pw.landAt = now
       const at = this.cellPos(m.cell, this.tmp)
-      this.puff(at.clone().setY(TOP_Y))
+      this.puff(at.clone().setY(at.y + TOP_Y))
       const tile = this.tiles[m.cell]
-      if (tile) tile.bump = 1
+      if (tile) {
+        tile.bump = 1
+        this.bumped.add(m.cell)
+      }
     }
     if (view.events.length > this.evCount) {
       const fresh = view.events.slice(0, view.events.length - this.evCount).reverse()
@@ -1261,7 +2050,10 @@ export class PartyScene {
     if (e.t === 'star_poor') return this.label(`😬 ${e.need} 🪙 ?`, '#ffffff', head, order)
     if (e.t === 'fork') {
       if (e.tide) return this.label(e.way === 1 ? '🏝️ Banc de sable !' : '🌊 Par la Digue', '#9be7ff', head, order)
-      return this.label(e.way === 1 ? '🔀 Détour !' : '🔀 Tout droit', '#FFD166', head, order)
+      // Habillage de la porte : bac, cabine, barrière, tourniquet, portique de piste (défaut : aiguillage).
+      const look = this.board.forks[e.fork ?? 0]?.look ?? 'switch'
+      const TXT: Record<string, [string, string]> = { switch: ['🔀 Détour !', '🔀 Tout droit'], boat: ['⛴️ Le bac est là !', '⛴️ Bac parti'], cabin: ['🚠 Une cabine !', '🚠 À pied'], gate: ['🚧 Barrière levée !', '🚧 Barrière baissée'], turnstile: ['🎠 Ça tourne !', '🎠 Bloqué'], piste: ['⛷️ Piste rouge !', '🧗 Par l’arête'] }
+      return this.label((TXT[look] ?? TXT.switch)[e.way === 1 ? 0 : 1], '#FFD166', head, order)
     }
     if (e.t === 'card') {
       this.label('✉️ Surprise !', '#c9b6ff', head, order)
@@ -1413,12 +2205,15 @@ export class PartyScene {
     const pw = m ? this.pawns.get(m.id) : null
     const n = m ? Math.min(3, m.dice.length) : 0
     // Hors pion : le dé du thème (dé de Riton au début de sa ronde).
-    const anchor = !m ? (this.rt.dieAnchor?.(view) ?? null) : null
+    // Hors pion : les dés du thème (Riton, et sa famille en grande taille : un dé au-dessus de chaque raton).
+    const one = !m ? (this.rt.dieAnchor?.(view) ?? null) : null
+    const anchors = !m ? (this.rt.dieAnchors?.(view) ?? (one ? [one] : [])) : []
     const right = this.tmp.set(1, 0, 0).applyQuaternion(this.camera.quaternion)
     for (let i = 0; i < 3; i++) {
       const die = this.dice[i]
-      if (anchor) {
-        const on = i === 0
+      if (anchors.length) {
+        const anchor = anchors[Math.min(i, anchors.length - 1)]
+        const on = i < anchors.length
         this.dieScale[i] = lerp(this.dieScale[i], on ? 1 : 0, 1 - Math.exp(-dt * (on ? 14 : 9)))
         if (this.dieScale[i] < 0.02) {
           die.visible = false
@@ -1495,7 +2290,7 @@ export class PartyScene {
     })
     const spotMat = this.spot.material as THREE.MeshBasicMaterial
     spotMat.opacity = lerp(spotMat.opacity, mover ? (this.dark ? 0.6 : 0.45) : 0, 1 - Math.exp(-dt * 6))
-    if (mover) this.spot.position.set(mover.group.position.x, TOP_Y + 0.03, mover.group.position.z)
+    if (mover) this.spot.position.set(mover.group.position.x, mover.cur.y + 0.03, mover.group.position.z)
 
     // Guirlande : alterne tranquillement ; en chenillard (gros lot) une ampoule sur trois file autour du tapis.
     const chase = this.chaseUntil > this.time
@@ -1517,34 +2312,100 @@ export class PartyScene {
 
   /* ------------------------------ caméra ------------------------------ */
 
+  /** Centre (monde) de la zone d'une case : son quartier, ou le plateau de base. */
+  private zoneCenter(cell: number, out: THREE.Vector3) {
+    const q = this.big ? quarterOf(this.board, cell) : null
+    if (!q) return out.set(0, 0, 0)
+    return this.grid((q.box.c0 + q.box.c1) / 2, (q.box.r0 + q.box.r1) / 2, 0, out)
+  }
+
   private updateCamera(view: BoardView, dt: number) {
     const m = view.mover
     const mover = m ? this.pawns.get(m.id) : null
     // Sans pion en vedette, le thème peut demander qu'on suive autre chose (Riton pendant sa ronde).
-    const focus = !mover ? (this.rt.focus?.(view) ?? null) : null
-    const mode: CamMode = mover || focus ? 'follow' : this.phase === 'roll' || this.phase === 'move' || this.phase === 'intro' ? 'overview' : 'show'
+    let focus = !mover ? (this.rt.focus?.(view) ?? null) : null
+    // Téléphone, grande taille : mon pion emporté par la vague, la caméra le suit.
+    const me = this.focusId ? this.pawns.get(this.focusId) : null
+    if (!mover && me && !this.opts.big && view.epi?.data.t === 'tide' && view.epi.events.some((e) => e.t === 'wash' && e.id === this.focusId)) focus = me.cur
+    // Vue perso (téléphone, grande taille, phase de lancer) : mon pion, 3 cases devant lui sur sa route.
+    const persona = !mover && !focus && !this.forceOverview && this.big && me && this.phase === 'roll'
+    let mode: CamMode = mover || focus || persona ? 'follow' : this.phase === 'roll' || this.phase === 'move' || this.phase === 'intro' ? 'overview' : 'show'
+    if (this.forceOverview) mode = 'overview'
     this.mode = mode
     const goalT = this.tmp
     let az = this.baseAz()
     let el = this.overviewEl()
     let dist = this.overviewDist
-    if (mode === 'follow' && (mover || focus)) {
+    // Liseré des 12 prochaines cases (vue perso).
+    let routeN = 0
+    if (mode === 'follow' && persona && me) {
+      const pos = view.snap.pos[this.focusId!] ?? 0
+      const ahead = this.routeAhead(pos, view.snap.sw ?? [])
+      ahead.forEach((c, k) => {
+        const p = this.cellPos(c, this.tmp2)
+        this.tmpM.makeTranslation(p.x, p.y + TOP_Y + 0.012, p.z)
+        this.route.setMatrixAt(k, this.tmpM)
+      })
+      routeN = ahead.length
+      const tgt = this.cellPos(ahead[2] ?? pos, new THREE.Vector3()).lerp(me.cur, 0.35)
+      az += Math.sin(this.time * 0.4) * 0.04
+      el = this.portrait ? 0.92 : 0.86
+      dist = 20
+      goalT.set(tgt.x, tgt.y + 0.9, tgt.z)
+    } else if (mode === 'follow' && (mover || focus)) {
       const at = mover ? mover.cur : focus!
       az += Math.sin(this.time * 0.4) * 0.06
       el = this.portrait ? 0.9 : 0.84
       dist = clamp(this.overviewDist * (this.portrait ? 0.5 : 0.68), 11, 26)
-      // On vise un peu au-delà du pion (il reste sous le bandeau) et un peu vers le centre
-      // (le plateau et les étoiles restent dans le champ, pas seulement les gradins).
-      goalT.set(at.x * 0.82 - Math.sin(az) * dist * 0.07, 0.9, at.z * 0.82 - Math.cos(az) * dist * 0.07)
+      // On vise un peu au-delà du pion (il reste sous le bandeau) et un peu vers le centre de SA zone
+      // (l'île, le quartier ou le plateau de base restent dans le champ, pas seulement les gradins).
+      const zc = this.zoneCenter(m ? m.cell : -1, this.tmp2)
+      const pull = this.big ? 0.25 : 0.18
+      goalT.set(lerp(at.x, zc.x, pull) - Math.sin(az) * dist * 0.07, this.big ? at.y + 0.6 : 0.9, lerp(at.z, zc.z, pull) - Math.cos(az) * dist * 0.07)
+      // Plan de traversée (grande taille) : pendant un transport, la caméra recule pour cadrer le départ et l'arrivée.
+      if (this.big && m && m.next !== null && m.leap && m.leap !== 'lift' && m.leap !== 'ice') {
+        const key = `${m.cell}-${m.next}`
+        if (key !== this.rideKey) {
+          this.rideKey = key
+          const p = this.cellPos(m.cell)
+          const q = this.cellPos(m.next)
+          this.rideMid.copy(p).add(q).multiplyScalar(0.5)
+          this.rideDist = clamp(this.fitRect(Math.min(p.x, q.x) - 2, Math.max(p.x, q.x) + 2, Math.min(p.z, q.z) - 2, Math.max(p.z, q.z) + 2, 3 + Math.max(p.y, q.y), this.rideMid, az, el), 26, this.overviewDist)
+        }
+        goalT.set(this.rideMid.x, this.rideMid.y + 0.6, this.rideMid.z)
+        dist = this.rideDist
+      }
     } else if (mode === 'show') {
-      goalT.set(0, 0.6, 0)
+      this.overviewTarget(goalT).y += 0.3
       az += Math.sin(this.time * 0.22) * 0.45
       el = 0.72
       dist = this.overviewDist * 0.92
     } else {
-      goalT.set(0, 0.3, 0)
+      this.overviewTarget(goalT)
       az += Math.sin(this.time * 0.3) * 0.035
+      // Générique d'une grande taille : vue d'ensemble, puis survol de chaque quartier ouvert (1,1 s chacun).
+      const qs = this.board.quarters
+      if (this.phase === 'intro' && this.big && this.introT0 >= 0 && qs.length && !this.forceOverview) {
+        const k = Math.floor((this.time - this.introT0 - 1.6) / 1.1)
+        if (k >= 0 && k < qs.length) {
+          const q = qs[k]
+          const a = this.grid(q.box.c0, q.box.r0)
+          const b = this.grid(q.box.c1, q.box.r1)
+          this.grid((q.box.c0 + q.box.c1) / 2, (q.box.r0 + q.box.r1) / 2, 0.3, goalT)
+          dist = clamp(this.fitRect(a.x - 1.5, b.x + 1.5, a.z - 1.5, b.z + 1.5, 2, goalT, az, el), 12, this.overviewDist)
+          if (this.introShown !== k) {
+            this.introShown = k
+            this.label(`${q.emoji} ${q.name}`, q.road ?? '#FFD166', goalT.clone().setY(1.6), 0)
+            this.cheerK = Math.max(this.cheerK, 0.6)
+          }
+        }
+      }
     }
+    if (this.route.count !== routeN) {
+      this.route.count = routeN
+    }
+    if (routeN) this.route.instanceMatrix.needsUpdate = true
+    if (mode !== 'follow' || !m || m.next === null || !m.leap) this.rideKey = ''
     if (this.camSnap) {
       this.camSnap = false
       this.camT.copy(goalT)
@@ -1568,7 +2429,7 @@ export class PartyScene {
 
   /** Cadrage courant et coût de la dernière image (mise au point). */
   get stats() {
-    return { mode: this.mode, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles }
+    return { mode: this.mode, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles, frameMs: Math.round(this.frameAvg * 10) / 10, quality: this.quality }
   }
 
   dispose() {

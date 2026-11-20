@@ -14,7 +14,8 @@ import type { GamePlayProps } from '../types'
 import { boardViewAt, moverLine, rollLine, useBoardView } from './anim'
 import { Board } from './GameBoard'
 import { Stage } from './Stage'
-import { CELL_INFO, STAR_PRICE, HALF_PRICE, cellTypesOf } from './board'
+import { CELL_INFO, STAR_PRICE, HALF_PRICE, SIZE_LABEL, cellTypesOf, quarterOf, starsInPlay, type BoardDef } from './board'
+import { MiniMap, TRANSPORT_LOOK } from './MiniMap'
 import { MINIGAMES } from './minigames'
 import { Countdown, DedeHost, Die, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
 import { AwardsScreen, Curtain, IntroScreen, MechChip, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
@@ -78,12 +79,13 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
             {s.round === s.rounds ? ' · 🔥 la Finale !' : isPlayer && !r.mine ? ' : lance tes dés !' : ''}
           </p>
         )}
-        <MechChip board={board} mech={snap.mech} className="self-center" />
+        <MechChip board={board} mech={snap.mech} meCell={snap.pos[meId]} className="self-center" />
         <Stage
           s={s}
           view={view}
           get={get}
           className="aspect-[4/5] max-h-[58dvh]"
+          meId={meId}
           top={moving ? <MoveBanner s={s} view={view} get={get} /> : undefined}
           bottom={moving ? undefined : <RollOverlay r={r} isPlayer={isPlayer} />}
           center={moving ? <MoveCenter s={s} view={view} get={get} /> : undefined}
@@ -173,14 +175,18 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
           <p className="mt-1 text-sm font-bold">
             ⭐ Une étoile s’achète toute seule ({STAR_PRICE} 🪙, ta première à {HALF_PRICE} 🪙) dès que tu passes ou t’arrêtes dessus, puis elle déménage dans une autre Loge.
           </p>
+          {board.size !== 's' && <BigBoardHelp board={board} players={s.players.length} />}
           {board.id === 'grand' && (
             <p className="text-sm font-bold">
-              🔀 Aux deux embranchements, personne ne choisit : la flèche jaune montre la voie ouverte, et elle bascule après chaque pion. 🎭 La Scène rapporte gros, 📺 le Tunnel de la pub coûte cher !
+              🔀 Aux {countWord(board.forks.length)} embranchements, personne ne choisit : la flèche jaune montre la voie ouverte, et elle bascule après chaque pion. 🎭 La Scène rapporte gros, 📺 le Tunnel de la pub coûte cher !
             </p>
           )}
           {board.id === 'mer' && (
             <p className="text-sm font-bold">
-              🌊 La marée suit un cycle : 2 tours basse, 1 tour haute. La flèche bleue montre la voie ouverte. Les pions sur le Banc de sable quand la mer monte reviennent sur la Digue avec 5 pièces de moins.
+              🌊 La marée suit un cycle : 2 tours basse, 1 tour haute. La flèche bleue montre la voie ouverte.{' '}
+              {board.size === 's'
+                ? 'Les pions sur le Banc de sable quand la mer monte reviennent sur la Digue avec 5 pièces de moins.'
+                : 'Les pions sur un banc de sable quand la mer monte sont ramenés au rivage avec 5 pièces de moins.'}
             </p>
           )}
           {board.id === 'kermesse' && <p className="text-sm font-bold">🎟️ La cagnotte démarre à 5 pièces et grossit à chaque péage. Ta case d’arrivée compte : il faut s’arrêter PILE sur une Tombola avec ses dés.</p>}
@@ -189,7 +195,11 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
           <p className="text-sm font-bold">
             🎮 Mini-jeu à chaque tour : 1er 10 🪙, 2e 6, 3e 4, les autres 2 (doublé au dernier tour). À la fin, 2 étoiles bonus : Roi des mini-jeux et Prix de la poisse !
           </p>
-          <Board s={s} view={boardViewAt(s, Infinity)} get={get} portrait className="mt-1" />
+          {board.size === 's' ? (
+            <Board s={s} view={boardViewAt(s, Infinity)} get={get} portrait className="mt-1" />
+          ) : (
+            <MiniMap board={board} snap={boardViewAt(s, Infinity).snap} order={s.order} get={get} meId={meId} className="mt-1 w-full" />
+          )}
         </div>
       </BottomSheet>
 
@@ -220,6 +230,45 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
       >
         Les étoiles bonus sont remises tout de suite et le classement est figé.
       </ConfirmModal>
+    </div>
+  )
+}
+
+const COUNT_WORDS = ['zéro', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf']
+const countWord = (n: number) => COUNT_WORDS[n] ?? String(n)
+
+/** Aide des grandes tailles : quartiers ouverts, portes, transports, Haltes, étoiles par zone. */
+function BigBoardHelp({ board, players }: { board: BoardDef; players: number }) {
+  const kinds = [...new Set(Object.values(board.transports).map((t) => t.kind))]
+  const pack = (board.extra.pack as Array<{ name: string; start: number }> | undefined) ?? []
+  const booths = board.cells.filter((t) => t === 'tombola').length
+  return (
+    <div className="sticker-sm flex flex-col gap-1 bg-sky/20 px-3 py-2 text-sm font-bold leading-snug">
+      <span className="font-display text-base font-extrabold">
+        🗺️ {SIZE_LABEL[board.size]}
+        {board.title ? ` : ${board.title}` : ''}
+      </span>
+      <span>
+        Quartiers ouverts :{' '}
+        {board.quarters.map((q, k) => (
+          <span key={q.id} className="whitespace-nowrap">
+            {k > 0 ? ' · ' : ''}
+            {q.emoji} {q.name}
+          </span>
+        ))}
+      </span>
+      <span>🚪 Chaque quartier a sa porte : personne ne choisit, elle s’ouvre un pion sur deux (la flèche montre la voie ouverte).</span>
+      {kinds.length > 0 && <span>{kinds.map((k) => TRANSPORT_LOOK[k].emoji).join(' ')} Bacs, télécabines, pistes : le voyage ne compte que pour 1 pas, même s’il va loin.</span>}
+      {board.cells.includes('halt') && <span>🏁 Halte : +5 pièces quand tu y débarques, comme au Départ.</span>}
+      {board.starts?.length ? <span>🏁 Au départ, les pions sont répartis par deux sur les Haltes.</span> : null}
+      {board.id === 'kermesse' && booths > 1 && <span>🎟️ Les {booths} guichets de la Tombola se partagent la même cagnotte.</span>}
+      {pack.length > 0 && (
+        <span>
+          🦝 Riton a de la famille :{' '}
+          {pack.map((p, k) => `${k > 0 ? ', ' : ''}${p.name}${quarterOf(board, p.start) ? ` (${quarterOf(board, p.start)!.name})` : ''}`).join('')}. Même règle que lui.
+        </span>
+      )}
+      <span>⭐ {starsInPlay(board, players)} étoiles en jeu : chaque quartier a la sienne, et une étoile achetée déménage dans sa zone.</span>
     </div>
   )
 }

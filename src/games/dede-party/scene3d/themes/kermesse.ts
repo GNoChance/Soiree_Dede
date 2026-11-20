@@ -5,6 +5,8 @@
 import * as THREE from 'three'
 import { STAND } from '../../boards/kermesse'
 import { makePlate } from '../textures'
+import { freeze, freezeLocal } from './kit'
+import { buildFair, buildClosedFair } from './kermesse-fair'
 import type { ThemeDef } from './types'
 
 const CONF = ['#EF476F', '#FFD166', '#06D6A0', '#4CC9F0', '#8B5CF6', '#FF8FA3']
@@ -21,6 +23,8 @@ export const kermesseTheme: ThemeDef = {
     const white = ctx.toon('#ffffff')
     const orange = ctx.toon('#FF8C42')
     const red = ctx.toon('#EF476F')
+    // Décor fixe : figé en un seul maillage à la fin (même rendu, quelques appels de dessin).
+    const stat = new THREE.Group()
 
     // --- Le stand de la Tombola (entre les deux cases Tombola) et la plaque de la cagnotte.
     const stand = new THREE.Group()
@@ -44,8 +48,10 @@ export const kermesseTheme: ThemeDef = {
     }
     const drum = ctx.inked(ctx.track(new THREE.SphereGeometry(0.22, 14, 10)), ctx.toon('#FFD23F', { emissive: '#c77700', emissiveIntensity: 0.4 }), 1.1)
     drum.position.y = 0.88
-    stand.add(booth, awning, drum)
-    scene.add(stand)
+    stand.add(booth, awning)
+    stat.add(stand)
+    drum.position.copy(stand.position).setY(0.88)
+    scene.add(drum)
     const potAt = ctx.grid(STAND.col, STAND.row, 0.9)
     const potMat = ctx.track(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false }))
     const potPlate = new THREE.Sprite(potMat)
@@ -92,8 +98,10 @@ export const kermesseTheme: ThemeDef = {
     const flagGeo = ctx.track(new THREE.ShapeGeometry(triShape))
     const flag = new THREE.Mesh(flagGeo, ctx.track(new THREE.MeshBasicMaterial({ color: '#FFD166', side: THREE.DoubleSide })))
     flag.position.set(0.02, 1.9, 0)
-    tent.add(tentInk, flagPole, flag)
-    scene.add(tent)
+    tent.add(tentInk, flagPole)
+    stat.add(tent)
+    flag.position.add(tent.position)
+    scene.add(flag)
 
     // --- Lobe droit : grande roue et manège.
     const wheelAt = ctx.grid(8, 2.1)
@@ -117,6 +125,8 @@ export const kermesseTheme: ThemeDef = {
       wheel.add(c)
     }
     wheel.add(rim)
+    // Roue et manège tournent d'un bloc : leurs pièces sont figées dans leur repère (les nacelles sont des sphères).
+    freezeLocal(ctx, wheel)
     const legGeo = ctx.track(new THREE.CylinderGeometry(0.05, 0.07, 1.65, 6))
     const legMat = ctx.toon('#6c5ce7')
     for (const s of [-1, 1]) {
@@ -124,7 +134,7 @@ export const kermesseTheme: ThemeDef = {
       leg.position.set(wheelAt.x + s * 0.35, 0.72, wheelAt.z - 0.15)
       leg.rotation.z = s * 0.42
       leg.castShadow = true
-      scene.add(leg)
+      stat.add(leg)
     }
     scene.add(wheel)
     const carousel = new THREE.Group()
@@ -145,6 +155,7 @@ export const kermesseTheme: ThemeDef = {
       horse.scale.set(1.3, 0.9, 0.8)
       carousel.add(mast, horse)
     }
+    freezeLocal(ctx, carousel)
     scene.add(carousel)
 
     // --- Arche d'entrée dans l'encoche du bas.
@@ -153,7 +164,7 @@ export const kermesseTheme: ThemeDef = {
     for (const s of [-1, 1]) {
       const p = ctx.inked(pillarGeo, red, 1.2)
       p.position.set(archAt.x + s * 0.6, 0.75, archAt.z)
-      scene.add(p)
+      stat.add(p)
     }
     const pa = makePlate('KERMESSE', '#FFD166')
     const archPlate = ctx.sprite(ctx.track(pa.tex))
@@ -174,7 +185,7 @@ export const kermesseTheme: ThemeDef = {
       ball.position.y = 0.72
       ball.scale.set(1, 1.15, 1)
       g.add(st, ball)
-      scene.add(g)
+      stat.add(g)
     }
     const balloonGeo = ctx.track(new THREE.SphereGeometry(0.2, 12, 10))
     const stringGeo = ctx.track(new THREE.CylinderGeometry(0.008, 0.008, 0.9, 4))
@@ -199,7 +210,7 @@ export const kermesseTheme: ThemeDef = {
     pennant.lineTo(0, -0.55)
     pennant.closePath()
     const penGeo = ctx.track(new THREE.ShapeGeometry(pennant))
-    const lenA = ctx.xWall + ctx.halfX + 7
+    const lenA = ctx.xWall - ctx.ext.minX + 7
     const nA = Math.floor(lenA / 0.9)
     const pens = new THREE.InstancedMesh(penGeo, ctx.track(new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide })), nA)
     const m4 = new THREE.Matrix4()
@@ -211,6 +222,10 @@ export const kermesseTheme: ThemeDef = {
       pens.setColorAt(k, col.set(CONF[k % CONF.length]))
     }
     scene.add(pens)
+    scene.add(freeze(ctx, stat))
+
+    const fair = buildFair(ctx)
+    buildClosedFair(ctx)
 
     return {
       update(view, dt) {
@@ -220,6 +235,7 @@ export const kermesseTheme: ThemeDef = {
           if (pot >= 0) bump = 1
           pot = n
           drawPot(n)
+          fair?.pot(n, bump > 0)
         }
         bump = Math.max(0, bump - dt * 3)
         const h = 0.6 * (1 + 0.35 * Math.sin(bump * Math.PI))
@@ -232,18 +248,19 @@ export const kermesseTheme: ThemeDef = {
         carousel.rotation.y = t * 0.9
         for (const b of balloons) b.g.position.y = Math.sin(t * 1.4 + b.ph) * 0.08
         flag.rotation.y = Math.sin(t * 3) * 0.4
+        fair?.update(t, dt)
       },
       onEvent(e, pawnId, order) {
         const head = ctx.pawnHead(pawnId)
         if (!head) return false
         if (e.t === 'toll') {
           const n = -(e.d ?? 0)
-          if (n > 0) ctx.coinsFly(head, potAt, Math.min(8, n + 2))
+          if (n > 0) ctx.coinsFly(head, fair?.nearest(head) ?? potAt, Math.min(8, n + 2))
           ctx.label(n > 0 ? `🎟️ −${n} 🪙` : '🎟️ Offert !', n > 0 ? '#FFC49B' : '#ffffff', head, order)
           return true
         }
         if (e.t === 'jackpot') {
-          ctx.coinsFly(potAt.clone().setY(1.4), pawnId, 20)
+          ctx.coinsFly((fair?.nearest(head) ?? potAt).clone().setY(1.4), pawnId, 20)
           ctx.confetti(head, 70)
           ctx.shake(0.7)
           ctx.chase(3)
@@ -251,6 +268,7 @@ export const kermesseTheme: ThemeDef = {
           ctx.label(`🎟️ GROS LOT +${e.d ?? 0} 🪙`, '#FFD23F', head, order)
           return true
         }
+        fair?.onEvent(e, pawnId, order)
         return false
       },
     }

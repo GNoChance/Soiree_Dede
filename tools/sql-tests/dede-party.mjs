@@ -1,5 +1,5 @@
 // Tests SQL du jeu « Dédé Party » (PGlite) :
-//   node dede-party.mjs ../../supabase/install.sql [parties simulées par config, Grand Plateau] [parties simulées par config et par plateau]
+//   node dede-party.mjs ../../supabase/install.sql [parties simulées par config, Grand Plateau] [parties simulées par config et par plateau] [parties par (plateau, nombre de joueurs) en grande taille]
 // Appels directs du moteur (superutilisateur) : game_dede_party_start / game_dede_party_action.
 // Dés et cartes imposés via server.forced_dice / server.forced_cards / server.forced_mg ; états de mécanique par patch.
 import fs from 'node:fs'
@@ -27,7 +27,10 @@ const [A, B, C, D] = P
 const QUIZ = Array.from({ length: 6 }, (_, i) => ({ prompt: `Question ${i} ?`, answer: `Bonne ${i}`, distractors: [`Faux ${i}a`, `Faux ${i}b`, `Faux ${i}c`] }))
 const PIF = [{ prompt: 'Combien de marches ?', answer: 100, unit: 'marches' }, { prompt: 'Combien de km ?', answer: 42 }]
 const MAJ = ['Qui de nous ronfle le plus ?', 'Qui de nous arrive toujours en retard ?']
-const OPTS = { quiz: QUIZ, pif: PIF, majorite: MAJ, map: 'grand' }
+// size: 's' : les tests historiques gardent les plateaux classiques quel que soit le nombre de joueurs (la taille
+// automatique, M dès 5 joueurs, est testée plus bas avec AUTO).
+const OPTS = { quiz: QUIZ, pif: PIF, majorite: MAJ, map: 'grand', size: 's' }
+const AUTO = { quiz: QUIZ, pif: PIF, majorite: MAJ, map: 'grand' }
 
 const start = async (opts = OPTS, players = P.slice(0, 4)) => {
   try {
@@ -494,6 +497,316 @@ ok('ski : Grande Luge 48 → 0, +5 au Départ', t.state.pos[A] === 0 && t.state.
 }
 ok('ski : pas d’épilogue', t.state.epi === null && approx(t.state.deadline, 12))
 
+// ============================================================================= GRANDES TAILLES (S / M / L)
+// Spec : docs/superpowers/specs/2026-11-20-dede-party-grands-plateaux-design.md (§1, §3, §7, annexe A).
+const BIG_KEYS = ['grand:m', 'mer:m', 'mer:l', 'kermesse:m', 'camping:m', 'ski:m', 'ski:l']
+const EXPECT_BIG = {
+  'grand:m': { n: 100, laps: [36, 92], count: { start: 1, clap: 46, pub: 17, env: 19, loge: 17 } },
+  'mer:m': { n: 100, laps: [36, 94], count: { start: 1, clap: 42, pub: 16, env: 16, loge: 23, halt: 2 } },
+  'mer:l': { n: 201, laps: [36, 190], count: { start: 1, clap: 87, pub: 30, env: 32, loge: 46, halt: 5 } },
+  'kermesse:m': { n: 100, laps: [40, 98], count: { start: 1, clap: 47, pub: 16, env: 15, loge: 17, tombola: 4 } },
+  'camping:m': { n: 100, laps: [36, 98], count: { start: 1, clap: 52, pub: 13, env: 16, loge: 18 } },
+  'ski:m': { n: 105, laps: [73, 75], count: { start: 1, clap: 47, pub: 12, env: 13, loge: 16, lift: 9, ice: 5, halt: 2 } },
+  'ski:l': { n: 204, laps: [73, 95], count: { start: 1, clap: 91, pub: 26, env: 23, loge: 33, lift: 17, ice: 9, halt: 4 } },
+}
+/** Quartiers de chaque plateau (cases), pour compter les visiteurs de la simulation. */
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i)
+const QUARTERS = {
+  grand: [range(47, 72), range(73, 99)],
+  mer: [range(45, 72), range(73, 99), range(100, 130), range(131, 166), range(167, 200)],
+  kermesse: [range(40, 70), range(71, 99)],
+  camping: [range(36, 66), range(67, 99)],
+  ski: [range(49, 76), range(77, 104), range(105, 154), range(155, 203)],
+}
+const tsConstOpt = (src, name) => {
+  const m = src.match(new RegExp(`export const ${name}[^=]*= (.+)\\n`))
+  return m ? JSON.parse(m[1].replace(/'/g, '"')) : null
+}
+const sqlOf2 = async (fn, id, size) => {
+  try {
+    return (await db.query(`select public.${fn}($1, $2) b`, [id, size])).rows[0].b
+  } catch (e) {
+    return { err: e.message }
+  }
+}
+const BIG = {}
+for (const key of BIG_KEYS) {
+  const [id, size] = key.split(':')
+  const S = size.toUpperCase()
+  const src = fs.readFileSync(new URL(`../../src/games/dede-party/boards/${id}.ts`, import.meta.url), 'utf8')
+  const ts = { cells: tsConstOpt(src, `CELLS_${S}`), next: tsConstOpt(src, `NEXT_${S}`), prev: tsConstOpt(src, `PREV_${S}`), xy: tsConstOpt(src, `XY_${S}`), jumps: tsConstOpt(src, `JUMPS_${S}`), extra: tsConstOpt(src, `EXTRA_${S}`) }
+  const sq = { cells: await sqlOf2('_dp_board', id, size), next: await sqlOf2('_dp_next', id, size), prev: await sqlOf2('_dp_prev', id, size), extra: await sqlOf2('_dp_map', id, size) }
+  const E = EXPECT_BIG[key]
+  const synced = ['cells', 'next', 'prev', 'extra'].every((k) => ts[k] && canon(sq[k]) === canon(ts[k]))
+  ok(`${key} : synchro SQL ↔ boards/${id}.ts (CELLS_${S}, NEXT_${S}, PREV_${S}, EXTRA_${S})`, synced, ['cells', 'next', 'prev', 'extra'].filter((k) => !ts[k] || canon(sq[k]) !== canon(ts[k])).join())
+  if (!synced || !ts.xy || !ts.jumps || !Array.isArray(sq.cells)) {
+    ok(`${key} : données disponibles pour les contrôles de tracé`, false)
+    continue
+  }
+  const { cells, next, prev, extra } = sq
+  const xy = ts.xy
+  const jumps = ts.jumps
+  BIG[key] = { cells, next, prev, extra, xy, jumps }
+  const n = cells.length
+  const count = (t) => cells.filter((x) => x === t).length
+  ok(`${key} : ${E.n} cases, tableaux de même taille`, n === E.n && next.length === n && prev.length === n && xy.length === n)
+  ok(`${key} : compte de chaque type (${canon(E.count)})`, Object.entries(E.count).every(([t, c]) => count(t) === c) && cells[0] === 'start' && cells.every((t) => t in E.count), canon(Object.fromEntries([...new Set(cells)].map((t) => [t, count(t)]))))
+  ok(`${key} : fiche size = ${size}, n° ${extra.no}`, extra.size === size && extra.no === MAPS.indexOf(id) + 1)
+  ok(`${key} : aucune case superposée`, new Set(xy.map((p) => p.join())).size === n)
+  const links = next.flatMap((x, i) => [x].flat().map((j) => [i, j]))
+  const adj = (i, j) => Math.abs(xy[i][0] - xy[j][0]) + Math.abs(xy[i][1] - xy[j][1]) === 1
+  const isJ = (i, j) => jumps.some(([a, b]) => a === i && b === j)
+  ok(`${key} : liaisons entre cases voisines, sauf les ${jumps.length} transports`, links.every(([i, j]) => isJ(i, j) || adj(i, j)), canon(links.filter(([i, j]) => !isJ(i, j) && !adj(i, j))))
+  ok(`${key} : aucun transport entre cases voisines, tous les transports sont des liaisons`, jumps.every(([i, j]) => !adj(i, j) && links.some(([a, b]) => a === i && b === j)))
+  const linked = new Set(links.flatMap(([i, j]) => [`${i}-${j}`, `${j}-${i}`]))
+  const amb = []
+  const n0 = MAPDATA[id].cells.length
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (adj(i, j) && !linked.has(`${i}-${j}`) && !(id === 'grand' && i < n0 && j < n0) && !(id === 'ski' && i === 13 && j === 14)) amb.push(`${i}/${j}`)
+  ok(`${key} : deux cases voisines sont toujours reliées (exceptions de la spec)`, amb.length === 0, amb.join(' '))
+  ok(`${key} : PREV inverse de NEXT`, prev.every((p, i) => [next[p]].flat().includes(i)))
+  const reach = new Set([0])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const i of [...reach]) for (const j of [next[i]].flat()) if (!reach.has(j)) { reach.add(j); grew = true }
+  }
+  const back = new Set([0])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (let i = 0; i < n; i++) if (!back.has(i) && [next[i]].flat().some((j) => back.has(j))) { back.add(i); grew = true }
+  }
+  ok(`${key} : tout est atteignable depuis le Départ, toute case ramène au Départ`, reach.size === n && back.size === n)
+  const small = size === 'l' ? BIG[`${id}:m`] : { cells: MAPDATA[id].cells, xy: MAPDATA[id].xy }
+  ok(`${key} : la taille du dessous est un préfixe (types et coordonnées)`, Boolean(small) && canon(cells.slice(0, small.cells.length)) === canon(small.cells) && canon(xy.slice(0, small.xy.length)) === canon(small.xy))
+  const forkCells = next.map((x, i) => (Array.isArray(x) ? i : -1)).filter((i) => i >= 0)
+  const lapOf = (way) => { let i = 0, k = 0; do { const nx = next[i]; i = Array.isArray(nx) ? nx[way] : nx; k++ } while (i !== 0 && k < 400); return k }
+  ok(`${key} : tours voie 0 / voie 1 = ${E.laps.join(' / ')} cases`, canon([lapOf(0), lapOf(1)]) === canon(E.laps), canon([lapOf(0), lapOf(1)]))
+  ok(`${key} : un mode par embranchement (toggle | tide)`, Array.isArray(extra.forks) && extra.forks.length === forkCells.length && extra.forks.every((f) => f === 'toggle' || f === 'tide'))
+  const allLoges = cells.map((t, i) => (t === 'loge' ? i : -1)).filter((i) => i >= 0)
+  const zoneLoges = (extra.stars ?? []).flatMap((z) => z.loges)
+  ok(`${key} : zones d'étoiles = partition des Loges, au moins n + 2 Loges chacune (base : 5)`, Array.isArray(extra.stars) && extra.stars[0].n === 0 && extra.stars.every((z) => z.loges.length >= (z.n || 3) + 2 && z.loges.every((c) => cells[c] === 'loge')) && canon([...zoneLoges].sort((a, b) => a - b)) === canon(allLoges))
+  for (const bk of extra.banks ?? []) {
+    ok(`${key} : banc ${bk.cells[0]}-${bk.cells.at(-1)} sans Pub, rejoint ${bk.wash_to}, end ${bk.end}`, bk.cells.every((c) => cells[c] !== 'pub') && next[bk.cells.at(-1)] === bk.wash_to && bk.end === bk.cells.at(-1) + 1)
+  }
+  let tpOk = true
+  for (const [a, b] of Object.entries(extra.tp ?? {})) {
+    const P1 = xy[a], P2 = xy[b]
+    if (!(Math.abs(P1[0] - P2[0]) + Math.abs(P1[1] - P2[1]) === 2 && (P1[0] === P2[0] || P1[1] === P2[1]) && cells[b] === 'clap' && ['lift', 'ice'].includes(cells[a]) && !Array.isArray(next[a]) && !Array.isArray(next[b]))) tpOk = false
+  }
+  if (id === 'ski') ok(`${key} : ${size === 'm' ? 14 : 26} téléporteurs (2 cases en ligne droite, arrivée Applaudissements, hors embranchement), un par case lift / ice`, tpOk && Object.keys(extra.tp).length === (size === 'm' ? 14 : 26) && cells.every((t, i) => !['lift', 'ice'].includes(t) || String(i) in extra.tp))
+  if (extra.starts) ok(`${key} : haltes de départ = cases Halte`, extra.starts.every((c) => cells[c] === 'halt'))
+}
+ok('fiches S inchangées (pas de size, pas de stars)', MAPS.every((id) => MAPDATA[id].extra.size === undefined && MAPDATA[id].extra.stars === undefined))
+ok('_dp_board(map, taille absente / inconnue / indisponible) → taille S', canon(await sqlOf2('_dp_board', 'mer', null)) === canon(MAPDATA.mer.cells) && canon(await sqlOf2('_dp_board', 'mer', 'xl')) === canon(MAPDATA.mer.cells) && canon(await sqlOf2('_dp_board', 'grand', 'l')) === canon(MAPDATA.grand.cells) && canon(await sqlOf2('_dp_next', 'lune', 'm')) === canon(BIG['grand:m']?.next))
+
+// ----------------------------------------------------------------------------- _dp_size
+const szOf = async (m, n, w = null) => {
+  try {
+    return (await db.query(`select public._dp_size($1, $2, $3) s`, [m, n, w])).rows[0].s
+  } catch (e) {
+    return 'ERR ' + e.message
+  }
+}
+{
+  const got = {}
+  for (const id of MAPS) {
+    let s = ''
+    for (const n of [2, 3, 4, 5, 6, 7, 8]) s += await szOf(id, n)
+    got[id] = s
+  }
+  ok('_dp_size : 2-4 → s ; 5-6 → m ; 7-8 → l sur mer et ski, m ailleurs', canon(got) === canon({ grand: 'sssmmmm', mer: 'sssmmll', kermesse: 'sssmmmm', camping: 'sssmmmm', ski: 'sssmmll' }), canon(got))
+  ok('_dp_size : option de test valide (mer à 3 → l, mer à 8 → s, ski à 2 → m)', (await szOf('mer', 3, 'l')) === 'l' && (await szOf('mer', 8, 's')) === 's' && (await szOf('ski', 2, 'm')) === 'm')
+  ok('_dp_size : option inconnue ou trop grande → règle automatique', (await szOf('mer', 6, 'xl')) === 'm' && (await szOf('grand', 8, 'l')) === 'm' && (await szOf('kermesse', 3, 'l')) === 's' && (await szOf('ski', 8, '')) === 'l')
+}
+
+// ----------------------------------------------------------------------------- démarrage en grande taille
+const inZone = (extra, z, c) => extra.stars[z].loges.includes(c)
+const wetOf = (extra, mech) => (mech?.tide === 1 ? (extra.banks ?? []).flatMap((b) => b.cells) : [])
+for (const key of BIG_KEYS) {
+  const [id, size] = key.split(':')
+  const D = BIG[key]
+  if (!D) continue
+  for (const n of size === 'l' ? [7, 8] : [5, 6]) {
+    const g = must(await start({ ...AUTO, map: id }, P.slice(0, n)), `start ${key} ${n}`)
+    const st = g.state
+    const forkCells = D.next.map((x, i) => (Array.isArray(x) ? i : -1)).filter((i) => i >= 0)
+    const swOk = st.sw.length === forkCells.length && st.sw.every((x, k) => (D.extra.forks[k] === 'tide' ? x === 1 - (st.mech.tide ?? 0) : x === 0 || x === 1))
+    const zoneOk = D.extra.stars.every((z, k) => st.star_cells.filter((c) => inZone(D.extra, k, c)).length === (z.n || (n >= 7 ? 3 : 2)))
+    const dryOk = st.star_cells.every((c) => !wetOf(D.extra, st.mech).includes(c)) && new Set(st.star_cells).size === st.star_cells.length
+    ok(`${key} à ${n} : state.size, ${forkCells.length} aiguillages (marée : 1 − tide), étoiles par zone, au sec, générique ${size === 'l' ? 12 : 10} s`, st.size === size && swOk && zoneOk && dryOk && approx(st.deadline, size === 'l' ? 12 : 10), canon([st.size, st.sw, st.mech, st.star_cells]))
+    const pos = Object.values(st.pos)
+    if (size === 'm') ok(`${key} à ${n} : tout le monde au Départ, 10 pièces`, pos.every((c) => c === 0) && Object.values(st.coins).every((c) => c === 10))
+    else {
+      const halts = [...new Set(pos)]
+      const per = halts.map((h) => pos.filter((c) => c === h).length).sort()
+      ok(`${key} à ${n} : départs répartis par deux sur ${Math.ceil(n / 2)} haltes de la fiche, sans bonus`, halts.length === Math.ceil(n / 2) && halts.every((h) => D.extra.starts.includes(h)) && canon(per) === canon(n === 7 ? [1, 2, 2, 2] : [2, 2, 2, 2]) && Object.values(st.coins).every((c) => c === 10) && Object.values(st.dist).every((d) => d === 0) && st.order.every((p, k) => st.pos[p] === st.pos[st.order[k % halts.length]]), canon(st.pos))
+    }
+    if (id === 'camping') ok(`${key} à ${n} : mech.pack (Rita en 51, Ritou en 83, sacs vides)`, canon(st.mech) === canon({ riton: 18, sack: 0, pack: [{ c: 51, sack: 0 }, { c: 83, sack: 0 }] }), canon(st.mech))
+    if (id === 'kermesse') ok(`${key} à ${n} : une seule cagnotte`, canon(st.mech) === '{"pot":5}')
+  }
+}
+{
+  // Étoiles jamais sur un banc noyé au départ (mer L, marée haute).
+  let wetStar = false
+  let highSeen = false
+  for (let i = 0; i < 16; i++) {
+    const g = must(await start({ ...AUTO, map: 'mer' }, P.slice(0, 8)), 'mer L wet')
+    if (g.state.mech.tide === 1) highSeen = true
+    if (g.state.star_cells.some((c) => wetOf(BIG['mer:l']?.extra ?? {}, g.state.mech).includes(c))) wetStar = true
+  }
+  ok('mer L : à marée haute, aucune étoile posée sur un banc (4 bancs)', highSeen && !wetStar)
+}
+ok('2 à 4 joueurs : taille s (state.size)', must(await start(AUTO, P.slice(0, 4)), 's4').state.size === 's')
+
+/** Partie à 2 joueurs (A puis B) sur un plateau à une taille imposée (option de test), générique passé. */
+const onSize = async (id, size) => must(await act(late(must(await start({ ...AUTO, map: id, size }, [A, B]), `start ${id}:${size}`)), A, tick), `intro ${id}:${size}`)
+const cellsOf = (r, id = A) => stepsOf(r, id).map((s) => s.cell)
+
+// ----------------------------------------------------------------------------- partie lancée avant ce lot (sans size)
+{
+  const old = await onMap('mer')
+  const st = { ...old.state }
+  delete st.size
+  t = await turn({ ...old, state: st }, { pos: { [A]: 3 }, sw: [1], mech: { tide: 0, tide_in: 2 }, dice: [1, 2] })
+  ok('partie sans state.size : jouée en taille S (4 → 5 → 6, pas de bac)', t.state.pos[A] === 6 && t.state.size === undefined && t.state.sw.length === 1)
+}
+
+// ----------------------------------------------------------------------------- portes et transports
+const MERM = await onSize('mer', 'm')
+ok('option size m (2 joueurs) : mer en taille M, 4 aiguillages', MERM.state.size === 'm' && MERM.state.sw.length === 4)
+t = await turn(MERM, { pos: { [A]: 3 }, sw: [1, 0, 1, 1], mech: { tide: 0, tide_in: 2 }, dice: [1, 1] })
+{
+  const st = stepsOf(t)
+  ok('mer M : bac à quai (sw = 1) → 4 → Halte 45 (ponton), +5, le bac reste à l’île (sw = 0)', t.state.pos[A] === 45 && t.state.coins[A] === 15 && t.state.sw[0] === 0 && canon(st.map((s) => s.cell)) === '[4,45]' && canon(st[1].ev) === canon([{ t: 'fork', fork: 0, way: 1 }, { t: 'start', d: 5, halt: true }]), canon(st))
+}
+t = await turn(MERM, { pos: { [A]: 3 }, sw: [0, 0, 1, 1], mech: { tide: 0, tide_in: 2 }, dice: [1, 2] })
+ok('mer M : bac en mer (sw = 0) → le pion reste sur la Grande Île (4 → 5 → 6), le bac revient (sw = 1)', t.state.pos[A] === 6 && t.state.sw[0] === 1 && cellsOf(t).join() === '4,5,6')
+t = await turn(MERM, { pos: { [A]: 3 }, sw: [0, 1, 1, 1], mech: { tide: 0, tide_in: 2 }, dice: [1, 1], cards: ['reroll'], extra: [5] })
+ok('mer M : carte « Bis » à travers une porte (5 → … 9 → bac → Halte 73, +5)', t.state.pos[A] === 73 && t.state.sw[1] === 0 && stepsOf(t).some((s) => s.card && s.cell === 73 && s.ev.some((e) => e.t === 'start' && e.halt === true)) && t.state.coins[A] === 15, canon(cellsOf(t)))
+{
+  const w = (await db.query(`select public._dp_walk($1::jsonb, $2, 3, -1) w`, [canon({ ...MERM.state, star_cells: [3], pos: { ...MERM.state.pos, [A]: 47 } }), A])).rows[0].w
+  ok('mer M : carte « recule » depuis l’île : 46, Halte 45, embarcadère 4, sans bonus', canon(w.steps.map((s) => s.cell)) === '[46,45,4]' && w.state.coins[A] === 10 && w.steps.every((s) => s.ev.length === 0))
+}
+t = await turn(MERM, { pos: { [A]: 66 }, sw: [0, 0, 1, 1], mech: { tide: 0, tide_in: 2 }, dice: [1, 1] })
+ok('mer M : la navette du retour (67 → 8), toujours là', cellsOf(t).join() === '67,8' && t.state.pos[A] === 8)
+t = await turn(MERM, { pos: { [A]: 48 }, sw: [0, 0, 1, 1], mech: { tide: 0, tide_in: 2 }, dice: [1, 1] })
+ok('mer M : marée basse → la Langue des Mouettes (49 → 68), sans bascule', cellsOf(t).join() === '49,68' && canon(t.state.sw) === '[0,0,1,1]' && evOf(t).some((e) => e.t === 'fork' && e.fork === 3 && e.way === 1 && e.tide === true))
+t = await turn(MERM, { pos: { [A]: 48 }, sw: [0, 0, 0, 0], mech: { tide: 1, tide_in: 1 }, dice: [1, 1] })
+ok('mer M : marée haute → 49 → 50 (l’île, pas le banc)', cellsOf(t).join() === '49,50')
+
+const GRM = await onSize('grand', 'm')
+t = await turn(GRM, { pos: { [A]: 3 }, sw: [1, 0, 0, 0], dice: [1, 1] })
+ok('grand M : aiguillage en 4 → Les Coulisses (47), à pied, sans bonus', cellsOf(t).join() === '4,47' && t.state.sw[0] === 0 && !evOf(t).some((e) => e.t === 'start'))
+t = await turn(GRM, { pos: { [A]: 27 }, sw: [0, 0, 0, 1], dice: [1, 1] })
+ok('grand M : aiguillage en 28 → La Régie (73)', cellsOf(t).join() === '28,73' && t.state.sw[3] === 0)
+t = await turn(GRM, { pos: { [A]: 71 }, sw: [0, 0, 0, 0], dice: [1, 1] })
+ok('grand M : sortie des Coulisses 72 → 7', cellsOf(t).join() === '72,7')
+
+const SKIM = await onSize('ski', 'm')
+t = await turn(SKIM, { pos: { [A]: 12 }, sw: [0], dice: [1, 1] })
+ok('ski M : passage obligé 13 → télécabine des Alpages → Halte 77 (+5)', cellsOf(t).join() === '13,77' && t.state.coins[A] === 15 && !evOf(t).some((e) => e.t === 'fork'))
+t = await turn(SKIM, { pos: { [A]: 10 }, sw: [1], dice: [1, 1] })
+ok('ski M : une cabine sur deux en 11 → Halte 49 (+5), la cabine bascule', cellsOf(t).join() === '11,49' && t.state.coins[A] === 15 && t.state.sw[0] === 0)
+t = await turn(SKIM, { pos: { [A]: 10 }, sw: [0], dice: [1, 1] })
+ok('ski M : cabine manquée en 11 → 12 (la voie des Alpages)', cellsOf(t).slice(0, 2).join() === '11,12' && t.state.sw[0] === 1)
+t = await turn(SKIM, { pos: { [A]: 75 }, sw: [0], dice: [1, 1], cards: ['everyone3'] })
+ok('ski M : la piste des Chamois ramène en 14 (76 → 14)', cellsOf(t).join() === '76,14' && t.state.pos[A] === 14)
+{
+  const w = (await db.query(`select public._dp_walk($1::jsonb, $2, 2, -1) w`, [canon({ ...SKIM.state, pos: { ...SKIM.state.pos, [A]: 15 } }), A])).rows[0].w
+  ok('ski M : reculer depuis 15 → 14 → 76 (PREV[14] = 76, par la piste)', canon(w.steps.map((s) => s.cell)) === '[14,76]')
+}
+const SKIL = await onSize('ski', 'l')
+ok('option size l (2 joueurs) : ski en taille L, les deux joueurs sur la même gare', SKIL.state.size === 'l' && SKIL.state.pos[A] === SKIL.state.pos[B] && [49, 77, 105, 155].includes(SKIL.state.pos[A]))
+for (const [cell, k, way, to] of [[76, 1, 0, 14], [76, 1, 1, 105], [104, 2, 0, 18], [104, 2, 1, 155], [130, 3, 0, 131], [130, 3, 1, 20], [180, 4, 0, 181], [180, 4, 1, 24]]) {
+  const sw = [0, 0, 0, 0, 0]
+  sw[k] = way
+  t = await turn(SKIL, { pos: { [A]: cell - 1 }, sw, dice: [1, 1], cards: ['everyone3'] })
+  ok(`ski L : aiguillage ${cell} voie ${way} → ${to}${to === 105 || to === 155 ? ' (Halte +5)' : ''}`, cellsOf(t)[1] === to && t.state.sw[k] === 1 - way && (![105, 155].includes(to) || stepsOf(t)[1].ev.some((e) => e.t === 'start' && e.halt)), canon(cellsOf(t)))
+}
+t = await turn(SKIL, { pos: { [A]: 152 }, sw: [0, 0, 0, 0, 0], dice: [1, 1] })
+ok('ski L : l’arête ouest arrive au Pic (153 → 154)', cellsOf(t).join() === '153,154')
+t = await turn(SKIL, { pos: { [A]: 202 }, sw: [0, 0, 0, 0, 0], dice: [1, 1] })
+ok('ski L : l’arête est arrive au Pic (203 → 154)', cellsOf(t).join() === '203,154')
+t = await turn(SKIL, { pos: { [A]: 153 }, sw: [0, 0, 0, 0, 0], dice: [1, 1] })
+ok('ski L : la Grande Descente (154 → Départ), +5', cellsOf(t).join() === '154,0' && t.state.coins[A] === 15 && stepsOf(t)[1].ev.some((e) => e.t === 'start' && e.d === 5 && !e.halt))
+for (const key of ['ski:m', 'ski:l']) {
+  const G0 = key === 'ski:m' ? SKIM : SKIL
+  const tp = BIG[key]?.extra.tp ?? {}
+  const ext = Object.entries(tp).map(([a, b]) => [Number(a), b]).filter(([a]) => a >= 49)
+  let good = 0
+  for (const [from, to] of ext) {
+    const k = to > from ? 'lift' : 'ice'
+    t = await turn(G0, { pos: { [A]: from - 2 }, dist: { [A]: 100 }, sw: G0.state.sw.map(() => 0), dice: [1, 1], diceB: [1, 2] })
+    const st = stepsOf(t)
+    const last = st[st.length - 1]
+    if (t.state.pos[A] === to && t.state.dist[A] === 100 + 2 + (to - from) && last.tp === k && canon(last.ev[0]) === canon({ t: 'tp', k, from, to })) good++
+  }
+  ok(`${key} : les ${ext.length} téléporteurs de la montagne (pile dessus)`, ext.length === (key === 'ski:m' ? 6 : 18) && good === ext.length, `${good}/${ext.length}`)
+}
+t = await turn(SKIL, { pos: { [A]: 107 }, coins: { [A]: 30 }, star: [127, 3, 7], sw: [0, 0, 0, 0, 0], dice: [1, 1] })
+ok('ski L : étoile achetée à l’arrivée d’un télésiège du Glacier (109 → 127)', t.state.stars[A] === 1 && t.state.stats[A].star_exact === 1 && !t.state.star_cells.includes(127), canon([cellsOf(t), t.state.star_cells, t.state.coins[A], t.state.stars[A]]))
+
+// ----------------------------------------------------------------------------- étoiles par zone
+{
+  let stays = true
+  const coul = BIG['grand:m']?.extra.stars[1].loges ?? []
+  for (let i = 0; i < 8; i++) {
+    t = await turn(GRM, { pos: { [A]: 47 }, coins: { [A]: 40 }, star: [49, 3, 7, 77], sw: [0, 0, 0, 0], dice: [1, 1] })
+    if (t.state.stars[A] !== 1 || !coul.includes(t.state.star_cells[0]) || t.state.star_cells[0] === 49) stays = false
+  }
+  ok('étoile achetée dans les Coulisses → elle déménage dans une autre Loge des Coulisses', stays)
+  let r = { ...GRM.state, star_cells: [3, 7, 49, 77] }
+  for (const c of [3, 7, 49, 77]) r = (await db.query(`select public._dp_move_star($1::jsonb, $2) s`, [canon(r), c])).rows[0].s
+  const Z = BIG['grand:m']?.extra.stars ?? [{ loges: [] }, { loges: [] }, { loges: [] }]
+  ok('« Changement de décor » : chaque étoile déménage dans sa zone', Z[0].loges.includes(r.star_cells[0]) && Z[0].loges.includes(r.star_cells[1]) && Z[1].loges.includes(r.star_cells[2]) && Z[2].loges.includes(r.star_cells[3]) && new Set(r.star_cells).size === 4, canon(r.star_cells))
+  const mz = BIG['mer:m']?.extra.stars[1].loges ?? []
+  const full = { ...MERM.state, mech: { tide: 1, tide_in: 1 }, star_cells: mz.filter((c) => c !== 70) }
+  r = (await db.query(`select public._dp_move_star($1::jsonb, 46) s`, [canon(full)])).rows[0].s
+  ok('zone dont toutes les autres Loges sont noyées (70 sous l’eau) : l’étoile reste où elle est', mz.length === 7 && canon(r.star_cells) === canon(full.star_cells))
+}
+
+// ----------------------------------------------------------------------------- la marée sur plusieurs bancs
+t = await turn(MERM, { pos: { [A]: 36, [B]: 68 }, sw: [0, 0, 1, 1], star: [3, 7, 46, 74], mech: { tide: 0, tide_in: 1 }, dice: [1, 2], diceB: [1, 1] })
+ok('mer M : la mer monte → les embranchements de marée se ferment (sw[2] = sw[3] = 0), les bacs ne bougent pas', canon(t.state.sw) === '[0,0,0,0]' && t.state.mech.tide === 1)
+ok('mer M : deux bancs rincés le même tour, chacun vers son retour (14 et 51), dist, ordre de passage', canon(t.state.epi?.washed) === canon([{ id: A, from: 39, d: -5, to: 14 }, { id: B, from: 70, d: -5, to: 51 }]) && t.state.pos[A] === 14 && t.state.pos[B] === 51 && t.state.dist[A] === 3 + 6 && t.state.dist[B] === 2 + 3, canon([t.state.epi?.washed, t.state.dist]))
+t = await turn(MERM, { pos: { [A]: 1 }, sw: [0, 0, 1, 1], star: [3, 7, 70, 74], mech: { tide: 0, tide_in: 1 } })
+ok('mer M : étoile sur la Loge des Mouettes (70) quand la mer monte → elle déménage dans l’île aux Mouettes', !t.state.star_cells.includes(70) && Boolean(BIG['mer:m']?.extra.stars[1].loges.includes(t.state.star_cells[2])) && canon(t.state.epi?.stars) === canon(t.state.star_cells))
+t = await turn(MERM, { pos: { [A]: 1 }, sw: [1, 0, 0, 0], mech: { tide: 1, tide_in: 1 } })
+ok('mer M : la mer redescend → tous les bancs rouvrent (sw[2] = sw[3] = 1), le bac garde sa position', canon(t.state.sw) === '[1,0,1,1]' && t.state.epi?.tide === 0)
+const MERL = await onSize('mer', 'l')
+t = await turn(MERL, { pos: { [A]: 160, [B]: 194 }, sw: MERL.state.sw.map((x, k) => ((BIG['mer:l']?.extra.forks ?? [])[k] === 'tide' ? 1 : 0)), star: [3, 7, 46, 74, 101, 132, 168], mech: { tide: 0, tide_in: 1 }, dice: [1, 2], diceB: [1, 1] })
+ok('mer L : Gué du Trésor → 145, Gué des Crabes → 180, embranchements de marée fermés', canon(t.state.epi?.washed?.map((w) => [w.id, w.from, w.to])) === canon([[A, 163, 145], [B, 196, 180]]) && t.state.pos[A] === 145 && t.state.pos[B] === 180 && t.state.sw.every((x, k) => (BIG['mer:l']?.extra.forks ?? [])[k] !== 'tide' || x === 0), canon(t.state.epi?.washed))
+
+// ----------------------------------------------------------------------------- la Tombola à 4 guichets
+const KERM = await onSize('kermesse', 'm')
+ok('kermesse M : 4 guichets (13, 33, 55, 85)', canon(BIG['kermesse:m']?.cells.map((c, i) => (c === 'tombola' ? i : -1)).filter((i) => i >= 0)) === '[13,33,55,85]')
+t = await turn(KERM, { pos: { [A]: 54, [B]: 84 }, sw: [0, 0], mech: { pot: 5 }, dice: [1, 1], diceB: [1, 1] })
+ok('kermesse M : péage aux guichets du Train Fantôme (55) et du Grand Huit (85), une seule cagnotte', t.state.mech.pot === 11 && evOf(t).some((e) => e.t === 'toll' && e.pot === 8) && evOf(t, B).some((e) => e.t === 'toll' && e.pot === 11))
+t = await turn(KERM, { pos: { [A]: 83 }, sw: [0, 0], mech: { pot: 20 }, dice: [1, 1] })
+ok('kermesse M : gros lot sur le guichet du Grand Huit (85) : toute la cagnotte', t.state.pos[A] === 85 && evOf(t).some((e) => e.t === 'jackpot' && e.d === 20) && t.state.mech.pot === 5)
+
+// ----------------------------------------------------------------------------- la famille Raton
+const CAMPM = await onSize('camping', 'm')
+const pack0 = (rita, ritou, sacks = [0, 0, 0]) => ({ riton: 26, sack: sacks[0], pack: [{ c: rita, sack: sacks[1] }, { c: ritou, sack: sacks[2] }] })
+t = await turn(CAMPM, { pos: { [A]: 49, [B]: 28 }, sw: [0, 0], mech: pack0(51, 90), dice: [1, 1], extra: [1, 1, 1] })
+{
+  const ev = ritonOf(t)
+  ok('camping M : croiser Rita (51) → elle pique 5 pièces (évènement who = 1), dans son sac à elle', ev.length === 1 && ev[0].who === 1 && ev[0].k === 'steal' && t.state.moves[0].after.mech.pack?.[0].sack === 5 && t.state.moves[0].after.mech.sack === 0 && t.state.moves[0].after.mech.pack?.[1].sack === 0, canon(ev))
+}
+t = await turn(CAMPM, { pos: { [A]: 49, [B]: 80 }, sw: [0, 0], mech: pack0(52, 83, [0, 5, 0]), dice: [1, 1], diceB: [1, 1], extra: [6, 1, 1] })
+ok('camping M : ronde du soir → Rita lâche son sac sur A (sous-bois), Ritou vole B (rivière), Riton ne quitte pas le camp', canon(t.state.epi?.pack?.map((p) => [p.who, p.die, p.from, p.path, p.hits.map((h) => [h.id, h.k])])) === canon([[1, 1, 52, [51], [[A, 'drop']]], [2, 1, 83, [82], [[B, 'steal']]]]) && t.state.epi.path.every((c) => c < 36) && canon(t.state.mech.pack) === canon([{ c: 51, sack: 0 }, { c: 82, sack: 5 }]), canon([t.state.epi?.pack, t.state.mech]))
+t = await turn(CAMPM, { pos: { [A]: 20, [B]: 28 }, sw: [0, 0], mech: pack0(36, 67), dice: [1, 1], extra: [1, 2, 3] })
+ok('camping M : rondes cycliques (Rita 36 → 66 → 65, Ritou 67 → 99 → 98 → 97)', t.state.epi?.die === 1 && canon(t.state.epi?.pack?.map((p) => [p.die, p.path])) === canon([[2, [66, 65]], [3, [99, 98, 97]]]))
+t = await turn(CAMPM, { pos: { [A]: 3, [B]: 28 }, sw: [0, 0], mech: pack0(60, 90), dice: [1, 1], cards: ['reroll'], extra: [2, 4, 5, 6] })
+ok('camping M : ordre des dés (lancers, carte « Bis », Riton, Rita, Ritou)', cev(t)?.die === 2 && t.state.epi?.die === 4 && canon(t.state.epi?.pack?.map((p) => p.die)) === '[5,6]')
+ok('camping M : épilogue toujours de 4 s', approx(t.state.deadline, 16))
+
+// ----------------------------------------------------------------------------- size_no dans les stats de fin
+{
+  const W2 = patch(MERM, { phase: 'awards', round: 9, rounds: 9, deadline: iso(-1), awards: [], ranking: [{ id: A, stars: 1, coins: 0, rank: 1 }, { id: B, stars: 0, coins: 0, rank: 2 }] })
+  const f2 = must(await act(W2, A, tick), 'finish M')
+  ok('stats de fin : size_no (2 = grand format) à côté de map_no', Array.isArray(f2.results) && f2.results.every((r) => r.stats.size_no === 2 && r.stats.map_no === 2), canon(f2.results?.map((r) => r.stats)))
+}
+
 // ----------------------------------------------------------------------------- enchaînement des phases
 let G = auto
 ok('tick pendant les déplacements (avant échéance) : sans effet', must(await act(G, A, tick), 'gm').state.phase === 'move')
@@ -715,14 +1028,21 @@ function skilledPayload(st, lvl) {
   if (k === 'etoiles') return { score: Math.round(5 + 15 * lvl + rnd(9)) }
   return { ms: Math.round(7000 + (Math.random() - 0.5) * 2 * (150 + 1800 * (1 - lvl))) }
 }
-async function simulate(n, rounds, skilled = false, map = 'grand') {
+/** Partie complète ; size : 's' (défaut, les plateaux classiques) ou null (taille automatique selon le nombre de joueurs). */
+async function simulate(n, rounds, skilled = false, map = 'grand', size = 's') {
   const players = P.slice(0, n)
   const lvl = (p) => 1 - players.indexOf(p) / (n - 1)
-  let st = must(await start({ ...OPTS, rounds, map }, players), 'sim')
+  let st = must(await start({ ...AUTO, rounds, map, ...(size ? { size } : {}) }, players), 'sim')
+  // Quartiers visités (grandes tailles) : par quartier, l'ensemble des joueurs qui y sont passés.
+  const nCells = BIG[`${map}:${st.state.size}`]?.cells.length ?? 0
+  const quarters = st.state.size && st.state.size !== 's' ? QUARTERS[map].filter((q) => q[q.length - 1] < nCells) : []
+  const visits = quarters.map(() => new Set())
+  const seen = (p, c) => quarters.forEach((q, k) => q.includes(c) && visits[k].add(p))
+  for (const p of players) seen(p, st.state.pos[p])
   st = must(await act(late(st), players[0], tick), 'sim intro')
   let moveS = 0
   // Évènements signature du plateau, comptés dans les scénarios publiés.
-  const ev = { rises: 0, washed: 0, tolls: 0, jackpots: 0, jackpotSum: 0, jackpotMax: 0, steals: 0, drops: 0, nones: 0, lifts: 0, slides: 0, luges: 0, starts: 0 }
+  const ev = { rises: 0, washed: 0, tolls: 0, jackpots: 0, jackpotSum: 0, jackpotMax: 0, steals: 0, drops: 0, nones: 0, lifts: 0, slides: 0, luges: 0, starts: 0, halts: 0, descents: 0 }
   for (let guard = 0; guard < 400 && st.state.phase !== 'finished'; guard++) {
     const ph = st.state.phase
     if (ph === 'roll') {
@@ -734,18 +1054,21 @@ async function simulate(n, rounds, skilled = false, map = 'grand') {
       }
       if (st.state.phase === 'roll') st = must(await act(late(st), players[0], tick), 'sim roll tick')
       moveS = Math.max(moveS, ...st.state.moves.map((m) => m.steps.length))
+      for (const m of st.state.moves) for (const s of m.steps) seen(m.id, s.cell)
       const all = st.state.moves.flatMap((m) => m.steps.flatMap((s) => s.ev))
       for (const e of all) {
         if (e.t === 'toll') ev.tolls++
         if (e.t === 'jackpot') { ev.jackpots++; ev.jackpotSum += e.d; ev.jackpotMax = Math.max(ev.jackpotMax, e.d) }
         if (e.t === 'riton') ev[e.k === 'steal' ? 'steals' : e.k === 'drop' ? 'drops' : 'nones']++
         if (e.t === 'tp') ev[e.k === 'lift' ? 'lifts' : 'slides']++
-        if (e.t === 'start') ev.starts++
+        if (e.t === 'start' && !e.halt) ev.starts++
+        if (e.t === 'start' && e.halt) ev.halts++
       }
       const epi = st.state.epi
       if (epi?.t === 'tide' && epi.tide === 1) { ev.rises++; ev.washed += epi.washed.length }
       if (epi?.t === 'riton') for (const h of epi.hits) ev[h.k === 'steal' ? 'steals' : h.k === 'drop' ? 'drops' : 'nones']++
       if (st.state.moves.some((m) => m.steps.some((s, k) => s.cell === 0 && (k === 0 ? m.from : m.steps[k - 1].cell) === 48 && map === 'ski'))) ev.luges++
+      for (const m of st.state.moves) for (const [k, s] of m.steps.entries()) if (map === 'ski' && s.cell === 0 && (k === 0 ? m.from : m.steps[k - 1].cell) === 154) ev.descents++
     } else if (ph === 'mg_play') {
       if (st.state.mg.kind === 'buzzer') st = patch(st, { mg: { ...st.state.mg, data: { ...st.state.mg.data, go_at: iso(-2) } } })
       for (const p of players) {
@@ -758,7 +1081,7 @@ async function simulate(n, rounds, skilled = false, map = 'grand') {
       st = must(await act(late(st), players[0], tick), 'sim tick ' + ph)
     }
   }
-  return { st, maxSteps: moveS, ev }
+  return { st, maxSteps: moveS, ev, visits: visits.map((v) => v.size), quarterCount: players.map((p) => visits.filter((v) => v.has(p)).length) }
 }
 const t0 = Date.now()
 const CONFIGS = [[4, 9, false], [6, 9, false], [8, 9, false], [2, 9, false], [3, 6, false], [4, 12, false], [4, 9, true], [6, 9, true], [8, 9, true]]
@@ -846,6 +1169,57 @@ for (const map of MAPS) {
 }
 if (ecarts.length) console.log(`\n⚠ Écarts > 15 % avec la spec (${MAP_SIMS} parties par config : à relire avec plus de parties) :\n  - ${ecarts.join('\n  - ')}`)
 else console.log('\nAucun écart > 15 % avec les chiffres de la spec.')
+
+// ----------------------------------------------------------------------------- simulation des grandes tailles (5 à 8 joueurs, 9 tours, taille automatique)
+// Comparée aux chiffres du modèle JS de la spec grands plateaux (§2.2) : écart > 15 % signalé.
+const SIZE_SIMS = Number(process.argv[5] ?? 2)
+const SPEC_BIG = {
+  // étoiles par joueur à 5 / 6 / 7 / 8 joueurs
+  stars: { grand: [2.17, 2.02, 2.04, 1.94], mer: [2.26, 2.08, 1.98, 1.89], kermesse: [2.07, 1.92, 1.94, 1.85], camping: [2.10, 1.95, 1.95, 1.85], ski: [2.15, 1.99, 2.01, 1.91] },
+}
+const t2 = Date.now()
+const sizeSims = []
+for (const map of MAPS) {
+  for (const n of [5, 6, 7, 8]) {
+    for (let i = 0; i < SIZE_SIMS; i++) {
+      const r = await simulate(n, 9, false, map, null)
+      sizeSims.push({ map, n, size: r.st.state.size, ...r })
+    }
+  }
+}
+const SIZE_NO = { s: 1, m: 2, l: 3 }
+ok(`simulation des grandes tailles : ${sizeSims.length} parties complètes (5 à 8 joueurs) jusqu’à finished`, sizeSims.every((x) => x.st.state.phase === 'finished' && x.st.results.length === x.n))
+ok('simulation des grandes tailles : taille automatique (m à 5-6 ; l à 7-8 sur mer et ski), size_no dans les stats de fin', sizeSims.every((x) => x.size === (x.n >= 7 && ['mer', 'ski'].includes(x.map) ? 'l' : 'm') && x.st.results.every((r) => r.stats.size_no === SIZE_NO[x.size])))
+ok('simulation des grandes tailles : jamais plus de 24 pas pour un pion en un tour', sizeSims.every((x) => x.maxSteps <= 24), String(Math.max(...sizeSims.map((x) => x.maxSteps))))
+ok('simulation des grandes tailles : pièces jamais négatives', sizeSims.every((x) => Object.values(x.st.state.coins).every((v) => v >= 0)))
+const ecartsBig = []
+console.log(`\n— Simulation des grandes tailles (${SIZE_SIMS} parties par config, 9 tours, ${((Date.now() - t2) / 1000).toFixed(1)} s) —`)
+for (const map of MAPS) {
+  for (const [k, n] of [5, 6, 7, 8].entries()) {
+    const g = sizeSims.filter((x) => x.map === map && x.n === n)
+    if (!g.length) continue
+    const all = g.flatMap((x) => x.st.results)
+    const per = (f) => g.reduce((a, x) => a + f(x), 0) / g.length
+    const stars = all.reduce((a, r) => a + r.stats.stars, 0) / all.length
+    const ref = SPEC_BIG.stars[map][k]
+    const d = (stars - ref) / ref
+    if (Math.abs(d) > 0.15) ecartsBig.push(`${map} ${g[0].size.toUpperCase()} à ${n} : étoiles/joueur ${stars.toFixed(2)} contre ${ref} (${d > 0 ? '+' : ''}${Math.round(d * 100)} %)`)
+    const noStar = all.filter((r) => r.stats.no_star).length / all.length
+    if (noStar >= 0.1) ecartsBig.push(`${map} ${g[0].size.toUpperCase()} à ${n} : ${Math.round(noStar * 100)} % de joueurs sans étoile (objectif < 10 %)`)
+    const vis = g[0].visits.map((_, q) => per((x) => x.visits[q]))
+    if (vis.some((v) => v < 2)) ecartsBig.push(`${map} ${g[0].size.toUpperCase()} à ${n} : un quartier à moins de 2 visiteurs par partie (${vis.map((v) => v.toFixed(1)).join(' · ')})`)
+    const noQ = all.length ? g.reduce((a, x) => a + x.quarterCount.filter((c) => c === 0).length, 0) / all.length : 0
+    let line = `  ${map.padEnd(8)} ${g[0].size.toUpperCase()} ${n} joueurs : étoiles/joueur ${stars.toFixed(2)} (spec ${ref}) · vainqueur ${avg(g.map((x) => Math.max(...x.st.results.map((r) => r.stats.stars))))} ★ · sans étoile ${pct(all.filter((r) => r.stats.no_star).length, all.length)} · fauché ${pct(all.filter((r) => r.stats.broke).length, all.length)} · Départ/joueur ${(per((x) => x.ev.starts) / n).toFixed(2)} + haltes ${(per((x) => x.ev.halts) / n).toFixed(2)} · pas max ${Math.max(...g.map((x) => x.maxSteps))}`
+    line += `\n             quartiers : ${(g.reduce((a, x) => a + x.quarterCount.reduce((s, c) => s + c, 0), 0) / all.length).toFixed(2)} par joueur, aucun ${Math.round(noQ * 100)} % · visiteurs ${vis.map((v) => v.toFixed(1)).join(' · ')}`
+    if (map === 'mer') line += ` · marée : ${per((x) => x.ev.rises).toFixed(1)} montées, ${per((x) => x.ev.washed).toFixed(1)} pions emportés`
+    if (map === 'kermesse') line += ` · tombola : ${(per((x) => x.ev.tolls) / n).toFixed(2)} péages/joueur, ${per((x) => x.ev.jackpots).toFixed(1)} gros lots`
+    if (map === 'camping') line += ` · ratons : ${((per((x) => x.ev.steals + x.ev.drops + x.ev.nones)) / n).toFixed(2)} croisements/joueur`
+    if (map === 'ski') line += ` · ski : ${(per((x) => x.ev.lifts) / n).toFixed(2)} télésièges et ${(per((x) => x.ev.slides) / n).toFixed(2)} glissades/joueur, Grande Descente ${per((x) => x.ev.descents).toFixed(1)}/partie`
+    console.log(line)
+  }
+}
+if (ecartsBig.length) console.log(`\n⚠ Grandes tailles, à surveiller (${SIZE_SIMS} parties par config) :\n  - ${ecartsBig.join('\n  - ')}`)
+else console.log('\nGrandes tailles : aucun écart > 15 % avec la spec.')
 
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)

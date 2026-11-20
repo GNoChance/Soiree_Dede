@@ -3,7 +3,7 @@ import { CELL_INFO, isJump, linksOf, type BoardDef } from './board'
 /** Mini-plan du tracé d'un plateau (une pastille par case, couleur du type), pour les options. */
 export function BoardThumb({ board, className }: { board: BoardDef; className?: string }) {
   return (
-    <svg className={className} viewBox={`-0.6 -0.6 ${board.cols + 0.2} ${board.rows + 0.2}`} aria-hidden>
+    <svg className={className} viewBox={`${board.col0 - 0.6} ${board.row0 - 0.6} ${board.cols + 0.2} ${board.rows + 0.2}`} aria-hidden>
       {linksOf(board)
         .filter(([a, b]) => !isJump(board, a, b))
         .map(([a, b]) => (
