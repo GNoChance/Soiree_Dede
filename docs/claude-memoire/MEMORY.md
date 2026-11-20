@@ -1,0 +1,3 @@
+- [Roadmap méta-soirée](roadmap-meta-soiree.md) — lots A-G décidés le 2026-11-17 et choix produit
+- [Nouveaux jeux 22-25](nouveaux-jeux-22-25.md) — Échecs, Kems, Mini-golf, Dédé Party livrés le 2026-11-19 ; restes : tenues Manon/Karo/Cycy, playtests
+- [Carte blanche jeux 22-25](autonomie-jeux-22-25.md) — accepte tout, commit + push sans demander pour ce chantier
