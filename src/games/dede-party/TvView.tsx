@@ -148,6 +148,8 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
               className="absolute inset-0 z-40 flex items-center justify-center overflow-hidden rounded-card bg-paper/90 p-6 backdrop-blur-sm"
+              // Annonce du mini-jeu : le clip « échauffement » se cale sur la hauteur du panneau (unités cqh, voir MgClip).
+              style={s.phase === 'mg_intro' ? { containerType: 'size' } : undefined}
             >
               <div className="max-h-full w-full max-w-5xl overflow-hidden">{overlay}</div>
             </motion.div>

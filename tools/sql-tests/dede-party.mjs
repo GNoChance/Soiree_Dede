@@ -811,7 +811,7 @@ ok('camping M : épilogue toujours de 4 s', approx(t.state.deadline, 16))
 let G = auto
 ok('tick pendant les déplacements (avant échéance) : sans effet', must(await act(G, A, tick), 'gm').state.phase === 'move')
 G = must(await act(late(patch(G, {}, { forced_mg: ['quiz'] })), A, tick), 'mgi')
-ok('fin des déplacements → annonce du mini-jeu (8 s), mini-jeu n°1', G.state.phase === 'mg_intro' && G.state.mg.no === 1 && G.state.mg.kind === 'quiz' && approx(G.state.deadline, 8) && G.state.mg.finale === false)
+ok('fin des déplacements → annonce du mini-jeu (10 s), mini-jeu n°1', G.state.phase === 'mg_intro' && G.state.mg.no === 1 && G.state.mg.kind === 'quiz' && approx(G.state.deadline, 10) && G.state.mg.finale === false)
 ok('quiz : 3 questions à 4 choix, sans les réponses', G.state.mg.data.questions.length === 3 && G.state.mg.data.questions.every((q) => q.choices.length === 4) && !('answers' in G.state.mg.data) && G.server.mg.secret.answers.length === 3)
 ok('envoi pendant l’annonce : ignoré', must(await act(G, A, sub(1, { answers: [0, 0, 0], ms: [1, 1, 1] })), 'early').state.mg.submitted.length === 0)
 G = must(await act(late(G), A, tick), 'mgp')

@@ -12,6 +12,7 @@ import { MG_ORDER, MINIGAMES } from './minigames'
 import { fmtSec } from './minigames/common'
 import { eventLabel, introLine, mechChip, type BoardView, type EpiView } from './anim'
 import { boardOf, SIZE_LABEL, type BoardDef } from './board'
+import { MgClip } from './MgClip'
 import { DedeHost, Die, type Get } from './Parts'
 import { RITON_DIE_MS, WASH_AT_MS, type DedePartyState, type DpMech, type DpMg, type DpMgResult } from './types'
 
@@ -73,7 +74,7 @@ export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?
 /** Annonce du mini-jeu (8 s) : roulette, nom, une phrase de règle, 3-2-1. */
 export function MgIntroScreen({ s, mg, big }: { s: DedePartyState; mg: DpMg; big?: boolean }) {
   const left = useCountdown(s.deadline)
-  const spun = left < 5600
+  const spun = left < 7600
   const [face, setFace] = useState(0)
   useEffect(() => {
     if (spun) return
@@ -91,7 +92,7 @@ export function MgIntroScreen({ s, mg, big }: { s: DedePartyState; mg: DpMg; big
   const shown = spun ? def : MINIGAMES[MG_ORDER[face]]
   const sec = Math.ceil(left / 1000)
   return (
-    <div className="flex flex-col items-center gap-3 text-center">
+    <div className="relative flex flex-col items-center gap-3 text-center">
       {mg.finale && (
         <motion.span initial={{ scale: 0 }} animate={{ scale: [1, 1.12, 1] }} transition={{ repeat: Infinity, duration: 0.9 }} className={cn('sticker bg-tomato px-3 py-1 font-display font-extrabold text-white', big ? 'text-4xl' : 'text-xl')}>
           🔥 LA FINALE : gains doublés !
@@ -109,6 +110,8 @@ export function MgIntroScreen({ s, mg, big }: { s: DedePartyState; mg: DpMg; big
         <span className={big ? 'text-9xl' : 'text-7xl'}>{shown.emoji}</span>
         <span className={cn('font-display font-extrabold leading-tight', big ? 'text-6xl' : 'text-3xl')}>{shown.name}</span>
       </motion.div>
+      {/* Clip « échauffement » : le geste du mini-jeu en boucle (rien si la vidéo ne charge pas). */}
+      <MgClip key={`clip-${mg.no}`} kind={mg.kind} show={spun} big={big} reserve={mg.finale ? 650 : 580} />
       {spun && (
         <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={cn('sticker bg-surface px-4 py-2 font-display font-extrabold', big ? 'text-4xl' : 'text-xl')}>
           {def.rule}

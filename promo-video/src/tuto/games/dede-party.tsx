@@ -9,7 +9,7 @@ import { Fly } from '../parts'
 import { CAMPING, KERMESSE, MER_L, SKI, type Bd } from './dede-party-boards'
 import type { MockScene, TutoSpec } from '../types'
 
-const OUTFITS: Partial<Record<Slug, string>> = { kevin: 'host', dede: 'host' }
+export const OUTFITS: Partial<Record<Slug, string>> = { kevin: 'host', dede: 'host' }
 const INK = C.ink
 
 // ---------------------------------------------------------------------------
@@ -423,11 +423,11 @@ const Tok: React.FC<{ p: XYpx; size: number; slug: Slug; expr?: string; lift?: n
     <Avatar slug={slug} expression={expr} size={size} outfit={OUTFITS[slug]} />
   </div>
 )
-const Emo: React.FC<{ p: XYpx; size: number; rot?: number; z?: number; children: React.ReactNode }> = ({ p, size, rot = 0, z = 4, children }) => (
+export const Emo: React.FC<{ p: XYpx; size: number; rot?: number; z?: number; children: React.ReactNode }> = ({ p, size, rot = 0, z = 4, children }) => (
   <div style={{ position: 'absolute', left: p[0], top: p[1], fontSize: size, lineHeight: 1, transform: `translate(-50%, -50%) rotate(${rot}deg)`, zIndex: z }}>{children}</div>
 )
 /** Petite étiquette qui surgit sur un point du plateau. */
-const Tag: React.FC<{ f: number; from: number; to?: number; p: XYpx; bg?: string; children: React.ReactNode }> = ({ f, from, to = 999, p, bg = C.surface, children }) =>
+export const Tag: React.FC<{ f: number; from: number; to?: number; p: XYpx; bg?: string; children: React.ReactNode }> = ({ f, from, to = 999, p, bg = C.surface, children }) =>
   f >= from && f < to ? (
     <Pop f={f} at={from} style={{ position: 'absolute', left: p[0], top: p[1], width: 0, height: 0, zIndex: 8 }}>
       <div style={{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%, -50%)' }}>
@@ -517,8 +517,8 @@ const Pick: MockScene = ({ f }) => {
 // ---------------------------------------------------------------------------
 // 2 — Le tour des 5 plateaux : une carte par plateau, sa particularité animée sur le vrai tracé
 // ---------------------------------------------------------------------------
-const BW = 632
-const BH = 422
+export const BW = 632
+export const BH = 422
 const SLIDE = 46
 /** Décalage (en frames de l’étape) de la carte affichée : ses effets sonores `Sx` sont calés sur sa frame locale. */
 const T0 = React.createContext(0)
@@ -909,7 +909,7 @@ const StarBuy: MockScene = ({ f: f0 }) => {
 // 5 — Un mini-jeu à chaque tour : les 6 mini-jeux en revue (noms, couleurs et règles de minigames/index.ts), puis le podium
 // ---------------------------------------------------------------------------
 const MSLIDE = 44
-const BTN: React.CSSProperties = { position: 'absolute', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', border: `4px solid ${INK}` }
+export const BTN: React.CSSProperties = { position: 'absolute', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', border: `4px solid ${INK}` }
 
 const MQuiz: React.FC<{ g: number }> = ({ g }) => (
   <Slide g={g} e="❓" name="Questions pour un Dédé" bg="#DFF4FF" note="⚡ 3 questions : réponds vite !" noteBg="#4CC9F0">

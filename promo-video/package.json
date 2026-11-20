@@ -7,6 +7,7 @@
     "sfx": "node scripts/make-sfx.mjs",
     "render:video": "remotion render src/index.ts Promo out/soirees-dede.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
     "render:tutos": "node scripts/render-tutos.mjs",
+    "render:mg": "node scripts/render-mg-clips.mjs",
     "still": "remotion still src/index.ts Promo out/still.png --frame=60"
   },
   "dependencies": {

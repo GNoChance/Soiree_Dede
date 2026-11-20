@@ -18,6 +18,7 @@ Vidéos d'explication de 34 à 37 s, une par jeu (les 25 jeux sont faits ; excep
 | Planche de contrôle : les 4 étapes côte à côte, figées à N % de leur durée (compositions `Sheet-<id>`) | `cd promo-video && sh scripts/sheet.sh <id> 50 92` → `out/tutos-check/sheet-<id>-<N>.png` |
 | Vidéos servies par l'appli | `public/tutos/<id>.mp4` |
 | Jeux qui affichent le bouton | `src/data/tutos.ts` (`TUTO_GAME_IDS`) |
+| Clips « échauffement » des mini-jeux de Dédé Party (6 s, muets, en boucle, 1264 × 844, < 200 Ko) joués pendant l'annonce du mini-jeu | `promo-video/src/tuto/games/dede-party-mg.tsx` (compositions `Mg-<id>`, planche de contrôle `MgSheet`) → `cd promo-video && npm run render:mg` → `public/tutos/dede-party/mg-<id>.mp4`, affichés par `src/games/dede-party/MgClip.tsx` |
 
 **Ajouter un jeu** : 1) écrire `games/<id>.tsx` (copier `morpion.tsx`) : `goal`, 4 `steps` (texte ≤ ~60 caractères + maquette `Mock` dessinée dans 720 × 880 px), `win` ; 2) l'ajouter à `registry.ts` ; 3) contrôler les planches (`sh scripts/sheet.sh <id> 50 92`) et, au besoin, une image précise (`npx remotion still src/index.ts Tuto-<id> out/x.png --frame=300`) ; 4) `npm run render:tutos -- <id>` ; 5) ajouter l'id à `TUTO_GAME_IDS`.
 
