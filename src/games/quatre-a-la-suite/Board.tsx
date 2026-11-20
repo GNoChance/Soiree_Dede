@@ -142,7 +142,7 @@ export default function Q4BoardView({ board, me, isMyTurn, onMove, pending, phas
                 }}
                 onClick={() => onColumn(c)}
                 className={cn(
-                  'relative flex flex-col-reverse gap-[5%] overflow-hidden rounded-full p-[4%] transition-colors',
+                  'relative flex flex-col-reverse gap-1 overflow-hidden rounded-full p-[4%] transition-colors',
                   interactive ? (full ? 'cursor-not-allowed' : 'cursor-pointer') : 'cursor-default',
                   hl && 'bg-white/25',
                 )}

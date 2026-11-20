@@ -1,4 +1,6 @@
+import { useNavigate } from 'react-router'
 import { Modal } from '@/components/ui/Modal'
+import { isSoloGame } from '@/features/solo/games'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { TENUES } from '@/data/tenues'
@@ -10,6 +12,7 @@ import { TutoButton } from './TutoButton'
  * « Comment on joue ? » (si elle existe) et tenue à gagner.
  */
 export function GameInfoModal({ game, onClose }: { game: GameDefinition | null; onClose: () => void }) {
+  const navigate = useNavigate()
   const tenue = game ? TENUES.find((t) => t.gameId === game.id) : undefined
   return (
     <Modal open={!!game} onClose={onClose} title={game ? `${game.emoji} ${game.name}` : undefined}>
@@ -31,8 +34,22 @@ export function GameInfoModal({ game, onClose }: { game: GameDefinition | null; 
               {tenue.emoji} Tenue à gagner : <b>{tenue.label}</b> ({tenue.condition})
             </p>
           )}
-          <p className="text-sm text-muted">Pour jouer, lance une soirée depuis l’accueil !</p>
-          <Button onClick={onClose}>Compris !</Button>
+          {isSoloGame(game.id) && (
+            <Button
+              size="lg"
+              fullWidth
+              onClick={() => {
+                onClose()
+                navigate(`/solo/${game.id}`)
+              }}
+            >
+              Jouer seul 🤖
+            </Button>
+          )}
+          <p className="text-sm text-muted">
+            {isSoloGame(game.id) ? 'Ou lance une soirée depuis l’accueil pour jouer à plusieurs !' : 'Pour jouer, lance une soirée depuis l’accueil !'}
+          </p>
+          <Button variant={isSoloGame(game.id) ? 'secondary' : 'primary'} onClick={onClose}>Compris !</Button>
         </div>
       )}
     </Modal>
