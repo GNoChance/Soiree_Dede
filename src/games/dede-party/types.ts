@@ -2,6 +2,7 @@
  * Types de Dédé Party (contrat : supabase/games/dede-party.sql).
  * Phases : intro -> roll -> move -> mg_intro -> mg_play -> mg_result -> roll … -> awards -> finished.
  */
+import type { MapId } from './boards/types'
 
 export type DpPhase = 'intro' | 'roll' | 'move' | 'mg_intro' | 'mg_play' | 'mg_result' | 'awards' | 'finished' | 'aborted'
 
@@ -9,7 +10,12 @@ export type MgKind = 'quiz' | 'pif' | 'majorite' | 'buzzer' | 'etoiles' | 'chron
 
 /** Évènement d'une étape de déplacement (ou de la case d'arrivée). */
 export interface DpEvent {
-  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card' | 'fork'
+  /**
+   * toll : péage de la Tombola (d ≤ 0, pot = cagnotte après) ; jackpot : gros lot (d, pot = 5) ;
+   * riton : croisement de Riton (k steal | drop | none, d, sack après) ; tp : télésiège / verglas (k, from, to).
+   * wash : pion emporté par la vague (front seulement, tiré de l'épilogue de la marée).
+   */
+  t: 'start' | 'clap' | 'pub' | 'star' | 'star_poor' | 'card' | 'fork' | 'toll' | 'jackpot' | 'riton' | 'tp' | 'wash'
   /** Pièces gagnées / perdues (start, clap, pub ; pickpocket, Téléthon). */
   d?: number
   /** Étoile : prix payé, nouvelles cases des étoiles (aussi carte « changement de décor »), achat pile sur la case. */
@@ -20,6 +26,13 @@ export interface DpEvent {
   /** Embranchement : numéro de l'aiguillage et voie prise (0 = tout droit, 1 = détour). */
   fork?: number
   way?: number
+  /** Embranchement commandé par la marée (Dédé-sur-Mer) : pas de bascule. */
+  tide?: boolean
+  /** Tombola : cagnotte après l'évènement. Riton : contenu du sac après. */
+  pot?: number
+  sack?: number
+  /** Riton : steal | drop | none ; tp : lift | ice. */
+  k?: string
   exact?: boolean
   need?: number
   /** Carte : id, texte, gain du tireur, dé relancé, joueur visé… */
@@ -28,9 +41,12 @@ export interface DpEvent {
   gain?: number
   die?: number
   with?: string
-  from?: string
+  /** Carte pickpocket : joueur volé ; tp / wash : case de départ. */
+  from?: string | number
   cell?: number
   none?: boolean
+  /** Évènements d'épilogue (front) : joueur concerné. */
+  id?: string
 }
 
 export interface DpStep {
@@ -38,7 +54,34 @@ export interface DpStep {
   ev: DpEvent[]
   /** Étape due à une carte (avance / recule / relance). */
   card?: boolean
+  /** Étape ajoutée par un téléporteur (Dédé 2000) : saut en cloche, pas un pas à pied. */
+  tp?: 'lift' | 'ice'
 }
+
+/** État de la mécanique du plateau : {} (grand, ski) · marée · cagnotte · Riton. */
+export interface DpMech {
+  /** Dédé-sur-Mer : 0 = basse, 1 = haute ; fins de tour avant le prochain changement. */
+  tide?: 0 | 1
+  tide_in?: number
+  /** La Kermesse : cagnotte de la Tombola. */
+  pot?: number
+  /** Le Camping : case de Riton et contenu de son sac. */
+  riton?: number
+  sack?: number
+}
+
+export interface DpRitonHit {
+  id: string
+  cell: number
+  k: 'steal' | 'drop' | 'none'
+  d: number
+  sack: number
+}
+
+/** Épilogue du tour (joué après le dernier pion, EPI_MS). */
+export type DpEpi =
+  | { t: 'tide'; tide: 0 | 1; washed: Array<{ id: string; from: number; d: number }>; stars?: number[]; after: DpSnap }
+  | { t: 'riton'; die: number; from: number; path: number[]; hits: DpRitonHit[]; after: DpSnap }
 
 export interface DpSnap {
   pos: Record<string, number>
@@ -49,6 +92,8 @@ export interface DpSnap {
   /** Aiguillages des embranchements (0 = tout droit, 1 = détour) : basculent à chaque passage. */
   sw: number[]
   dist: Record<string, number>
+  /** Mécanique du plateau (cagnotte, sac et case de Riton, marée) « en direct ». */
+  mech?: DpMech
 }
 
 export interface DpMove {
@@ -144,7 +189,16 @@ export interface DpStats {
   mg_streak_max: number
   doubles: number
   king?: number
+  /** Plus gros gain en une fois : carte Enveloppe, gros lot (card 'jackpot'), sac de Riton (card 'riton'). */
   best_card?: { card: string; text: string; gain: number }
+  washed?: number
+  toll_paid?: number
+  jackpots?: number
+  jackpot_best?: number
+  robbed?: number
+  loot?: number
+  lifts?: number
+  slides?: number
 }
 
 export interface DedePartyState {
@@ -163,6 +217,11 @@ export interface DedePartyState {
   stars: Record<string, number>
   star_cells: number[]
   sw: number[]
+  /** Plateau de la partie (absent : partie lancée avant les 5 plateaux = Grand Plateau). */
+  map?: MapId
+  mech?: DpMech
+  /** Épilogue du tour (null quand le tour n'en a pas). */
+  epi?: DpEpi | null
   half_price: Record<string, boolean>
   double_left: Record<string, number>
   rolls: Record<string, DpRoll | null>
@@ -189,3 +248,11 @@ export const dpActions = {
 
 /** Durée d'animation d'un pion pendant les déplacements (le serveur laisse 5 s par joueur). */
 export const MOVE_SEG_MS = 5000
+/** Durée de l'épilogue du tour (marée, ronde de Riton) : `_dp_const().epi_s`. */
+export const EPI_MS = 4000
+/** Épilogue de Riton : le dé roule, puis Riton trottine case par case. */
+export const RITON_DIE_MS = 600
+export const RITON_STEP_MS = 350
+/** Épilogue de la marée : l'eau monte (ou descend) en 2 s, la vague emporte les pions à 1,2 s. */
+export const TIDE_MS = 2000
+export const WASH_AT_MS = 1200

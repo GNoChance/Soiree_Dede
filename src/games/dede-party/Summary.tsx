@@ -4,6 +4,7 @@ import { cn } from '@/lib/cn'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { useTv } from '@/features/tv/tv'
 import type { GameSummaryProps } from '../types'
+import { boardOf } from './board'
 import type { DedePartyState } from './types'
 
 const MEDAL = ['🥇', '🥈', '🥉']
@@ -20,7 +21,8 @@ export default function DedePartySummary({ state, meId, players }: GameSummaryPr
       .filter((a) => a.ids.includes(id))
       .map((a) => (a.kind === 'king' ? '👑' : '📺'))
       .join(' ')
-  // Meilleur moment : plus gros gain en une carte Enveloppe surprise.
+  const board = boardOf(s.map)
+  // Meilleur moment : plus gros gain en une fois (carte Enveloppe, gros lot de la Tombola, sac de Riton).
   const best = s.players
     .map((id) => ({ id, card: s.stats?.[id]?.best_card }))
     .filter((x) => x.card && x.card.gain > 0)
@@ -33,7 +35,7 @@ export default function DedePartySummary({ state, meId, players }: GameSummaryPr
           🎤 {winners.length > 1 ? 'Victoire partagée' : `${get(winners[0].id).nickname} remporte l’émission`} avec {winners[0].stars} étoile{winners[0].stars > 1 ? 's' : ''}
         </p>
         <p className="text-sm font-bold text-muted">
-          {s.round} tour{s.round > 1 ? 's' : ''} sur {s.rounds}
+          {board.emoji} {board.name} · {s.round} tour{s.round > 1 ? 's' : ''} sur {s.rounds}
           {s.forced ? ' · partie écourtée' : ''}
         </p>
         <div className="flex flex-wrap justify-center gap-2">

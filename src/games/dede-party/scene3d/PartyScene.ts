@@ -1,25 +1,30 @@
 /**
- * Plateau 3D de Dédé Party (three « brut », chargé en différé) : un plateau télé façon sticker book.
+ * Plateau 3D de Dédé Party (three « brut », chargé en différé) : un plateau télé façon sticker book,
+ * paramétré par le plateau de la partie (`BoardDef`) et son thème (`themes/<id>.ts`).
  *
- * - Plateau : 47 cases épaisses (couleur du type, liseré encre, emoji), tracé au sol, deux aiguillages
- *   (flèche sur poteau + voie ouverte éclairée), tapis à pois, guirlande d'ampoules.
- * - Décor : estrade de Dédé au milieu, La Scène, la télé du Tunnel de la pub, rideaux rouges, gradins
- *   et public qui saute, tours de projecteurs et faisceaux, enseignes néon.
+ * - Commun aux 5 plateaux : cases épaisses (couleur du type, liseré encre, emoji), ruban du chemin
+ *   (teinté par zone, chevrons de sens), aiguillages (flèche sur poteau + voie ouverte éclairée), tapis,
+ *   guirlande, toile de fond, gradins et public, projecteurs, estrade de Dédé, pions, étoiles, dés,
+ *   pièces, confettis, étiquettes, caméra.
+ * - Thème : palette clair / sombre, décor fixe, mécanique animée (marée, cagnotte, Riton, télésièges).
  * - Animation : RIEN n'est simulé ici. Chaque image demande `getView()` (anim.ts : quel pion, quelle
- *   case, quelle fraction de saut à l'heure serveur) : télé et téléphones montrent la même chose.
- *   Sauts avec étirement / écrasement, poussière, dés qui roulent, pièces, confettis, étoiles.
- * - Caméra : vue d'ensemble (lancer, début de tour), suivi fluide du pion en vedette, travelling
- *   circulaire pendant les mini-jeux. Portrait : la caméra tourne d'un quart de tour.
+ *   case, quelle fraction de saut, quel moment de l'épilogue à l'heure serveur) : télé et téléphones
+ *   montrent la même chose.
+ * - Caméra : vue d'ensemble (lancer, début de tour, marée), suivi fluide du pion en vedette (ou de Riton
+ *   pendant sa ronde), travelling circulaire pendant les mini-jeux. Portrait : un quart de tour.
  * - Perfs : pixelRatio plafonné, une seule ombre portée calculée une fois (décor fixe), pions sans
- *   ombre portée (socle), particules en réserve fixe, pause onglet caché, dispose() complet.
+ *   ombre portée (socle), instanciation de tout ce qui se répète, particules en réserve fixe,
+ *   pause onglet caché, dispose() complet.
  */
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { BoardView } from '../anim'
 import { DICE_MS } from '../anim'
-import { CELLS, CELL_INFO, COLS, FORKS, LINKS, N_CELLS, ROWS, cellXY, type CellType } from '../board'
+import { CELL_INFO, isJump, linksOf, zoneOf, type BoardDef, type CellType } from '../board'
 import type { DpEvent } from '../types'
-import { makeBeam, makeCarpet, makeCellTop, makeDieFace, makeFloor, makeGlow, makeLabel, makeNeon, makePlate, makePubScreen, makeSparkle, shade } from './textures'
+import { makeBeam, makeCarpet, makeCellTop, makeDieFace, makeFloor, makeGlow, makeLabel, makeSparkle, shade } from './textures'
+import { THEMES } from './themes'
+import type { Palette, ThemeCtx, ThemeDef, ThemeRuntime } from './themes/types'
 
 export interface ScenePlayer {
   id: string
@@ -38,6 +43,8 @@ export interface SceneOptions {
   /** Télé : plus de détails (ombres fines, pixelRatio 2). */
   big?: boolean
   onLost: () => void
+  /** Plateau de la partie (fixe pendant la vie de la scène). */
+  board: BoardDef
 }
 
 type CamMode = 'overview' | 'follow' | 'show'
@@ -47,11 +54,10 @@ const TILE = 1.04
 const TILE_H = 0.3
 const TOP_Y = TILE_H + 0.02
 const FOV = 36
-const HALF_X = ((COLS - 1) / 2) * S
-const HALF_Z = ((ROWS - 1) / 2) * S
 const INK = '#1f1b2e'
 const GOLD = '#FFD23F'
 const CONFETTI = ['#EF476F', '#FFD166', '#06D6A0', '#4CC9F0', '#8B5CF6', '#FF8FA3']
+const BULBS = ['#FFD23F', '#FF8FA3', '#fff6e5']
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v))
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
@@ -66,29 +72,6 @@ const rand = (i: number) => {
   return x - Math.floor(x)
 }
 
-function cellPos(i: number, out = new THREE.Vector3()): THREE.Vector3 {
-  const { col, row } = cellXY(i)
-  return out.set((col - (COLS - 1) / 2) * S, 0, (row - (ROWS - 1) / 2) * S)
-}
-
-interface Palette {
-  bg: string
-  floorA: string
-  floorB: string
-  carpet: string
-  carpetDot: string
-  road: string
-  sky: string
-  ground: string
-  hemi: number
-  sun: number
-  beam: number
-  curtain: string
-}
-
-const LIGHT: Palette = { bg: '#fff0d6', floorA: '#ffc98a', floorB: '#ffb86b', carpet: '#fff8ec', carpetDot: '#ffe2b8', road: '#fff6e5', sky: '#ffffff', ground: '#ffd9a8', hemi: 1.25, sun: 1.55, beam: 0.09, curtain: '#d62839' }
-const DARK: Palette = { bg: '#15122b', floorA: '#221a4d', floorB: '#2b2160', carpet: '#33297a', carpetDot: '#42379a', road: '#fff6e5', sky: '#b9a8ff', ground: '#2a1f5c', hemi: 0.95, sun: 1.25, beam: 0.34, curtain: '#a4133c' }
-
 interface Pawn {
   id: string
   group: THREE.Group
@@ -97,7 +80,7 @@ interface Pawn {
   ring: THREE.Mesh
   cur: THREE.Vector3
   scale: number
-  /** Saut en cloche vers une case lointaine (carte « échange »). */
+  /** Saut en cloche vers une case lointaine (carte « échange », vague). */
   arc: { from: THREE.Vector3; to: THREE.Vector3; t0: number } | null
   landAt: number
   placed: boolean
@@ -121,7 +104,9 @@ interface Particle {
   age: number
   life: number
   kind: 'coin_in' | 'coin_out' | 'confetti' | 'dust'
+  /** coin_in : file vers la tête d'un pion, ou vers un point fixe (stand, sac de Riton). */
   target: Pawn | null
+  goal: THREE.Vector3 | null
   size: number
 }
 
@@ -133,13 +118,20 @@ interface FloatLabel {
   h: number
 }
 
+const LEAP_H: Record<'lift' | 'ice' | 'luge', number> = { lift: 2.6, ice: 1.1, luge: 3.9 }
+const LEAP_LABEL: Record<'lift' | 'ice' | 'luge', [string, string]> = { lift: ['🚡 Télésiège !', '#B5E61D'], ice: ['🧊 Glissade !', '#DFF3FF'], luge: ['🛷 Grande Luge !', '#ffffff'] }
+const LEAP_TRAIL: Record<'lift' | 'ice' | 'luge', string> = { lift: '#fff2c4', ice: '#dff3ff', luge: '#ffffff' }
+
 export class PartyScene {
   private host: HTMLElement
   private opts: SceneOptions
+  private board: BoardDef
+  private theme: ThemeDef
+  private rt: ThemeRuntime = {}
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
-  private camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 120)
-  private fitCam = new THREE.PerspectiveCamera(FOV, 1, 0.5, 120)
+  private camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 140)
+  private fitCam = new THREE.PerspectiveCamera(FOV, 1, 0.5, 140)
   private disposables: Array<{ dispose: () => void }> = []
   private cleanups: Array<() => void> = []
   private disposed = false
@@ -149,11 +141,16 @@ export class PartyScene {
   private width = 1
   private height = 1
   private portrait = false
-  private pal: Palette = LIGHT
+  private dark = false
+  private pal: Palette
   private ramp!: THREE.DataTexture
   private inkBack!: THREE.MeshBasicMaterial
   private inkFront!: THREE.MeshBasicMaterial
   private maxAniso = 1
+  private halfX: number
+  private halfZ: number
+  private zWall: number
+  private xWall: number
 
   // lumières / thème
   private hemi!: THREE.HemisphereLight
@@ -166,21 +163,23 @@ export class PartyScene {
   // plateau
   private tiles: Array<{ group: THREE.Group; bump: number }> = []
   private tops: THREE.Mesh[] = []
+  private links: Array<[number, number]> = []
   private roadIn!: THREE.InstancedMesh
   private forkLinks: number[][] = []
   private signs: Array<{ arrow: THREE.Group; ang: number; vel: number; way: number; wiggle: number }> = []
   private bulbs!: THREE.InstancedMesh
   private bulbTick = -1
+  private chaseUntil = 0
 
   // décor animé
   private crowdHeads!: THREE.InstancedMesh
   private crowdBodies!: THREE.InstancedMesh
   private crowd: Array<{ x: number; y: number; z: number; ph: number }> = []
-  private cheer = 0
+  private cheerK = 0
+  private olaUntil = 0
   private beams: Array<{ mesh: THREE.Mesh; src: THREE.Vector3; aim: THREE.Vector3; ph: number }> = []
   private spot!: THREE.Mesh
-  private neons: THREE.MeshBasicMaterial[] = []
-  private pubMat!: THREE.MeshBasicMaterial
+  private stage!: THREE.Group
   private dede!: THREE.Sprite
 
   // acteurs
@@ -194,6 +193,7 @@ export class PartyScene {
   private stars: Star[] = []
   private starGeo!: THREE.ExtrudeGeometry
   private starMat!: THREE.MeshToonMaterial
+  private starBeamGeo!: THREE.CylinderGeometry
   private glowTex!: THREE.CanvasTexture
   private sparkleTex!: THREE.CanvasTexture
   private beamTex!: THREE.CanvasTexture
@@ -208,6 +208,10 @@ export class PartyScene {
   private evCount = 0
   private hopKey = ''
   private hopCount = 0
+  private leapKey = ''
+  private trailT = 0
+  private epiKey = ''
+  private epiCount = 0
   private primed = false
 
   // caméra
@@ -219,7 +223,7 @@ export class PartyScene {
   private camDist = 30
   private overviewDist = 30
   private camSnap = true
-  private shake = 0
+  private shakeK = 0
   private tmp = new THREE.Vector3()
   private tmp2 = new THREE.Vector3()
   private tmpQ = new THREE.Quaternion()
@@ -229,6 +233,14 @@ export class PartyScene {
   constructor(host: HTMLElement, opts: SceneOptions) {
     this.host = host
     this.opts = opts
+    this.board = opts.board
+    this.theme = THEMES[opts.board.id] ?? THEMES.grand
+    this.halfX = ((this.board.cols - 1) / 2) * S
+    this.halfZ = ((this.board.rows - 1) / 2) * S
+    this.zWall = -this.halfZ - 6.3
+    this.xWall = this.halfX + 6.3
+    this.dark = document.documentElement.classList.contains('dark')
+    this.pal = this.dark ? this.theme.palette.dark : this.theme.palette.light
     const cores = navigator.hardwareConcurrency || 4
     const dpr = Math.min(window.devicePixelRatio || 1, opts.big ? 2 : cores <= 4 ? 1.5 : 2)
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
@@ -240,7 +252,7 @@ export class PartyScene {
     const el = this.renderer.domElement
     el.style.cssText = 'display:block;width:100%;height:100%;touch-action:pan-y;outline:none'
     el.setAttribute('role', 'img')
-    el.setAttribute('aria-label', 'Le Grand Plateau de Dédé en 3D')
+    el.setAttribute('aria-label', `${this.board.name} en 3D`)
     host.appendChild(el)
 
     this.ramp = this.track(new THREE.DataTexture(new Uint8Array([120, 185, 235, 255]), 4, 1, THREE.RedFormat))
@@ -251,16 +263,15 @@ export class PartyScene {
     this.glowTex = this.track(makeGlow())
     this.sparkleTex = this.track(makeSparkle())
     this.beamTex = this.track(makeBeam())
-    this.pal = document.documentElement.classList.contains('dark') ? DARK : LIGHT
 
     this.buildLights()
     this.buildGround()
     this.buildBoard()
     this.buildForks()
     this.buildCenter()
-    this.buildZones()
     this.buildStudio()
     this.buildActors()
+    this.rt = this.theme.build(this.ctx())
     this.applyTheme()
 
     this.resize()
@@ -268,9 +279,10 @@ export class PartyScene {
     ro.observe(host)
     this.cleanups.push(() => ro.disconnect())
     const mo = new MutationObserver(() => {
-      const next = document.documentElement.classList.contains('dark') ? DARK : LIGHT
-      if (next !== this.pal) {
-        this.pal = next
+      const dark = document.documentElement.classList.contains('dark')
+      if (dark !== this.dark) {
+        this.dark = dark
+        this.pal = dark ? this.theme.palette.dark : this.theme.palette.light
         this.applyTheme()
       }
     })
@@ -314,6 +326,56 @@ export class PartyScene {
     return new THREE.Sprite(this.track(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, ...opts })))
   }
 
+  /** Position monde d'un point de grille (colonne, ligne ; décimales permises). */
+  private grid(col: number, row: number, y = 0, out = new THREE.Vector3()): THREE.Vector3 {
+    return out.set((col - (this.board.cols - 1) / 2) * S, y, (row - (this.board.rows - 1) / 2) * S)
+  }
+
+  private cellPos(i: number, out = new THREE.Vector3()): THREE.Vector3 {
+    const n = this.board.cells.length
+    const [col, row] = this.board.xy[((i % n) + n) % n]
+    return this.grid(col, row, 0, out)
+  }
+
+  /** Ce que les thèmes peuvent utiliser. */
+  private ctx(): ThemeCtx {
+    return {
+      scene: this.scene,
+      board: this.board,
+      S,
+      TOP_Y,
+      halfX: this.halfX,
+      halfZ: this.halfZ,
+      zWall: this.zWall,
+      xWall: this.xWall,
+      cellPos: (i, out) => this.cellPos(i, out),
+      grid: (c, r, y, out) => this.grid(c, r, y, out),
+      toon: (c, e) => this.toon(c, e),
+      inked: (g, m, grow) => this.inked(g, m, grow),
+      sprite: (m, o) => this.sprite(m, o),
+      track: (x) => this.track(x),
+      tex: { glow: this.glowTex, sparkle: this.sparkleTex, beam: this.beamTex },
+      inkBack: this.inkBack,
+      inkFront: this.inkFront,
+      stage: this.stage,
+      dede: this.dede,
+      isDark: () => this.dark,
+      time: () => this.time,
+      label: (text, bg, at, order = 0) => this.label(text, bg, at, order),
+      confetti: (at, n) => this.confetti(at, n),
+      coinsFly: (from, to, n) => this.coinsFly(from, to, n),
+      puff: (at, color) => this.puff(at, color),
+      pawnHead: (id) => {
+        const pw = this.pawns.get(id)
+        return pw ? this.headOf(pw, new THREE.Vector3()) : null
+      },
+      shake: (k) => (this.shakeK = Math.max(this.shakeK, k)),
+      cheer: (k) => (this.cheerK = Math.max(this.cheerK, k)),
+      ola: (sec) => (this.olaUntil = this.time + sec),
+      chase: (sec) => (this.chaseUntil = this.time + sec),
+    }
+  }
+
   /* ------------------------------ construction ------------------------------ */
 
   private buildLights() {
@@ -325,10 +387,10 @@ export class PartyScene {
     const size = this.opts.big ? 2048 : 1024
     this.sun.shadow.mapSize.set(size, size)
     const cam = this.sun.shadow.camera
-    cam.left = -13
-    cam.right = 15
-    cam.top = 13
-    cam.bottom = -13
+    cam.left = -(this.halfX + 6.5)
+    cam.right = this.halfX + 8.5
+    cam.top = this.halfZ + 7.8
+    cam.bottom = -(this.halfZ + 7.8)
     cam.near = 2
     cam.far = 40
     this.sun.shadow.bias = -0.0015
@@ -346,10 +408,10 @@ export class PartyScene {
     this.scene.add(floor)
 
     // Tapis du plateau (bord encre + dessus à pois).
-    const w = HALF_X * 2 + 2.3
-    const d = HALF_Z * 2 + 2.3
+    const w = this.halfX * 2 + 2.3
+    const d = this.halfZ * 2 + 2.3
     const inkGeo = this.track(new RoundedBoxGeometry(w + 0.36, 0.2, d + 0.36, 4, 0.1))
-    const ink = new THREE.Mesh(inkGeo, this.track(new THREE.MeshBasicMaterial({ color: INK })))
+    const ink = new THREE.Mesh(inkGeo, this.inkFront)
     ink.position.y = -0.12
     ink.receiveShadow = true
     this.scene.add(ink)
@@ -380,55 +442,85 @@ export class PartyScene {
     this.scene.add(this.bulbs)
   }
 
+  /** Teinte du ruban d'une liaison : celle de la zone d'arrivée si elle en a une. */
+  private roadColor(k: number): string {
+    const [i, j] = this.links[k]
+    return zoneOf(this.board, j)?.road ?? zoneOf(this.board, i)?.road ?? this.pal.road
+  }
+
   private buildBoard() {
-    // Tracé : ruban encre + ruban clair (la voie ouverte des aiguillages s'allume).
+    const b = this.board
+    const n = b.cells.length
+    // Tracé : ruban encre + ruban clair (pas de ruban pour les sauts) ; la voie ouverte des aiguillages s'allume.
+    this.links = linksOf(b).filter(([i, j]) => !isJump(b, i, j))
     const inkGeo = this.track(new THREE.BoxGeometry(S, 0.06, 0.52))
     const inGeo = this.track(new THREE.BoxGeometry(S, 0.06, 0.26))
-    const roadInk = new THREE.InstancedMesh(inkGeo, this.track(new THREE.MeshBasicMaterial({ color: INK })), LINKS.length)
-    this.roadIn = new THREE.InstancedMesh(inGeo, this.track(new THREE.MeshBasicMaterial({ color: '#ffffff' })), LINKS.length)
+    const roadInk = new THREE.InstancedMesh(inkGeo, this.inkFront, this.links.length)
+    this.roadIn = new THREE.InstancedMesh(inGeo, this.track(new THREE.MeshBasicMaterial({ color: '#ffffff' })), this.links.length)
+    // Chevrons de sens : un triangle toutes les 3 liaisons, posé entre deux cases, pointe dans le sens de marche.
+    const tri = (len: number, half: number) => {
+      const sh = new THREE.Shape()
+      sh.moveTo(len * 0.55, 0)
+      sh.lineTo(-len * 0.45, half)
+      sh.lineTo(-len * 0.45, -half)
+      sh.closePath()
+      const g = this.track(new THREE.ShapeGeometry(sh))
+      g.rotateX(-Math.PI / 2)
+      return g
+    }
+    const chev = this.links.map((_, k) => k).filter((k) => k % 3 === 1)
+    const chevInk = new THREE.InstancedMesh(tri(0.36, 0.2), this.inkFront, chev.length)
+    const chevIn = new THREE.InstancedMesh(tri(0.22, 0.12), this.track(new THREE.MeshBasicMaterial({ color: '#FFD166' })), chev.length)
     const a = new THREE.Vector3()
-    const b = new THREE.Vector3()
+    const c = new THREE.Vector3()
     const q = new THREE.Quaternion()
     const one = new THREE.Vector3(1, 1, 1)
-    LINKS.forEach(([i, j], k) => {
-      cellPos(i, a)
-      cellPos(j, b)
-      const mid = a.clone().add(b).multiplyScalar(0.5)
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.atan2(b.z - a.z, b.x - a.x))
+    const up = new THREE.Vector3(0, 1, 0)
+    this.links.forEach(([i, j], k) => {
+      this.cellPos(i, a)
+      this.cellPos(j, c)
+      const mid = a.clone().add(c).multiplyScalar(0.5)
+      q.setFromAxisAngle(up, -Math.atan2(c.z - a.z, c.x - a.x))
       this.tmpM.compose(mid.clone().setY(0.05), q, one)
       roadInk.setMatrixAt(k, this.tmpM)
       this.tmpM.compose(mid.clone().setY(0.065), q, one)
       this.roadIn.setMatrixAt(k, this.tmpM)
-      this.roadIn.setColorAt(k, this.tmpC.set(this.pal.road))
+      this.roadIn.setColorAt(k, this.tmpC.set(this.roadColor(k)))
+      const ci = chev.indexOf(k)
+      if (ci >= 0) {
+        this.tmpM.compose(mid.clone().setY(0.212), q, one)
+        chevInk.setMatrixAt(ci, this.tmpM)
+        this.tmpM.compose(mid.clone().setY(0.218), q, one)
+        chevIn.setMatrixAt(ci, this.tmpM)
+      }
     })
-    this.forkLinks = FORKS.map((f) => f.ways.map((wcell) => LINKS.findIndex(([i, j]) => i === f.cell && j === wcell)))
-    roadInk.frustumCulled = false
-    this.roadIn.frustumCulled = false
-    this.scene.add(roadInk, this.roadIn)
+    this.forkLinks = b.forks.map((f) => f.ways.map((wcell) => this.links.findIndex(([i, j]) => i === f.cell && j === wcell)))
+    for (const m of [roadInk, this.roadIn, chevInk, chevIn]) m.frustumCulled = false
+    this.scene.add(roadInk, this.roadIn, chevInk, chevIn)
 
     // Cases : socle encre (instancié), corps coloré arrondi, dessus illustré.
     const slabGeo = this.track(new RoundedBoxGeometry(TILE + 0.16, 0.2, TILE + 0.16, 3, 0.09))
-    const slabs = new THREE.InstancedMesh(slabGeo, this.track(new THREE.MeshBasicMaterial({ color: INK })), N_CELLS)
+    const slabs = new THREE.InstancedMesh(slabGeo, this.inkFront, n)
     slabs.castShadow = true
     slabs.frustumCulled = false
     const bodyGeo = this.track(new RoundedBoxGeometry(TILE, TILE_H, TILE, 3, 0.1))
     const topGeo = this.track(new THREE.PlaneGeometry(TILE * 0.94, TILE * 0.94))
     topGeo.rotateX(-Math.PI / 2)
-    const types = Object.keys(CELL_INFO) as CellType[]
+    const types = (Object.keys(CELL_INFO) as CellType[]).filter((t) => b.cells.includes(t))
     const bodyMat = Object.fromEntries(types.map((t) => [t, this.toon(shade(CELL_INFO[t].color, -0.22))])) as unknown as Record<CellType, THREE.Material>
     const topMat = Object.fromEntries(
       types.map((t) => [t, this.track(new THREE.MeshToonMaterial({ map: this.track(makeCellTop(t, this.maxAniso)), gradientMap: this.ramp, transparent: true, alphaTest: 0.4 }))]),
     ) as unknown as Record<CellType, THREE.Material>
-    for (let i = 0; i < N_CELLS; i++) {
-      const p = cellPos(i)
+    for (let i = 0; i < n; i++) {
+      const p = this.cellPos(i)
       this.tmpM.makeTranslation(p.x, 0.1, p.z)
       slabs.setMatrixAt(i, this.tmpM)
       const g = new THREE.Group()
       g.position.copy(p)
-      const body = new THREE.Mesh(bodyGeo, bodyMat[CELLS[i]])
+      const body = new THREE.Mesh(bodyGeo, bodyMat[b.cells[i]])
       body.position.y = TILE_H / 2 + 0.02
       body.castShadow = true
-      const top = new THREE.Mesh(topGeo, topMat[CELLS[i]])
+      const top = new THREE.Mesh(topGeo, topMat[b.cells[i]])
       top.position.y = TOP_Y + 0.006
       this.tops.push(top)
       g.add(body, top)
@@ -439,6 +531,7 @@ export class PartyScene {
   }
 
   private buildForks() {
+    if (!this.board.forks.length) return
     const shape = new THREE.Shape()
     shape.moveTo(-0.5, -0.17)
     shape.lineTo(0.05, -0.17)
@@ -452,13 +545,15 @@ export class PartyScene {
     geo.translate(0, 0, -0.07)
     geo.rotateX(-Math.PI / 2)
     const mat = this.toon('#FFD166', { emissive: '#7a4a00', emissiveIntensity: 0.35 })
+    // Aiguillage de la marée : flèche bleue (elle suit la mer, pas les pions).
+    const tideMat = this.toon('#4CC9F0', { emissive: '#0b4f6c', emissiveIntensity: 0.35 })
     const poleGeo = this.track(new THREE.CylinderGeometry(0.07, 0.09, 1.4, 8))
     const poleMat = this.toon('#fff6e5')
     const footGeo = this.track(new THREE.CylinderGeometry(0.26, 0.3, 0.12, 14))
     const footMat = this.toon('#EF476F')
-    FORKS.forEach((f) => {
-      const o = cellPos(f.cell)
-      const d = f.ways.map((c) => cellPos(c).sub(o).normalize())
+    this.board.forks.forEach((f) => {
+      const o = this.cellPos(f.cell)
+      const d = f.ways.map((c) => this.cellPos(c).sub(o).normalize())
       const at = o.clone().add(d[0].clone().add(d[1]).multiplyScalar(S * 0.5))
       const g = new THREE.Group()
       g.position.copy(at)
@@ -466,7 +561,7 @@ export class PartyScene {
       pole.position.y = 0.7
       const foot = this.inked(footGeo, footMat, 1.12)
       foot.position.y = 0.06
-      const arrow = this.inked(geo, mat, 1.14)
+      const arrow = this.inked(geo, f.mode === 'tide' ? tideMat : mat, 1.14)
       arrow.position.y = 1.5
       g.add(foot, pole, arrow)
       this.scene.add(g)
@@ -474,34 +569,39 @@ export class PartyScene {
     })
   }
 
-  /** L'estrade de Dédé, au milieu du plateau. */
+  /** L'estrade de Dédé (placée par `board.dede`) ; un thème sans `stageColors` la construit lui-même. */
   private buildCenter() {
-    const c = new THREE.Vector3(-0.9, 0, 1.25)
+    const { col, row, scale } = this.board.dede
     const g = new THREE.Group()
-    g.position.copy(c)
-    const t1 = this.inked(this.track(new THREE.CylinderGeometry(1.75, 1.85, 0.28, 36)), this.toon('#8B5CF6'), 1.04)
-    t1.position.y = 0.14
-    const t2 = this.inked(this.track(new THREE.CylinderGeometry(1.2, 1.28, 0.24, 32)), this.toon('#FF8FA3'), 1.05)
-    t2.position.y = 0.4
-    const t3 = this.inked(this.track(new THREE.CylinderGeometry(0.7, 0.76, 0.2, 28)), this.toon('#FFD166'), 1.07)
-    t3.position.y = 0.62
-    g.add(t1, t2, t3)
-    // Petites étoiles dorées posées sur la première marche.
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.4
-      const s = this.sprite(this.sparkleTex, { color: '#FFD23F' })
-      s.scale.setScalar(0.42)
-      s.position.set(Math.cos(a) * 1.48, 0.5, Math.sin(a) * 1.48)
-      g.add(s)
+    this.grid(col, row, 0, g.position)
+    g.scale.setScalar(scale)
+    const cols = this.theme.stageColors
+    if (cols) {
+      const t1 = this.inked(this.track(new THREE.CylinderGeometry(1.75, 1.85, 0.28, 36)), this.toon(cols[0]), 1.04)
+      t1.position.y = 0.14
+      const t2 = this.inked(this.track(new THREE.CylinderGeometry(1.2, 1.28, 0.24, 32)), this.toon(cols[1]), 1.05)
+      t2.position.y = 0.4
+      const t3 = this.inked(this.track(new THREE.CylinderGeometry(0.7, 0.76, 0.2, 28)), this.toon(cols[2]), 1.07)
+      t3.position.y = 0.62
+      g.add(t1, t2, t3)
+      // Petites étoiles dorées posées sur la première marche.
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.4
+        const s = this.sprite(this.sparkleTex, { color: GOLD })
+        s.scale.setScalar(0.42)
+        s.position.set(Math.cos(a) * 1.48, 0.5, Math.sin(a) * 1.48)
+        g.add(s)
+      }
     }
     this.scene.add(g)
+    this.stage = g
     const mat = this.track(new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.08, color: '#ffffff' }))
     this.dede = new THREE.Sprite(mat)
     this.dede.center.set(0.5, 0.04)
     this.dede.scale.setScalar(2.3)
-    this.dede.position.set(c.x, 0.7, c.z)
+    this.dede.position.set(0, 0.7, 0)
     this.dede.visible = false
-    this.scene.add(this.dede)
+    g.add(this.dede)
     this.loadTexture([this.opts.dedeUrl, this.opts.dedeFallback], (t) => {
       mat.map = t
       mat.needsUpdate = true
@@ -509,58 +609,9 @@ export class PartyScene {
     })
   }
 
-  /** La Scène (détour doré) et la télé du Tunnel de la pub (détour piégé). */
-  private buildZones() {
-    // La Scène : petit podium rond, deux pans de rideau, panneau.
-    const sc = new THREE.Vector3((5 - 5) * S, 0, (1 - 4) * S)
-    const stage = this.inked(this.track(new THREE.CylinderGeometry(0.5, 0.56, 0.5, 20)), this.toon('#EF476F'), 1.08)
-    stage.position.set(sc.x, 0.25, sc.z)
-    this.scene.add(stage)
-    const starTop = this.sprite(this.sparkleTex, { color: GOLD })
-    starTop.scale.setScalar(0.9)
-    starTop.position.set(sc.x, 1.0, sc.z)
-    this.scene.add(starTop)
-    const p1 = makePlate('🎭 La Scène', '#FFD166')
-    const plate1 = this.sprite(this.track(p1.tex), { depthTest: false })
-    plate1.scale.set(0.55 * p1.aspect, 0.55, 1)
-    plate1.position.set(sc.x + 0.5, 1.5, sc.z)
-    plate1.renderOrder = 5
-    this.scene.add(plate1)
-
-    // La télé : coffre violet, écran qui clignote, antennes, pieds.
-    const tv = new THREE.Group()
-    tv.position.set((9 - 5) * S, 0, (4.5 - 4) * S)
-    tv.rotation.y = -Math.PI / 4
-    const box = this.inked(this.track(new RoundedBoxGeometry(1.25, 0.95, 0.7, 3, 0.12)), this.toon('#8B5CF6'), 1.06)
-    box.position.y = 0.72
-    this.pubMat = this.track(new THREE.MeshBasicMaterial({ map: this.track(makePubScreen()) }))
-    const screen = new THREE.Mesh(this.track(new THREE.PlaneGeometry(0.95, 0.68)), this.pubMat)
-    screen.position.set(0, 0.74, 0.36)
-    const legGeo = this.track(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 6))
-    const dark = this.toon('#2b2545')
-    for (const x of [-0.4, 0.4]) {
-      const leg = new THREE.Mesh(legGeo, dark)
-      leg.position.set(x, 0.14, 0)
-      tv.add(leg)
-      const ant = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.025, 0.025, 0.7, 5)), dark)
-      ant.position.set(x * 0.45, 1.5, 0)
-      ant.rotation.z = -x * 1.1
-      tv.add(ant)
-    }
-    tv.add(box, screen)
-    this.scene.add(tv)
-    const p2 = makePlate('📺 Tunnel de la pub', '#FF8FA3')
-    const plate2 = this.sprite(this.track(p2.tex), { depthTest: false })
-    plate2.scale.set(0.58 * p2.aspect, 0.58, 1)
-    plate2.position.set(tv.position.x, 2.25, tv.position.z)
-    plate2.renderOrder = 5
-    this.scene.add(plate2)
-  }
-
-  /** Rideaux, gradins et public, tours de projecteurs, enseignes néon (côtés lointains de la caméra). */
+  /** Toile de fond (rideaux drapés), gradins et public, tours de projecteurs (côtés lointains de la caméra). */
   private buildStudio() {
-    const zWall = -HALF_Z - 6.3
-    const xWall = HALF_X + 6.3
+    const { zWall, xWall, halfX, halfZ } = this
     this.curtainMat = this.toon('#ffffff', { side: THREE.DoubleSide })
     const curtain = (len: number) => {
       const geo = this.track(new THREE.PlaneGeometry(len, 8, Math.round(len * 5), 1))
@@ -569,40 +620,14 @@ export class PartyScene {
       geo.computeVertexNormals()
       return new THREE.Mesh(geo, this.curtainMat)
     }
-    const lenA = xWall + HALF_X + 7
+    const lenA = xWall + halfX + 7
     const wallA = curtain(lenA)
     wallA.position.set(xWall - lenA / 2, 3.8, zWall)
-    const lenB = HALF_Z + 6 - zWall
+    const lenB = halfZ + 6 - zWall
     const wallB = curtain(lenB)
     wallB.rotation.y = -Math.PI / 2
     wallB.position.set(xWall, 3.8, zWall + lenB / 2)
     this.scene.add(wallA, wallB)
-    const valMat = this.toon('#6a0f24')
-    const goldMat = this.toon(GOLD)
-    const valA = new THREE.Mesh(this.track(new THREE.BoxGeometry(lenA, 1.1, 0.7)), valMat)
-    valA.position.set(wallA.position.x, 7.6, zWall + 0.2)
-    const trimA = new THREE.Mesh(this.track(new THREE.BoxGeometry(lenA, 0.16, 0.76)), goldMat)
-    trimA.position.set(wallA.position.x, 7.0, zWall + 0.2)
-    const valB = new THREE.Mesh(this.track(new THREE.BoxGeometry(0.7, 1.1, lenB)), valMat)
-    valB.position.set(xWall - 0.2, 7.6, wallB.position.z)
-    const trimB = new THREE.Mesh(this.track(new THREE.BoxGeometry(0.76, 0.16, lenB)), goldMat)
-    trimB.position.set(xWall - 0.2, 7.0, wallB.position.z)
-    this.scene.add(valA, trimA, valB, trimB)
-
-    // Enseignes néon sur les deux rideaux.
-    const neonTex = this.track(makeNeon())
-    const neonGeo = this.track(new THREE.PlaneGeometry(8.6, 2.7))
-    for (const k of [0, 1]) {
-      const m = this.track(new THREE.MeshBasicMaterial({ map: neonTex, transparent: true }))
-      const mesh = new THREE.Mesh(neonGeo, m)
-      if (k === 0) mesh.position.set(0, 4.9, zWall + 0.45)
-      else {
-        mesh.rotation.y = -Math.PI / 2
-        mesh.position.set(xWall - 0.45, 4.9, 0)
-      }
-      this.neons.push(m)
-      this.scene.add(mesh)
-    }
 
     // Gradins (3 marches) et public : têtes + corps instanciés qui sautillent.
     const stepMat = this.toon('#5b3fa8')
@@ -610,17 +635,17 @@ export class PartyScene {
     const seats: Array<{ x: number; y: number; z: number }> = []
     for (let r = 0; r < 3; r++) {
       const h = 0.5 + r * 0.5
-      const za = -HALF_Z - 2.5 - r * 1.05
-      const a = new THREE.Mesh(this.track(new THREE.BoxGeometry(HALF_X * 2 + 1, h, 1.05)), r % 2 === 0 ? stepMat : stepMat2)
+      const za = -halfZ - 2.5 - r * 1.05
+      const a = new THREE.Mesh(this.track(new THREE.BoxGeometry(halfX * 2 + 1, h, 1.05)), r % 2 === 0 ? stepMat : stepMat2)
       a.position.set(0, h / 2 - 0.2, za)
       a.castShadow = true
-      const xb = HALF_X + 2.5 + r * 1.05
-      const b = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.05, h, HALF_Z * 2 + 1)), r % 2 === 0 ? stepMat : stepMat2)
+      const xb = halfX + 2.5 + r * 1.05
+      const b = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.05, h, halfZ * 2 + 1)), r % 2 === 0 ? stepMat : stepMat2)
       b.position.set(xb, h / 2 - 0.2, 0)
       b.castShadow = true
       this.scene.add(a, b)
-      for (let x = -HALF_X + (r % 2) * 0.45; x <= HALF_X; x += 0.92) seats.push({ x, y: h - 0.2, z: za })
-      for (let z = -HALF_Z + (r % 2) * 0.45; z <= HALF_Z; z += 0.92) seats.push({ x: xb, y: h - 0.2, z })
+      for (let x = -halfX + (r % 2) * 0.45; x <= halfX; x += 0.92) seats.push({ x, y: h - 0.2, z: za })
+      for (let z = -halfZ + (r % 2) * 0.45; z <= halfZ; z += 0.92) seats.push({ x: xb, y: h - 0.2, z })
     }
     const headGeo = this.track(new THREE.SphereGeometry(0.27, 12, 9))
     const bodyGeo = this.track(new THREE.CylinderGeometry(0.2, 0.3, 0.5, 10))
@@ -644,11 +669,11 @@ export class PartyScene {
     const beamGeo = this.track(new THREE.CylinderGeometry(0.16, 1.5, 1, 18, 1, true))
     beamGeo.translate(0, -0.5, 0)
     const spots: Array<[number, number, string]> = [
-      [-HALF_X - 2.2, zWall + 1.3, '#FFD166'],
-      [HALF_X * 0.25, zWall + 1.0, '#FF8FA3'],
+      [-halfX - 2.2, zWall + 1.3, '#FFD166'],
+      [halfX * 0.25, zWall + 1.0, '#FF8FA3'],
       [xWall - 1.2, zWall + 1.3, '#4CC9F0'],
-      [xWall - 1.0, HALF_Z * 0.3, '#FFD166'],
-      [xWall - 1.3, HALF_Z + 3.4, '#8B5CF6'],
+      [xWall - 1.0, halfZ * 0.3, '#FFD166'],
+      [xWall - 1.3, halfZ + 3.4, '#8B5CF6'],
     ]
     spots.forEach(([x, z, col], i) => {
       const tower = new THREE.Mesh(towerGeo, towerMat)
@@ -692,6 +717,7 @@ export class PartyScene {
     this.starGeo = this.track(new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 2 }))
     this.starGeo.center()
     this.starMat = this.toon(GOLD, { emissive: '#c77700', emissiveIntensity: 0.45 })
+    this.starBeamGeo = this.track(new THREE.CylinderGeometry(0.5, 0.42, 5.5, 16, 1, true))
 
     // Dés (jusqu'à 3) : faces +x, −x, +y, −y, +z, −z = 2, 5, 3, 4, 1, 6.
     const faces = [2, 5, 3, 4, 1, 6].map((v) => this.track(new THREE.MeshToonMaterial({ map: this.track(makeDieFace(v)), gradientMap: this.ramp })))
@@ -710,10 +736,9 @@ export class PartyScene {
     const coinMat = this.toon(GOLD, { emissive: '#c77700', emissiveIntensity: 0.5 })
     const coinInk = this.track(new THREE.CylinderGeometry(0.19, 0.19, 0.035, 14))
     coinInk.rotateX(Math.PI / 2)
-    const inkFlat = this.track(new THREE.MeshBasicMaterial({ color: INK }))
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 32; i++) {
       const g = new THREE.Group()
-      g.add(new THREE.Mesh(coinGeo, coinMat), new THREE.Mesh(coinInk, inkFlat))
+      g.add(new THREE.Mesh(coinGeo, coinMat), new THREE.Mesh(coinInk, this.inkFront))
       g.visible = false
       this.pool.coin.push(g)
       this.scene.add(g)
@@ -726,7 +751,7 @@ export class PartyScene {
       this.pool.confetti.push(m)
       this.scene.add(m)
     }
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 26; i++) {
       const s = this.sprite(this.glowTex, { color: '#fff6e5', opacity: 0.9 })
       s.visible = false
       this.pool.dust.push(s)
@@ -752,7 +777,11 @@ export class PartyScene {
     oldCarpet?.dispose()
     this.curtainMat.color.set(p.curtain)
     for (const m of this.beamMats) m.opacity = p.beam
+    // Ruban : couleurs de base (les voies des aiguillages sont recolorées à la prochaine image).
+    this.links.forEach((_, k) => this.roadIn.setColorAt(k, this.tmpC.set(this.roadColor(k))))
+    if (this.roadIn.instanceColor) this.roadIn.instanceColor.needsUpdate = true
     for (const s of this.signs) s.way = -1
+    this.rt.applyTheme?.(this.dark)
   }
 
   private setFog() {
@@ -868,8 +897,8 @@ export class PartyScene {
     const cam = this.fitCam
     cam.aspect = this.camera.aspect
     cam.updateProjectionMatrix()
-    const mx = HALF_X + 1.25
-    const mz = HALF_Z + 1.25
+    const mx = this.halfX + 1.25
+    const mz = this.halfZ + 1.25
     const pts: THREE.Vector3[] = []
     for (const x of [-mx, mx]) for (const z of [-mz, mz]) for (const y of [0, 1.7]) pts.push(new THREE.Vector3(x, y, z))
     const target = new THREE.Vector3(0, 0.3, 0)
@@ -910,6 +939,7 @@ export class PartyScene {
     this.updateDice(view, dt)
     this.updateFx(dt)
     this.updateDecor(view, dt)
+    this.rt.update?.(view, dt)
     this.updateCamera(view, dt)
     this.primed = true
     this.renderer.render(this.scene, this.camera)
@@ -926,16 +956,18 @@ export class PartyScene {
     // Aiguillages : flèche (ressort) + voie ouverte allumée.
     let colors = false
     this.signs.forEach((sg, k) => {
-      const f = FORKS[k]
+      const f = this.board.forks[k]
       const way = view.snap.sw?.[k] === 1 ? 1 : 0
-      const o = cellPos(f.cell, this.tmp)
-      const d = cellPos(f.ways[way], this.tmp2).sub(o)
+      const o = this.cellPos(f.cell, this.tmp)
+      const d = this.cellPos(f.ways[way], this.tmp2).sub(o)
       const goal = -Math.atan2(d.z, d.x)
       if (sg.way !== way) {
         if (sg.way === -1) sg.ang = goal
         else if (this.primed) sg.wiggle = 1
         sg.way = way
-        this.forkLinks[k].forEach((link, w) => this.roadIn.setColorAt(link, this.tmpC.set(w === way ? '#FFD23F' : '#8f88a8')))
+        this.forkLinks[k].forEach((link, w) => {
+          if (link >= 0) this.roadIn.setColorAt(link, this.tmpC.set(w === way ? '#FFD23F' : '#8f88a8'))
+        })
         colors = true
       }
       // Ressort amorti vers l'angle voulu (chemin le plus court).
@@ -963,9 +995,8 @@ export class PartyScene {
     spin.add(mesh, hull)
     const glow = this.sprite(this.glowTex, { color: '#ffe066', blending: THREE.AdditiveBlending, opacity: 0.75 })
     glow.scale.setScalar(2.3)
-    const beamGeo = this.track(new THREE.CylinderGeometry(0.5, 0.42, 5.5, 16, 1, true))
     const beamMat = this.track(new THREE.MeshBasicMaterial({ map: this.beamTex, color: '#ffe066', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, opacity: 0.4 }))
-    const beam = new THREE.Mesh(beamGeo, beamMat)
+    const beam = new THREE.Mesh(this.starBeamGeo, beamMat)
     beam.rotation.x = Math.PI
     beam.renderOrder = 3
     const sparkles: THREE.Sprite[] = []
@@ -977,7 +1008,7 @@ export class PartyScene {
     group.add(glow, spin)
     this.scene.add(group, beam)
     const st: Star = { group, mesh: spin, glow, beam, sparkles, cell, move: null }
-    const p = cellPos(cell)
+    const p = this.cellPos(cell)
     group.position.set(p.x, 1.55, p.z)
     return st
   }
@@ -996,7 +1027,7 @@ export class PartyScene {
         if (this.primed) st.move = { t0: this.time, from: st.group.position.clone(), via: mover ? mover.group.position.clone().setY(1.2) : null }
         st.cell = cell
       }
-      const home = cellPos(cell, this.tmp)
+      const home = this.cellPos(cell, this.tmp)
       const bob = 1.55 + Math.sin(this.time * 2.2 + i * 2.1) * 0.12
       let scale = 1
       let beamK = 1
@@ -1032,7 +1063,7 @@ export class PartyScene {
         s.scale.setScalar(scale * (0.2 + 0.16 * Math.abs(Math.sin(this.time * 5 + k * 2))))
       })
       st.beam.position.set(st.group.position.x, TOP_Y + 2.75, st.group.position.z)
-      ;(st.beam.material as THREE.MeshBasicMaterial).opacity = (this.pal === DARK ? 0.42 : 0.2) * beamK * (0.85 + 0.15 * Math.sin(this.time * 3 + i))
+      ;(st.beam.material as THREE.MeshBasicMaterial).opacity = (this.dark ? 0.42 : 0.2) * beamK * (0.85 + 0.15 * Math.sin(this.time * 3 + i))
     })
   }
 
@@ -1056,7 +1087,7 @@ export class PartyScene {
     }
     for (const [cell, ids] of groups) {
       const n = ids.length
-      const base = cellPos(cell, this.tmp)
+      const base = this.cellPos(cell, this.tmp)
       const r = n === 1 ? 0 : n === 2 ? 0.27 : n <= 4 ? 0.31 : 0.36
       const scale = n === 1 ? 1 : n === 2 ? 0.82 : n <= 4 ? 0.7 : 0.58
       ids.forEach((id, k) => {
@@ -1091,24 +1122,38 @@ export class PartyScene {
         if (since < 0.4) squash += 0.42 * Math.exp(-since * 11) * Math.cos(since * 22)
         const idle = isStar ? 0 : Math.sin(this.time * 2.3 + k * 1.3 + cell) * 0.025
         pw.scale = lerp(pw.scale, scale * (isStar ? 1.15 : 1), 1 - Math.exp(-dt * 10))
-        this.poseePawn(pw, pw.cur.x, pw.cur.y + y, pw.cur.z, squash + idle, isStar)
+        this.poseePawn(pw, pw.cur.x, pw.cur.y + y, pw.cur.z, squash + idle, isStar, 0)
       })
     }
     // Le pion en vedette, en plein saut : position exacte donnée par l'horloge.
     if (m && flying) {
       const pw = this.pawns.get(m.id)
       if (pw) {
-        const a = cellPos(m.cell, this.tmp)
+        const a = this.cellPos(m.cell, this.tmp)
         let x = a.x
         let z = a.z
         let y = 0
         let squash = 0
+        let spin = 0
         if (m.rolling) {
           // Pendant les dés : le pion trépigne.
           squash = Math.sin(this.time * 14) * 0.07
         } else if (m.next !== null) {
-          const b = cellPos(m.next, this.tmp2)
+          const b = this.cellPos(m.next, this.tmp2)
           const f = m.frac
+          const leap = m.leap
+          if (leap) {
+            // Télésiège, verglas, Grande Luge : étiquette au décollage, grande cloche, traînée.
+            const key = `${m.idx}:${m.id}:${m.hops}`
+            if (key !== this.leapKey) {
+              this.leapKey = key
+              if (this.primed) {
+                const [txt, bg] = LEAP_LABEL[leap]
+                this.label(txt, bg, this.headOf(pw, new THREE.Vector3()), 0)
+                this.cheerK = Math.max(this.cheerK, leap === 'ice' ? 0.4 : 0.8)
+              }
+            }
+          }
           // 0-18 % : s'accroupit ; ensuite : bond en cloche, étiré.
           if (f < 0.18) squash = 0.34 * Math.sin((f / 0.18) * Math.PI * 0.5)
           else {
@@ -1116,8 +1161,13 @@ export class PartyScene {
             const e = easeInOut(g)
             x = lerp(a.x, b.x, e)
             z = lerp(a.z, b.z, e)
-            y = Math.sin(g * Math.PI) * 0.85
+            y = Math.sin(g * Math.PI) * (leap ? LEAP_H[leap] : 0.85)
             squash = 0.34 * (1 - Math.min(1, g * 5)) - 0.3 * Math.sin(g * Math.PI)
+            if (leap === 'ice') spin = g * Math.PI * 4
+            if (leap && this.time - this.trailT > 0.035) {
+              this.trailT = this.time
+              this.spawn('dust', this.tmp2.set(x, TOP_Y + y + 0.3, z).clone(), new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.2, (Math.random() - 0.5) * 0.6), 0.55, leap === 'luge' ? 0.42 : 0.32, null, LEAP_TRAIL[leap])
+            }
           }
         }
         const since = (now - pw.landAt) / 1000
@@ -1126,15 +1176,16 @@ export class PartyScene {
         pw.placed = true
         pw.arc = null
         pw.scale = lerp(pw.scale, 1.18, 1 - Math.exp(-dt * 10))
-        this.poseePawn(pw, x, TOP_Y + y, z, squash, true)
+        this.poseePawn(pw, x, TOP_Y + y, z, squash, true, spin)
       }
     }
   }
 
-  private poseePawn(pw: Pawn, x: number, y: number, z: number, squash: number, star: boolean) {
+  private poseePawn(pw: Pawn, x: number, y: number, z: number, squash: number, star: boolean, spin: number) {
     pw.group.position.set(x, y, z)
     const w = 1.55 * pw.scale
     pw.sprite.scale.set(w * (1 + squash * 0.55), w * (1 - squash * 0.55), 1)
+    pw.sprite.material.rotation = spin
     pw.base.scale.set(pw.scale * (1 + squash * 0.3), pw.scale, pw.scale * (1 + squash * 0.3))
     pw.base.parent!.children[0].scale.copy(pw.base.scale)
     pw.ring.visible = star
@@ -1157,13 +1208,30 @@ export class PartyScene {
       this.hopKey = key
       this.hopCount = this.primed ? 0 : (m?.hops ?? 0)
     }
+    // Épilogue (marée, ronde de Riton) : ses propres évènements.
+    const epi = view.epi
+    const ek = epi ? `${epi.data.t}:${JSON.stringify(epi.data.after.coins)}` : ''
+    if (ek !== this.epiKey) {
+      this.epiKey = ek
+      this.epiCount = this.primed ? 0 : (epi?.events.length ?? 0)
+      if (epi && this.primed && epi.data.t === 'tide' && epi.data.tide === 1) this.olaUntil = this.time + 2.5
+    }
+    if (epi && epi.events.length > this.epiCount) {
+      const fresh = epi.events.slice(0, epi.events.length - this.epiCount).reverse()
+      this.epiCount = epi.events.length
+      fresh.forEach((e, i) => {
+        if (this.rt.onEpiEvent?.(e, i)) return
+        const pw = e.id ? this.pawns.get(e.id) : undefined
+        if (pw) this.playEvent(e, pw, i)
+      })
+    }
     if (!m) return
     const pw = this.pawns.get(m.id)
     if (!pw) return
     if (m.hops > this.hopCount) {
       this.hopCount = m.hops
       pw.landAt = now
-      const at = cellPos(m.cell, this.tmp)
+      const at = this.cellPos(m.cell, this.tmp)
       this.puff(at.clone().setY(TOP_Y))
       const tile = this.tiles[m.cell]
       if (tile) tile.bump = 1
@@ -1171,23 +1239,30 @@ export class PartyScene {
     if (view.events.length > this.evCount) {
       const fresh = view.events.slice(0, view.events.length - this.evCount).reverse()
       this.evCount = view.events.length
-      fresh.forEach((e, i) => this.playEvent(e, pw, i))
+      fresh.forEach((e, i) => {
+        if (this.rt.onEvent?.(e, m.id, i)) return
+        this.playEvent(e, pw, i)
+      })
     }
   }
 
   private playEvent(e: DpEvent, pw: Pawn, order: number) {
     const head = this.headOf(pw, new THREE.Vector3())
     const gain = e.t === 'card' ? (e.gain ?? 0) : (e.d ?? 0)
+    if (e.t === 'tp') return // étiquette déjà posée au décollage
     if (e.t === 'star') {
       this.confetti(head, 70)
       this.coins(pw, -Math.min(12, Math.round((e.cost ?? 20) / 3)))
       this.label('⭐ +1', '#FFD23F', head, order)
-      this.cheer = 1
-      this.shake = 0.5
+      this.cheerK = 1
+      this.shakeK = 0.5
       return
     }
     if (e.t === 'star_poor') return this.label(`😬 ${e.need} 🪙 ?`, '#ffffff', head, order)
-    if (e.t === 'fork') return this.label(e.way === 1 ? '🔀 Détour !' : '🔀 Tout droit', '#FFD166', head, order)
+    if (e.t === 'fork') {
+      if (e.tide) return this.label(e.way === 1 ? '🏝️ Banc de sable !' : '🌊 Par la Digue', '#9be7ff', head, order)
+      return this.label(e.way === 1 ? '🔀 Détour !' : '🔀 Tout droit', '#FFD166', head, order)
+    }
     if (e.t === 'card') {
       this.label('✉️ Surprise !', '#c9b6ff', head, order)
       this.confetti(head, 14)
@@ -1197,24 +1272,25 @@ export class PartyScene {
     if (gain) {
       this.coins(pw, gain)
       this.label(`${gain > 0 ? '+' : '−'}${Math.abs(gain)} 🪙`, gain > 0 ? '#9cf0c9' : '#ff9db1', head, order)
-      if (gain > 0) this.cheer = Math.max(this.cheer, e.t === 'clap' ? 0.8 : 0.5)
+      if (gain > 0) this.cheerK = Math.max(this.cheerK, e.t === 'clap' ? 0.8 : 0.5)
     } else if (e.t === 'pub') this.label('📺 À sec…', '#ff9db1', head, order)
   }
 
-  private spawn(kind: Particle['kind'], pos: THREE.Vector3, vel: THREE.Vector3, life: number, size: number, target: Pawn | null = null) {
+  private spawn(kind: Particle['kind'], pos: THREE.Vector3, vel: THREE.Vector3, life: number, size: number, target: Pawn | null = null, color?: string, goal: THREE.Vector3 | null = null) {
     const list = kind === 'confetti' ? this.pool.confetti : kind === 'dust' ? this.pool.dust : this.pool.coin
     const mesh = list.find((o) => !o.visible)
     if (!mesh) return
     mesh.visible = true
     mesh.position.copy(pos)
     mesh.scale.setScalar(size)
-    this.particles.push({ mesh, vel, spin: new THREE.Vector3(Math.random() * 10 - 5, Math.random() * 14 - 7, Math.random() * 10 - 5), age: 0, life, kind, target, size })
+    if (kind === 'dust') ((mesh as THREE.Sprite).material as THREE.SpriteMaterial).color.set(color ?? '#fff6e5')
+    this.particles.push({ mesh, vel, spin: new THREE.Vector3(Math.random() * 10 - 5, Math.random() * 14 - 7, Math.random() * 10 - 5), age: 0, life, kind, target, goal, size })
   }
 
-  private puff(at: THREE.Vector3) {
+  private puff(at: THREE.Vector3, color?: string) {
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + Math.random()
-      this.spawn('dust', at.clone().setY(at.y + 0.08), new THREE.Vector3(Math.cos(a) * 1.5, 0.5 + Math.random() * 0.5, Math.sin(a) * 1.5), 0.4, 0.3)
+      this.spawn('dust', at.clone().setY(at.y + 0.08), new THREE.Vector3(Math.cos(a) * 1.5, 0.5 + Math.random() * 0.5, Math.sin(a) * 1.5), 0.4, 0.3, null, color)
     }
   }
 
@@ -1235,6 +1311,19 @@ export class PartyScene {
       const r = 1.3 + Math.random() * 1.1
       if (n > 0) this.spawn('coin_in', pw.group.position.clone().setY(TOP_Y + 0.2), new THREE.Vector3(Math.cos(a) * r, 5 + Math.random() * 2, Math.sin(a) * r), 0.95 + i * 0.03, 1, pw)
       else this.spawn('coin_out', head.clone(), new THREE.Vector3(Math.cos(a) * r * 1.3, 3.2 + Math.random() * 2, Math.sin(a) * r * 1.3), 1.0, 1)
+    }
+  }
+
+  /** Pièces qui jaillissent de `from` et filent vers un point (stand, sac) ou la tête d'un pion (id). */
+  private coinsFly(from: THREE.Vector3, to: THREE.Vector3 | string, n: number) {
+    const pw = typeof to === 'string' ? (this.pawns.get(to) ?? null) : null
+    const goal = typeof to === 'string' ? null : to.clone()
+    if (!pw && !goal) return
+    const count = Math.min(20, Math.max(1, n))
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + Math.random() * 0.5
+      const r = 0.8 + Math.random() * 0.9
+      this.spawn('coin_in', from.clone(), new THREE.Vector3(Math.cos(a) * r, 4.2 + Math.random() * 2, Math.sin(a) * r), 1.1 + i * 0.03, 1, pw, undefined, goal)
     }
   }
 
@@ -1272,8 +1361,8 @@ export class PartyScene {
         p.mesh.position.addScaledVector(p.vel, dt)
         p.mesh.rotation.y += p.spin.y * dt
         p.mesh.rotation.x += p.spin.x * dt * 0.4
-        if (p.kind === 'coin_in' && p.target && p.age > 0.38) {
-          const head = this.headOf(p.target, this.tmp)
+        if (p.kind === 'coin_in' && (p.target || p.goal) && p.age > 0.38) {
+          const head = p.target ? this.headOf(p.target, this.tmp) : this.tmp.copy(p.goal!)
           p.mesh.position.lerp(head, 1 - Math.exp(-dt * 11))
           p.mesh.scale.setScalar(Math.max(0.3, 1 - (k - 0.4) * 1.1))
           if (p.mesh.position.distanceTo(head) < 0.2) dead = true
@@ -1323,9 +1412,29 @@ export class PartyScene {
     const m = view.mover
     const pw = m ? this.pawns.get(m.id) : null
     const n = m ? Math.min(3, m.dice.length) : 0
+    // Hors pion : le dé du thème (dé de Riton au début de sa ronde).
+    const anchor = !m ? (this.rt.dieAnchor?.(view) ?? null) : null
     const right = this.tmp.set(1, 0, 0).applyQuaternion(this.camera.quaternion)
     for (let i = 0; i < 3; i++) {
       const die = this.dice[i]
+      if (anchor) {
+        const on = i === 0
+        this.dieScale[i] = lerp(this.dieScale[i], on ? 1 : 0, 1 - Math.exp(-dt * (on ? 14 : 9)))
+        if (this.dieScale[i] < 0.02) {
+          die.visible = false
+          continue
+        }
+        die.visible = true
+        const t = clamp(anchor.t / 600, 0, 1)
+        const rise = easeOut(Math.min(1, t * 2.2))
+        die.position.set(anchor.pos.x, anchor.pos.y + 0.4 + rise * 1.4 + Math.sin(this.time * 3) * 0.05, anchor.pos.z)
+        const spin = (1 - easeOut(t)) * 11
+        this.tmpQ.setFromAxisAngle(this.tmp2.set(0.8, 0.5, 0.3).normalize(), spin)
+        const v = clamp(Math.round(anchor.value), 1, 6)
+        die.quaternion.copy(this.camera.quaternion).multiply(this.tmpQ).multiply(PartyScene.FACE[v])
+        die.scale.setScalar(this.dieScale[i] * 0.84)
+        continue
+      }
       // Les dés restent le temps de les lire, puis laissent la place aux étiquettes (le bandeau les garde).
       const on = Boolean(m && pw && i < n && m.walking && m.t < DICE_MS + 900)
       this.dieScale[i] = lerp(this.dieScale[i], on ? 1 : 0, 1 - Math.exp(-dt * (on ? 14 : 9)))
@@ -1355,11 +1464,14 @@ export class PartyScene {
   /* ------------------------------ décor vivant ------------------------------ */
 
   private updateDecor(view: BoardView, dt: number) {
-    this.cheer = Math.max(0, this.cheer - dt * 0.45)
-    const amp = 0.05 + this.cheer * 0.5
+    this.cheerK = Math.max(0, this.cheerK - dt * 0.45)
+    const amp = 0.05 + this.cheerK * 0.5
+    const ola = this.olaUntil > this.time
     const one = this.tmp2.set(1, 1, 1)
     this.crowd.forEach((c, i) => {
-      const hop = Math.abs(Math.sin(this.time * (3 + this.cheer * 5) + c.ph)) * amp
+      let hop = Math.abs(Math.sin(this.time * (3 + this.cheerK * 5) + c.ph)) * amp
+      // Ola : une vague de bras levés qui fait le tour des gradins.
+      if (ola) hop += Math.max(0, Math.sin(this.time * 7 - (c.x - c.z) * 0.45)) ** 3 * 0.75
       this.tmpM.compose(this.tmp.set(c.x, c.y + 0.25 + hop, c.z), this.tmpQ.identity(), one)
       this.crowdBodies.setMatrixAt(i, this.tmpM)
       this.tmpM.compose(this.tmp.set(c.x, c.y + 0.72 + hop * 1.15, c.z), this.tmpQ.identity(), one)
@@ -1373,7 +1485,7 @@ export class PartyScene {
     this.beams.forEach((b, i) => {
       const goal = this.tmp
       if (mover && (i === 0 || i === 3)) goal.copy(mover.group.position).setY(0.4)
-      else goal.set(Math.sin(this.time * 0.35 + b.ph) * HALF_X * 0.8, 0, Math.cos(this.time * 0.27 + b.ph * 1.3) * HALF_Z * 0.8)
+      else goal.set(Math.sin(this.time * 0.35 + b.ph) * this.halfX * 0.8, 0, Math.cos(this.time * 0.27 + b.ph * 1.3) * this.halfZ * 0.8)
       b.aim.lerp(goal, 1 - Math.exp(-dt * 3))
       const dir = this.tmp2.copy(b.aim).sub(b.src)
       const len = dir.length()
@@ -1382,21 +1494,24 @@ export class PartyScene {
       b.mesh.scale.set(1, len, 1)
     })
     const spotMat = this.spot.material as THREE.MeshBasicMaterial
-    spotMat.opacity = lerp(spotMat.opacity, mover ? (this.pal === DARK ? 0.6 : 0.45) : 0, 1 - Math.exp(-dt * 6))
+    spotMat.opacity = lerp(spotMat.opacity, mover ? (this.dark ? 0.6 : 0.45) : 0, 1 - Math.exp(-dt * 6))
     if (mover) this.spot.position.set(mover.group.position.x, TOP_Y + 0.03, mover.group.position.z)
 
-    // Néons et télé qui clignotent, guirlande qui alterne.
-    this.neons.forEach((n, i) => n.color.setScalar(0.88 + 0.12 * Math.sin(this.time * 5 + i * 2)))
-    this.pubMat.color.setHSL((this.time * 0.25) % 1, 0.35, 0.8)
-    const tick = Math.floor(this.time * 2.2)
+    // Guirlande : alterne tranquillement ; en chenillard (gros lot) une ampoule sur trois file autour du tapis.
+    const chase = this.chaseUntil > this.time
+    const tick = Math.floor(this.time * (chase ? 14 : 2.2))
     if (tick !== this.bulbTick) {
       this.bulbTick = tick
-      for (let i = 0; i < this.bulbs.count; i++) this.bulbs.setColorAt(i, this.tmpC.set((i + tick) % 2 === 0 ? '#FFD23F' : (i + tick) % 4 === 1 ? '#FF8FA3' : '#fff6e5'))
+      const cols = this.theme.bulbs ?? BULBS
+      for (let i = 0; i < this.bulbs.count; i++) {
+        if (chase) this.bulbs.setColorAt(i, this.tmpC.set((i + tick) % 3 === 0 ? '#ffffff' : (i + tick) % 3 === 1 ? GOLD : '#3a2a10'))
+        else this.bulbs.setColorAt(i, this.tmpC.set((i + tick) % 2 === 0 ? cols[0] : cols[1 + (((i + tick) >> 1) % (cols.length - 1))]))
+      }
       if (this.bulbs.instanceColor) this.bulbs.instanceColor.needsUpdate = true
     }
     // Dédé se balance.
     this.dede.material.rotation = Math.sin(this.time * 1.6) * 0.05
-    const d = 2.3 * (1 + this.cheer * 0.06 * Math.abs(Math.sin(this.time * 9)))
+    const d = 2.3 * (1 + this.cheerK * 0.06 * Math.abs(Math.sin(this.time * 9)))
     this.dede.scale.set(d, d, 1)
   }
 
@@ -1405,19 +1520,22 @@ export class PartyScene {
   private updateCamera(view: BoardView, dt: number) {
     const m = view.mover
     const mover = m ? this.pawns.get(m.id) : null
-    const mode: CamMode = mover ? 'follow' : this.phase === 'roll' || this.phase === 'move' || this.phase === 'intro' ? 'overview' : 'show'
+    // Sans pion en vedette, le thème peut demander qu'on suive autre chose (Riton pendant sa ronde).
+    const focus = !mover ? (this.rt.focus?.(view) ?? null) : null
+    const mode: CamMode = mover || focus ? 'follow' : this.phase === 'roll' || this.phase === 'move' || this.phase === 'intro' ? 'overview' : 'show'
     this.mode = mode
     const goalT = this.tmp
     let az = this.baseAz()
     let el = this.overviewEl()
     let dist = this.overviewDist
-    if (mode === 'follow' && mover) {
+    if (mode === 'follow' && (mover || focus)) {
+      const at = mover ? mover.cur : focus!
       az += Math.sin(this.time * 0.4) * 0.06
       el = this.portrait ? 0.9 : 0.84
       dist = clamp(this.overviewDist * (this.portrait ? 0.5 : 0.68), 11, 26)
       // On vise un peu au-delà du pion (il reste sous le bandeau) et un peu vers le centre
       // (le plateau et les étoiles restent dans le champ, pas seulement les gradins).
-      goalT.set(mover.cur.x * 0.82 - Math.sin(az) * dist * 0.07, 0.9, mover.cur.z * 0.82 - Math.cos(az) * dist * 0.07)
+      goalT.set(at.x * 0.82 - Math.sin(az) * dist * 0.07, 0.9, at.z * 0.82 - Math.cos(az) * dist * 0.07)
     } else if (mode === 'show') {
       goalT.set(0, 0.6, 0)
       az += Math.sin(this.time * 0.22) * 0.45
@@ -1440,11 +1558,11 @@ export class PartyScene {
       this.camEl = lerp(this.camEl, el, k)
       this.camDist = lerp(this.camDist, dist, k)
     }
-    this.shake = Math.max(0, this.shake - dt * 1.8)
+    this.shakeK = Math.max(0, this.shakeK - dt * 1.8)
     this.place(this.camera, this.camT, this.camAz, this.camEl, this.camDist)
-    if (this.shake > 0) {
-      this.camera.position.x += Math.sin(this.time * 47) * 0.06 * this.shake
-      this.camera.position.y += Math.cos(this.time * 53) * 0.06 * this.shake
+    if (this.shakeK > 0) {
+      this.camera.position.x += Math.sin(this.time * 47) * 0.06 * this.shakeK
+      this.camera.position.y += Math.cos(this.time * 53) * 0.06 * this.shakeK
     }
   }
 

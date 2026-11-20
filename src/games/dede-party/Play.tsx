@@ -11,14 +11,13 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { TvButton } from '@/features/tv/TvButton'
 import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
-import { boardViewAt, moverLine, useBoardView } from './anim'
+import { boardViewAt, moverLine, rollLine, useBoardView } from './anim'
 import { Board } from './GameBoard'
 import { Stage } from './Stage'
-import { CELL_INFO, STAR_PRICE, HALF_PRICE, type CellType } from './board'
-import { dedeLine } from './dede-lines'
+import { CELL_INFO, STAR_PRICE, HALF_PRICE, cellTypesOf } from './board'
 import { MINIGAMES } from './minigames'
 import { Countdown, DedeHost, Die, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
-import { AwardsScreen, Curtain, IntroScreen, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
+import { AwardsScreen, Curtain, IntroScreen, MechChip, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
 import { DedePartyTv } from './TvView'
 import { dpActions, type DedePartyState } from './types'
 
@@ -50,6 +49,7 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [confirmSkip, setConfirmSkip] = useState(false)
   const snap = view.snap
+  const board = view.board
   const mg = s.mg
 
   // Mon pion vient de bouger : petit son à chaque évènement.
@@ -58,8 +58,8 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
     const n = view.events.length
     if (n > lastEv.current) {
       const e = view.events[0]
-      if (e?.t === 'star') playSound('fanfare')
-      else if (e?.t === 'pub' || e?.t === 'star_poor') playSound('fail')
+      if (e?.t === 'star' || e?.t === 'jackpot') playSound('fanfare')
+      else if (e?.t === 'pub' || e?.t === 'star_poor' || (e?.t === 'riton' && e.k === 'steal') || (e?.t === 'tp' && e.k === 'ice')) playSound('fail')
       else if (e) playSound('cash')
     }
     lastEv.current = n
@@ -78,6 +78,7 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
             {s.round === s.rounds ? ' · 🔥 la Finale !' : isPlayer && !r.mine ? ' : lance tes dés !' : ''}
           </p>
         )}
+        <MechChip board={board} mech={snap.mech} className="self-center" />
         <Stage
           s={s}
           view={view}
@@ -88,9 +89,9 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
           center={moving ? <MoveCenter s={s} view={view} get={get} /> : undefined}
         />
         <DedeHost
-          line={moving ? moverLine(s, view, get) : dedeLine(s.round === s.rounds ? 'finale' : 'roll', String(s.round))}
+          line={moving ? moverLine(s, view, get) : rollLine(s)}
           size={58}
-          expression={moving && view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie'}
+          expression={moving && view.events.some((e) => e.t === 'pub' || (e.t === 'riton' && e.k === 'steal')) ? 'pleurs' : 'joie'}
         />
         {!moving && <RollBelow s={s} meId={meId} isPlayer={isPlayer} get={get} left={left} r={r} />}
       </div>
@@ -152,9 +153,13 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
         </div>
       )}
 
-      <BottomSheet open={help} onClose={() => setHelp(false)} title="Le Grand Plateau de Dédé">
+      <BottomSheet open={help} onClose={() => setHelp(false)} title={`${board.emoji} ${board.name}`}>
         <div className="flex flex-col gap-2">
-          {(Object.keys(CELL_INFO) as CellType[]).map((t) => (
+          <div className="sticker-sm flex flex-col gap-0.5 bg-sun/30 px-3 py-2">
+            <span className="font-display font-extrabold">✨ La particularité du plateau</span>
+            <span className="text-sm font-bold leading-snug">{board.rule}</span>
+          </div>
+          {cellTypesOf(board).map((t) => (
             <div key={t} className="flex items-center gap-3">
               <span className="flex size-11 shrink-0 items-center justify-center rounded-chip border-[3px] border-ink text-2xl shadow-sticker-sm" style={{ background: CELL_INFO[t].color }}>
                 {CELL_INFO[t].emoji}
@@ -168,9 +173,19 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
           <p className="mt-1 text-sm font-bold">
             ⭐ Une étoile s’achète toute seule ({STAR_PRICE} 🪙, ta première à {HALF_PRICE} 🪙) dès que tu passes ou t’arrêtes dessus, puis elle déménage dans une autre Loge.
           </p>
-          <p className="text-sm font-bold">
-            🔀 Aux deux embranchements, personne ne choisit : la flèche jaune montre la voie ouverte, et elle bascule après chaque pion. 🎭 La Scène rapporte gros, 📺 le Tunnel de la pub coûte cher !
-          </p>
+          {board.id === 'grand' && (
+            <p className="text-sm font-bold">
+              🔀 Aux deux embranchements, personne ne choisit : la flèche jaune montre la voie ouverte, et elle bascule après chaque pion. 🎭 La Scène rapporte gros, 📺 le Tunnel de la pub coûte cher !
+            </p>
+          )}
+          {board.id === 'mer' && (
+            <p className="text-sm font-bold">
+              🌊 La marée suit un cycle : 2 tours basse, 1 tour haute. La flèche bleue montre la voie ouverte. Les pions sur le Banc de sable quand la mer monte reviennent sur la Digue avec 5 pièces de moins.
+            </p>
+          )}
+          {board.id === 'kermesse' && <p className="text-sm font-bold">🎟️ La cagnotte démarre à 5 pièces et grossit à chaque péage. Ta case d’arrivée compte : il faut s’arrêter PILE sur une Tombola avec ses dés.</p>}
+          {board.id === 'camping' && <p className="text-sm font-bold">🦝 À la fin de chaque tour, Riton lance 1 dé et remonte le sentier. Un coup il vole, un coup il rend : regarde son sac avant de lancer !</p>}
+          {board.id === 'ski' && <p className="text-sm font-bold">🚡 Les pointillés montrent où mènent les télésièges (vert) et les plaques de verglas (bleu). Seul un arrêt pile avec tes dés compte. 🛷 Du Sommet, la Grande Luge te ramène au Départ (+5).</p>}
           <p className="text-sm font-bold">
             🎮 Mini-jeu à chaque tour : 1er 10 🪙, 2e 6, 3e 4, les autres 2 (doublé au dernier tour). À la fin, 2 étoiles bonus : Roi des mini-jeux et Prix de la poisse !
           </p>

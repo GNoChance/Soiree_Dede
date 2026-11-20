@@ -10,14 +10,16 @@ import { withUnit } from '../le-plus-proche/setup'
 import { dedeLine } from './dede-lines'
 import { MG_ORDER, MINIGAMES } from './minigames'
 import { fmtSec } from './minigames/common'
-import { eventLabel, type BoardView } from './anim'
+import { eventLabel, mechChip, type BoardView, type EpiView } from './anim'
+import { boardOf, type BoardDef } from './board'
 import { DedeHost, Die, type Get } from './Parts'
-import type { DedePartyState, DpMg, DpMgResult } from './types'
+import { RITON_DIE_MS, WASH_AT_MS, type DedePartyState, type DpMech, type DpMg, type DpMgResult } from './types'
 
-/** Générique : « Bienvenue dans Dédé Party ! » et présentation des candidats. */
+/** Générique : « Bienvenue dans Dédé Party ! », le plateau du soir et sa mécanique, les candidats. */
 export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?: boolean }) {
+  const b = boardOf(s.map)
   return (
-    <div className="flex flex-col items-center gap-4 text-center">
+    <div className={cn('flex flex-col items-center text-center', big ? 'gap-4' : 'gap-3')}>
       <motion.h2
         initial={{ scale: 3, rotate: -15, opacity: 0 }}
         animate={{ scale: 1, rotate: -3, opacity: 1 }}
@@ -27,7 +29,18 @@ export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?
       >
         🎤 Dédé Party !
       </motion.h2>
-      <DedeHost line={dedeLine('intro', String(s.players.length))} size={big ? 170 : 96} big={big} expression="joie" />
+      <motion.div
+        initial={{ y: 40, opacity: 0, rotate: 4 }}
+        animate={{ y: 0, opacity: 1, rotate: 1 }}
+        transition={{ delay: 0.35, type: 'spring', stiffness: 260, damping: 14 }}
+        className={cn('sticker flex max-w-full flex-col items-center gap-1 bg-surface', big ? 'px-6 py-3' : 'px-3 py-2')}
+      >
+        <span className={cn('font-display font-extrabold leading-tight', big ? 'text-5xl' : 'text-2xl')}>
+          Ce soir : {b.emoji} {b.name}
+        </span>
+        <span className={cn('font-bold leading-snug', big ? 'text-2xl' : 'text-sm')}>{b.rule}</span>
+      </motion.div>
+      <DedeHost line={s.map ? dedeLine(`map_${b.id}` as const, String(s.players.length)) : dedeLine('intro', String(s.players.length))} size={big ? 150 : 80} big={big} expression="joie" />
       <div className="flex flex-wrap justify-center gap-3">
         {s.order.map((id, i) => {
           const p = get(id)
@@ -293,9 +306,53 @@ export function AwardsScreen({ s, get, big }: { s: DedePartyState; get: Get; big
   )
 }
 
+/** Puce de la mécanique du plateau (à côté du tour en cours) : marée, cagnotte, sac de Riton. */
+export function MechChip({ board, mech, big, className }: { board: BoardDef; mech: DpMech | undefined; big?: boolean; className?: string }) {
+  const chip = mechChip(board, mech)
+  if (!chip) return null
+  return (
+    <motion.span
+      key={chip.text}
+      initial={{ scale: 0.6, opacity: 0 }}
+      animate={chip.alert ? { scale: [1, 1.07, 1], opacity: 1 } : { scale: 1, opacity: 1 }}
+      transition={chip.alert ? { scale: { repeat: Infinity, duration: 0.9 } } : { type: 'spring', stiffness: 320, damping: 16 }}
+      className={cn('sticker-sm inline-block px-2 py-0.5 text-center font-display font-extrabold leading-tight', chip.alert ? 'bg-tomato text-white' : 'bg-surface/95', big ? 'text-2xl' : 'text-sm', className)}
+    >
+      {chip.text}
+    </motion.span>
+  )
+}
+
+/** Titre et détail de l'épilogue du tour (marée, ronde de Riton). */
+function epiText(epi: EpiView, get: Get): { title: string; detail: string | null } {
+  const d = epi.data
+  if (d.t === 'tide') {
+    if (d.tide === 0) return { title: '🏝️ Marée basse : le Banc de sable rouvre !', detail: null }
+    const washed = epi.events.filter((e) => e.t === 'wash')
+    return {
+      title: '🌊 La mer monte !',
+      detail: washed.length ? washed.map((e) => `${get(e.id ?? '').nickname} −${-(e.d ?? 0)} 🪙`).join(' · ') : epi.t >= WASH_AT_MS ? 'Personne à la baille !' : null,
+    }
+  }
+  const last = epi.events[0]
+  return {
+    title: `🦝 La ronde de Riton${epi.t >= RITON_DIE_MS ? ` : 🎲 ${d.die}` : '…'}`,
+    detail: last ? `${get(last.id ?? '').nickname} : ${eventLabel(last, (id) => get(id).nickname)}` : null,
+  }
+}
+
 /** Au centre du plateau pendant les déplacements : le pion en vedette, ses dés, le dernier évènement. */
 export function MoveCenter({ s, view, get, big }: { s: DedePartyState; view: BoardView; get: Get; big?: boolean }) {
   const m = view.mover
+  if (!m && view.epi) {
+    const e = epiText(view.epi, get)
+    return (
+      <div className="flex w-full flex-col items-center gap-1.5 text-center">
+        <span className={cn('font-display font-extrabold leading-tight', big ? 'text-4xl' : 'text-lg')}>{e.title}</span>
+        {e.detail && <span className={cn('sticker-sm bg-sun px-2 py-1 font-display font-extrabold leading-tight text-[#1f1b2e]', big ? 'text-2xl' : 'text-sm')}>{e.detail}</span>}
+      </div>
+    )
+  }
   if (!m) {
     return <p className={cn('text-center font-display font-extrabold text-muted', big ? 'text-3xl' : 'text-base')}>{view.done ? 'Tout le monde a bougé !' : 'Les pions se mettent en place…'}</p>
   }
@@ -321,7 +378,7 @@ export function MoveCenter({ s, view, get, big }: { s: DedePartyState; view: Boa
             animate={{ scale: 1, rotate: -2, opacity: 1 }}
             className={cn('sticker-sm bg-sun px-2 py-1 font-display font-extrabold leading-tight text-[#1f1b2e]', big ? 'text-2xl' : 'text-sm')}
           >
-            {eventLabel(last, (id) => get(id).nickname)}
+            {eventLabel(last, (id) => get(id).nickname, view.board)}
           </motion.span>
         )}
       </AnimatePresence>
@@ -329,9 +386,37 @@ export function MoveCenter({ s, view, get, big }: { s: DedePartyState; view: Boa
   )
 }
 
-/** Bandeau incrusté sur le plateau 3D : qui joue, ses dés, ce qui vient d'arriver. */
+/** Bandeau incrusté sur le plateau 3D : qui joue, ses dés, ce qui vient d'arriver (ou l'épilogue du tour). */
 export function MoveBanner({ s, view, get, big }: { s: DedePartyState; view: BoardView; get: Get; big?: boolean }) {
   const m = view.mover
+  if (!m && view.epi) {
+    const e = epiText(view.epi, get)
+    return (
+      <div className="flex max-w-full flex-col items-center gap-1.5">
+        <motion.span
+          key={view.epi.data.t}
+          initial={{ y: -30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className={cn('sticker-sm bg-surface/95 px-3 py-1 text-center font-display font-extrabold leading-tight', big ? 'text-4xl' : 'text-lg')}
+        >
+          {e.title}
+        </motion.span>
+        <AnimatePresence mode="popLayout">
+          {e.detail && (
+            <motion.span
+              key={e.detail}
+              initial={{ scale: 0.4, rotate: -6, opacity: 0 }}
+              animate={{ scale: 1, rotate: -1.5, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={cn('sticker-sm max-w-full bg-sun px-2 py-1 text-center font-display font-extrabold leading-tight text-[#1f1b2e]', big ? 'text-3xl' : 'text-sm')}
+            >
+              {e.detail}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
+    )
+  }
   if (!m) {
     return (
       <span className={cn('sticker-sm bg-surface/95 px-3 py-1 text-center font-display font-extrabold', big ? 'text-3xl' : 'text-base')}>
@@ -366,7 +451,7 @@ export function MoveBanner({ s, view, get, big }: { s: DedePartyState; view: Boa
             exit={{ opacity: 0 }}
             className={cn('sticker-sm max-w-full bg-sun px-2 py-1 text-center font-display font-extrabold leading-tight text-[#1f1b2e]', big ? 'text-3xl' : 'text-sm')}
           >
-            {eventLabel(last, (id) => get(id).nickname)}
+            {eventLabel(last, (id) => get(id).nickname, view.board)}
           </motion.span>
         )}
       </AnimatePresence>

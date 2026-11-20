@@ -5,13 +5,13 @@ import { playSound } from '@/lib/feedback'
 import { playerOrPlaceholder } from '@/features/soiree/players'
 import { useViewport } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
-import { moverLine, useBoardView } from './anim'
+import { moverLine, rollLine, useBoardView } from './anim'
 import { Stage } from './Stage'
-import { CELL_INFO, type CellType } from './board'
+import { CELL_INFO, cellTypesOf } from './board'
 import { dedeLine } from './dede-lines'
 import { MINIGAMES } from './minigames'
 import { Countdown, DedeHost, DoneStrip, Scoreboard, useDeadlineTick, type Get } from './Parts'
-import { AwardsScreen, Curtain, IntroScreen, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
+import { AwardsScreen, Curtain, IntroScreen, MechChip, MgIntroScreen, MgResultScreen, MoveBanner, MoveCenter, useCurtain } from './Screens'
 import type { DedePartyState } from './types'
 
 /**
@@ -29,6 +29,8 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
   const left = useDeadlineTick(live, act, true)
   const view = useBoardView(s)
   const mg = s.mg
+  const board = view.board
+  const sad = view.events.some((e) => e.t === 'pub' || (e.t === 'riton' && e.k === 'steal')) || Boolean(view.epi?.events.some((e) => e.t === 'wash' || (e.t === 'riton' && e.k === 'steal')))
 
   // Sons de plateau (la télé est souvent la seule enceinte).
   const lastEv = useRef(0)
@@ -36,18 +38,29 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
     const n = view.events.length
     if (n > lastEv.current) {
       const e = view.events[0]
-      if (e?.t === 'star') playSound('fanfare')
-      else if (e?.t === 'pub' || e?.t === 'star_poor') playSound('fail')
+      if (e?.t === 'star' || e?.t === 'jackpot') playSound('fanfare')
+      else if (e?.t === 'pub' || e?.t === 'star_poor' || (e?.t === 'riton' && e.k === 'steal') || (e?.t === 'tp' && e.k === 'ice')) playSound('fail')
       else if (e) playSound('cash')
     }
     lastEv.current = n
   }, [view.events])
+  // Épilogue du tour (marée, Riton) : un son par évènement.
+  const lastEpi = useRef(0)
+  const epiEvents = view.epi?.events
+  useEffect(() => {
+    const n = epiEvents?.length ?? 0
+    if (n > lastEpi.current && epiEvents) {
+      const e = epiEvents[0]
+      playSound(e.t === 'wash' || (e.t === 'riton' && e.k === 'steal') ? 'fail' : 'cash')
+    }
+    lastEpi.current = n
+  }, [epiEvents])
 
   // Incrustations sur le plateau 3D : en haut qui joue (ou le tour), en bas Dédé et sa bulle.
   const dede =
     s.phase === 'move'
-      ? { line: moverLine(s, view, get), expression: view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie' }
-      : { line: dedeLine(s.phase === 'roll' ? (s.round === s.rounds ? 'finale' : 'roll') : 'mg_intro', String(s.round)), expression: 'joie' }
+      ? { line: moverLine(s, view, get), expression: sad ? 'pleurs' : 'joie' }
+      : { line: s.phase === 'roll' ? rollLine(s) : dedeLine('mg_intro', String(s.round)), expression: 'joie' }
   const top =
     s.phase === 'move' ? (
       <MoveBanner s={s} view={view} get={get} big />
@@ -58,6 +71,7 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
         </span>
         {s.round === s.rounds && <span className="sticker bg-tomato px-3 py-1 font-display text-3xl font-extrabold text-white">🔥 La Finale !</span>}
         <Countdown left={left} big />
+        <MechChip board={board} mech={view.snap.mech} big />
       </div>
     ) : undefined
   const bottom =
@@ -73,7 +87,7 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
     center = (
       <div className="flex w-full flex-col items-center gap-3">
         <MoveCenter s={s} view={view} get={get} big />
-        <DedeHost line={moverLine(s, view, get)} size={110} big side="top" expression={view.events.some((e) => e.t === 'pub') ? 'pleurs' : 'joie'} />
+        <DedeHost line={moverLine(s, view, get)} size={110} big side="top" expression={sad ? 'pleurs' : 'joie'} />
       </div>
     )
   } else if (s.phase === 'roll') {
@@ -83,7 +97,8 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
           Tour {s.round} / {s.rounds}
         </p>
         {s.round === s.rounds && <p className="sticker bg-tomato px-3 font-display text-3xl font-extrabold text-white">🔥 La Finale !</p>}
-        <DedeHost line={s.round === s.rounds ? dedeLine('finale', String(s.round)) : dedeLine('roll', String(s.round))} size={140} big side="top" />
+        <MechChip board={board} mech={view.snap.mech} big />
+        <DedeHost line={rollLine(s)} size={140} big side="top" />
         <Countdown left={left} big />
       </div>
     )
@@ -142,7 +157,9 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
       </div>
       <div className={cn('flex min-h-0 shrink-0 flex-col gap-2 overflow-hidden', landscape ? 'w-[min(32vw,420px)]' : 'flex-[2]')}>
         <div className="flex items-center justify-between gap-2">
-          <span className="font-display text-3xl font-extrabold">🎤 Dédé Party</span>
+          <span className="min-w-0 truncate font-display text-3xl font-extrabold">
+            {board.emoji} {board.name}
+          </span>
           <span className="sticker-sm bg-sky px-2 font-display text-xl font-extrabold text-[#1f1b2e]">
             {s.phase === 'intro' ? 'Générique' : s.phase === 'awards' ? 'Cérémonie' : `Tour ${s.round}/${s.rounds}`}
           </span>
@@ -150,9 +167,14 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
         <div className="min-h-0 flex-1 overflow-hidden">
           <Scoreboard s={s} snap={view.snap} get={get} highlight={view.mover?.id ?? null} big note={note} />
         </div>
+        {s.phase === 'move' && <MechChip board={board} mech={view.snap.mech} className="self-start" />}
         {landscape && s.players.length <= 5 && (
           <div className="grid shrink-0 grid-cols-1 gap-1">
-            {(Object.keys(CELL_INFO) as CellType[]).map((t) => (
+            <p className="sticker-sm mb-1 bg-sun/30 px-2 py-1 text-sm leading-tight font-bold">
+              <span className="font-display font-extrabold">✨ La particularité du plateau : </span>
+              {board.rule}
+            </p>
+            {cellTypesOf(board).map((t) => (
               <div key={t} className="flex items-center gap-2 text-sm leading-tight font-bold">
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border-2 border-ink text-base" style={{ background: CELL_INFO[t].color }}>
                   {CELL_INFO[t].emoji}

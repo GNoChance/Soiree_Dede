@@ -28,6 +28,29 @@ export type LineKind =
   | 'fork_scene_no'
   | 'fork_tunnel'
   | 'fork_tunnel_no'
+  // Les 5 plateaux : générique et mécaniques signature.
+  | 'map_grand'
+  | 'map_mer'
+  | 'tide_warn'
+  | 'fork_banc'
+  | 'fork_banc_no'
+  | 'tide_wash'
+  | 'tide_wash_many'
+  | 'tide_up'
+  | 'tide_down'
+  | 'map_kermesse'
+  | 'toll'
+  | 'toll_poor'
+  | 'jackpot'
+  | 'map_camping'
+  | 'riton_move'
+  | 'riton_steal'
+  | 'riton_drop'
+  | 'riton_none'
+  | 'map_ski'
+  | 'lift'
+  | 'ice'
+  | 'luge'
 
 const LINES: Record<LineKind, string[]> = {
   intro: [
@@ -165,6 +188,124 @@ const LINES: Record<LineKind, string[]> = {
     '{name} passe à côté de la pub. Les annonceurs sont déçus, pas moi.',
     'Aiguillage sympa : pas de tunnel pour {name} ! Il se retourne déjà vers le suivant…',
   ],
+
+  // ------------------------------------------------------------- 🎤 Le Grand Plateau
+  map_grand: [
+    'Ce soir, on joue sur le Grand Plateau de Dédé ! Surveillez les aiguillages : ils tournent à chaque passage.',
+    'Bienvenue sur le Grand Plateau ! La Scène pour les chanceux, le Tunnel de la pub pour les autres.',
+  ],
+
+  // ------------------------------------------------------------- 🏖️ Dédé-sur-Mer
+  map_mer: [
+    'Ce soir, on tourne à Dédé-sur-Mer ! Crème solaire pour tout le monde, et surveillez la marée.',
+    'Bienvenue à Dédé-sur-Mer : du sable, des mouettes… et une marée qui ne prévient pas. Enfin si, moi je préviens.',
+  ],
+  tide_warn: [
+    'Attention, la mer monte à la fin de ce tour ! Ceux qui traînent sur le Banc de sable, je ne vous connais pas.',
+    'La marée arrive ! Dernier tour pour traverser les pieds au sec.',
+    'Ça clapote, ça clapote… À la fin du tour, le Banc de sable disparaît !',
+  ],
+  fork_banc: [
+    '{name} file sur le Banc de sable ! Regarde l’heure de la marée, quand même.',
+    'Direction le Phare pour {name}, les pieds dans le sable !',
+    '{name} coupe par le Banc de sable. Pourvu que la mer soit patiente…',
+  ],
+  fork_banc_no: [
+    'Marée haute : {name} reste sur la Digue. Au sec, mais devant la Baraque à frites.',
+    'Pas de Banc de sable pour {name}, la mer a dit non.',
+  ],
+  tide_wash: [
+    '{name} n’a pas vu monter la mer… Plouf ! 5 pièces au fond de l’eau.',
+    'La vague dépose {name} sur la Digue, trempé jusqu’aux oreilles. −5 pièces !',
+    '{name} boit la tasse ! Le porte-monnaie aussi.',
+    'Un maître-nageur pour {name} ! Et 5 pièces pour les poissons.',
+  ],
+  tide_wash_many: [
+    'Plouf ! {name} boivent la tasse : 5 pièces chacun au fond de l’eau.',
+    'La vague ramasse {name} d’un coup ! Tout le monde sur la Digue, et 5 pièces pour les poissons.',
+  ],
+  tide_up: [
+    'Marée haute ! Le Banc de sable est sous l’eau, tout le monde passe par la Digue.',
+    'Et voilà, la mer a tout recouvert. Personne à la baille ? Dommage pour l’audience.',
+    'Marée haute ! On range les serviettes.',
+  ],
+  tide_down: [
+    'Marée basse ! Le Banc de sable est de retour : par ici le chemin du Phare.',
+    'La mer se retire… Qui veut aller ramasser des coquillages ?',
+    'Marée basse ! Le Phare est accessible à pied, profitez-en.',
+  ],
+
+  // ------------------------------------------------------------- 🎪 La Kermesse
+  map_kermesse: [
+    'Bienvenue à la Kermesse de Dédé ! Pêche aux canards, barbe à papa… et une Tombola qui se remplit toute seule.',
+    'Ce soir c’est la kermesse ! Chacun met 3 pièces dans la Tombola en passant. Le gros lot ? Pour celui qui s’arrête pile dessus.',
+  ],
+  toll: [
+    '{name} passe devant la Tombola : 3 pièces dans la cagnotte, merci pour les œuvres !',
+    'Par ici la monnaie, {name} ! La cagnotte grossit, grossit…',
+    '{name} glisse 3 pièces dans l’urne. C’est pour la bonne cause : le prochain gagnant.',
+    'Un ticket pour {name} ! Enfin… {name} paie, le ticket gagnant, on verra plus tard.',
+  ],
+  toll_poor: [
+    '{name} a les poches vides : la Tombola fait cadeau. Exceptionnellement !',
+    'Rien à donner, {name} ? Allez, passe, je n’ai rien vu.',
+  ],
+  jackpot: [
+    'PILE SUR LA TOMBOLA ! {name} rafle le gros lot : {n} pièces !',
+    'Le numéro gagnant est… celui de {name} ! {n} pièces, mesdames et messieurs !',
+    '{name} décroche la cagnotte ! {n} pièces d’un coup, ça change une soirée.',
+    'Incroyable ! {name} vide la Tombola : {n} pièces. Merci à tous les généreux donateurs !',
+  ],
+
+  // ------------------------------------------------------------- 🏕️ Le Camping
+  map_camping: [
+    'Bienvenue au Camping des Pins Penchés ! Plantez vos sardines et surveillez vos poches : Riton le raton rôde.',
+    'Ce soir, émission en plein air ! Un conseil : ne laissez rien traîner, Riton fait sa ronde à l’envers.',
+  ],
+  riton_move: [
+    'Riton fait sa ronde… Cachez vos pièces !',
+    'Et pendant ce temps, Riton remonte le sentier. Tout doux, Riton.',
+    'Qui a laissé la glacière ouverte ? Riton arrive !',
+  ],
+  riton_steal: [
+    'Riton croise {name}… et repart avec ses pièces dans son sac ! Petit chenapan.',
+    'Oh ! {name} s’est fait faire les poches par un raton laveur. Ça ne s’invente pas.',
+    'Riton chipe les pièces de {name} ! Le prochain qui le croise ramasse le sac.',
+    '{name}, ton porte-monnaie ! Trop tard… Riton a déjà filé.',
+  ],
+  riton_drop: [
+    '{name} fait « BOUH ! » : Riton sursaute et lâche son sac. Tout est pour {name} !',
+    'Riton trébuche devant {name} et son butin s’envole. Ramasse, {name}, ramasse !',
+    'Le sac de Riton change de mains : merci qui ? Merci {name} !',
+    '{name} récupère le magot de Riton. Les bons comptes font les bons campeurs.',
+  ],
+  riton_none: [
+    'Riton fouille les poches de {name}… vides ! Il repart vexé.',
+    'Rien à voler chez {name}. Même Riton a de la peine.',
+  ],
+
+  // ------------------------------------------------------------- ⛷️ Dédé 2000
+  map_ski: [
+    'Bienvenue à Dédé 2000, la station où l’on monte vite… et où l’on redescend encore plus vite !',
+    'Chaussez vos skis ! Les télésièges montent, le verglas descend, et la Grande Luge ramène tout le monde à la Station.',
+  ],
+  lift: [
+    '{name} attrape le télésiège ! Attachez vos ceintures, on grimpe.',
+    'Pile sur le télésiège : {name} double tout le monde par les airs !',
+    'Et hop, {name} s’envole vers les sommets. Coucou, en bas !',
+    'Forfait gagnant pour {name} : direction le haut des pistes !',
+  ],
+  ice: [
+    'Plaque de verglas ! {name} repart en bas sur les fesses.',
+    'Oh la belle glissade de {name} ! Note artistique : 9 sur 10.',
+    '{name} dérape… et dévale toute la piste. On remonte, courage !',
+    'Ça glisse pour {name} ! Retour dans la vallée, sans passer par le chalet.',
+  ],
+  luge: [
+    '{name} atteint le Sommet et saute dans la Grande Luge : retour à la Station, 5 pièces à l’arrivée !',
+    'Youhou ! {name} dévale la Grande Luge jusqu’au Départ.',
+    'La Grande Luge pour {name} ! Tenez bien vos bonnets.',
+  ],
 }
 
 function hash(key: string): number {
@@ -176,10 +317,10 @@ function hash(key: string): number {
   return h >>> 0
 }
 
-/** Réplique de Dédé pour un évènement (même `key` = même réplique partout). */
-export function dedeLine(kind: LineKind, key: string, name = ''): string {
+/** Réplique de Dédé pour un évènement (même `key` = même réplique partout). `{n}` = nombre de pièces. */
+export function dedeLine(kind: LineKind, key: string, name = '', n?: number): string {
   const list = LINES[kind]
-  return list[hash(`${kind}:${key}`) % list.length].replace(/\{name\}/g, name)
+  return list[hash(`${kind}:${key}`) % list.length].replace(/\{name\}/g, name).replace(/\{n\}/g, String(n ?? ''))
 }
 
 /** Nombre total de répliques (pour les docs / tests). */

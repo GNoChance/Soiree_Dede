@@ -62,7 +62,8 @@ export function makeCellTop(type: CellType, anisotropy: number): THREE.CanvasTex
   }
   ctx.restore()
   roundRect(ctx, 16, 16, S - 32, S - 32, 46)
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+  // Case très claire (verglas) : liseré intérieur encre plutôt que blanc, sinon il disparaît.
+  ctx.strokeStyle = new THREE.Color(info.color).getHSL({ h: 0, s: 0, l: 0 }).l > 0.85 ? 'rgba(31,27,46,0.35)' : 'rgba(255,255,255,0.55)'
   ctx.lineWidth = 7
   ctx.stroke()
   ctx.textAlign = 'center'
@@ -232,6 +233,16 @@ export function makePlate(text: string, bg: string): { tex: THREE.CanvasTexture;
   ctx.fillStyle = INK
   ctx.fillText(text, W / 2, H / 2 + 2)
   return { tex: tex(c, 4), aspect: W / H }
+}
+
+/** Un gros emoji seul sur fond transparent (sprite : Riton…). */
+export function makeEmoji(emoji: string, size = 128): THREE.CanvasTexture {
+  const [c, ctx] = canvas(size, size)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `${Math.round(size * 0.82)}px ${EMOJI_FONT}`
+  ctx.fillText(emoji, size / 2, size / 2 + size * 0.04)
+  return tex(c, 2)
 }
 
 /** Écran de la télé du Tunnel de la pub. */

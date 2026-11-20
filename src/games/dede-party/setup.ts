@@ -4,9 +4,36 @@
  * Contrat : supabase/games/dede-party.sql (`game_dede_party_start`).
  */
 
+import { isMapId, MAP_IDS, type MapId } from './board'
+
 export const DP_ROUNDS = [6, 9, 12] as const
 export type DpRounds = (typeof DP_ROUNDS)[number]
-export const DP_DEFAULT_OPTIONS = { rounds: 9 as DpRounds }
+/** Plateau choisi par l'hôte : un des 5, ou « Au hasard » (résolu ici, le serveur reçoit toujours un id). */
+export type DpMapChoice = MapId | 'random'
+export const DP_DEFAULT_OPTIONS = { rounds: 9 as DpRounds, map: 'random' as DpMapChoice }
+
+/** Dernier plateau joué sur cet appareil (pas de redite au tirage « Au hasard »). */
+const LAST_MAP_KEY = 'dp:last-map'
+
+/** Tirage « Au hasard » : uniforme parmi les 5, sauf le dernier plateau joué sur cet appareil. */
+export function drawMap(rand: () => number = Math.random): MapId {
+  let last: string | null = null
+  try {
+    last = localStorage.getItem(LAST_MAP_KEY)
+  } catch {
+    /* stockage indisponible : tirage parmi les 5 */
+  }
+  const pool = MAP_IDS.filter((id) => id !== last)
+  return pool[Math.floor(rand() * pool.length)] ?? 'grand'
+}
+
+function rememberMap(id: MapId) {
+  try {
+    localStorage.setItem(LAST_MAP_KEY, id)
+  } catch {
+    /* stockage indisponible */
+  }
+}
 
 /** Durée indicative d'une partie (≈ 1 min 30 par tour à 4-6 joueurs). */
 export const DP_DURATION: Record<DpRounds, { label: string; minutes: string }> = {
@@ -15,9 +42,12 @@ export const DP_DURATION: Record<DpRounds, { label: string; minutes: string }> =
   12: { label: 'Longue', minutes: '≈ 20 min' },
 }
 
-export function normalizeOptions(o: Record<string, unknown>): { rounds: DpRounds } {
+export function normalizeOptions(o: Record<string, unknown>): { rounds: DpRounds; map: DpMapChoice } {
   const r = Number(o.rounds)
-  return { rounds: (DP_ROUNDS as readonly number[]).includes(r) ? (r as DpRounds) : DP_DEFAULT_OPTIONS.rounds }
+  return {
+    rounds: (DP_ROUNDS as readonly number[]).includes(r) ? (r as DpRounds) : DP_DEFAULT_OPTIONS.rounds,
+    map: isMapId(o.map) ? o.map : 'random',
+  }
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -32,8 +62,11 @@ function shuffle<T>(arr: T[]): T[] {
 /** Combien de questions de chaque banque (2 passages de chaque mini-jeu en partie longue, avec de la marge). */
 const COUNTS = { quiz: 18, pif: 6, majorite: 6 }
 
-/** p_options de start_match('dede-party') : durée + questions tirées dans les banques existantes. */
+/** p_options de start_match('dede-party') : durée, plateau concret (« Au hasard » résolu ici) + questions tirées dans les banques existantes. */
 export async function prepareDedePartyStart(options: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const o = normalizeOptions(options)
+  const map = o.map === 'random' ? drawMap() : o.map
+  rememberMap(map)
   const [{ QUESTIONS: QUIZ }, { CLOSE_QUESTIONS }, { QUESTIONS: QDN }] = await Promise.all([
     import('../cerveau-en-fete/questions'),
     import('../le-plus-proche/questions'),
@@ -47,5 +80,5 @@ export async function prepareDedePartyStart(options: Record<string, unknown>): P
     .slice(0, COUNTS.pif)
     .map((q) => ({ prompt: q.prompt, answer: q.answer, unit: q.unit ?? null }))
   const majorite = shuffle(QDN).slice(0, COUNTS.majorite).map((q) => q.text)
-  return { ...normalizeOptions(options), quiz, pif, majorite }
+  return { rounds: o.rounds, map, quiz, pif, majorite }
 }

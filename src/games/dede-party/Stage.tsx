@@ -12,7 +12,7 @@ import { DEFAULT_TENUE } from '@/data/tenues'
 import { cn } from '@/lib/cn'
 import { serverNow } from '@/features/soiree/useServerClock'
 import { boardViewAt, type BoardView } from './anim'
-import { COLS, ROWS } from './board'
+import { boardOf } from './board'
 import { Board } from './GameBoard'
 import type { Get } from './Parts'
 import type { PartyScene, ScenePlayer } from './scene3d/PartyScene'
@@ -55,6 +55,8 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
   const sceneRef = useRef<PartyScene | null>(null)
   const [ready, setReady] = useState(false)
   const [flat, setFlat] = useState(() => !webglAvailable())
+  const board = boardOf(s.map)
+  const mapId = board.id
   const sRef = useRef(s)
   useEffect(() => {
     sRef.current = s
@@ -92,6 +94,7 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
           dedeUrl: chibiSrc('dede', 'host', 'joie', false),
           dedeFallback: chibiUrl('dede', 'joie', 'default', false),
           big,
+          board: boardOf(mapId),
           onLost: () => setFlat(true),
         })
       })
@@ -114,14 +117,15 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
       scene?.dispose()
       setReady(false)
     }
-  }, [flat, big])
+    // Le plateau ne change pas pendant une partie : la scène n'est recréée que si l'on change de plateau.
+  }, [flat, big, mapId])
 
   if (flat) {
     // Repli 2D : tout est dans le plateau (le milieu porte qui joue et Dédé).
     if (big) {
       return (
         <div className="flex size-full items-center justify-center" style={{ containerType: 'size' }}>
-          <div style={{ width: `min(100cqw, calc(100cqh * ${COLS} / ${ROWS}))` }}>
+          <div style={{ width: `min(100cqw, calc(100cqh * ${board.cols} / ${board.rows}))` }}>
             <Board s={s} view={view} get={get} center={center ? <div style={{ zoom: 0.62 }}>{center}</div> : undefined} />
           </div>
         </div>
@@ -136,7 +140,7 @@ export function Stage({ s, view, get, big, top, bottom, center, className }: Sta
   }
 
   return (
-    <div className={cn('sticker relative w-full overflow-hidden bg-sunk select-none', className)} role="group" aria-label="Le Grand Plateau de Dédé">
+    <div className={cn('sticker relative w-full overflow-hidden bg-sunk select-none', className)} role="group" aria-label={board.name}>
       <div ref={host} className="absolute inset-0" />
       <AnimatePresence>
         {!ready && (

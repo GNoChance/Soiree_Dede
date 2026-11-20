@@ -1,12 +1,14 @@
-// Tests SQL du jeu « Dédé Party » (PGlite) : node dede-party.mjs ../../supabase/install.sql [nb de parties simulées]
+// Tests SQL du jeu « Dédé Party » (PGlite) :
+//   node dede-party.mjs ../../supabase/install.sql [parties simulées par config, Grand Plateau] [parties simulées par config et par plateau]
 // Appels directs du moteur (superutilisateur) : game_dede_party_start / game_dede_party_action.
-// Dés et cartes imposés via server.forced_dice / server.forced_cards / server.forced_mg.
+// Dés et cartes imposés via server.forced_dice / server.forced_cards / server.forced_mg ; états de mécanique par patch.
 import fs from 'node:fs'
 import { bootDb } from './boot.mjs'
 
 const file = process.argv[2]
-if (!file) throw new Error('usage : node dede-party.mjs <install.sql> [simulations]')
+if (!file) throw new Error('usage : node dede-party.mjs <install.sql> [simulations] [simulations par plateau]')
 const SIMS = Number(process.argv[3] ?? 12)
+const MAP_SIMS = Number(process.argv[4] ?? 6)
 const db = await bootDb(file)
 
 let failed = false
@@ -15,6 +17,9 @@ const ok = (name, cond, extra = '') => {
   if (!cond) failed = true
 }
 
+/** JSON aux clés triées (jsonb réordonne les clés des objets). */
+const canon = (x) => JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v))
+
 const P = (await db.query(`select id from public.profiles order by sort_order limit 9`)).rows.map((r) => r.id)
 const OUT = '00000000-0000-0000-0000-0000000000ff'
 const [A, B, C, D] = P
@@ -22,7 +27,7 @@ const [A, B, C, D] = P
 const QUIZ = Array.from({ length: 6 }, (_, i) => ({ prompt: `Question ${i} ?`, answer: `Bonne ${i}`, distractors: [`Faux ${i}a`, `Faux ${i}b`, `Faux ${i}c`] }))
 const PIF = [{ prompt: 'Combien de marches ?', answer: 100, unit: 'marches' }, { prompt: 'Combien de km ?', answer: 42 }]
 const MAJ = ['Qui de nous ronfle le plus ?', 'Qui de nous arrive toujours en retard ?']
-const OPTS = { quiz: QUIZ, pif: PIF, majorite: MAJ }
+const OPTS = { quiz: QUIZ, pif: PIF, majorite: MAJ, map: 'grand' }
 
 const start = async (opts = OPTS, players = P.slice(0, 4)) => {
   try {
@@ -58,16 +63,69 @@ const roll = (double = false) => ({ type: 'roll', double })
 const sub = (no, payload) => ({ type: 'mg_submit', no, payload })
 const map = (ids, vals) => Object.fromEntries(ids.map((id, i) => [id, Array.isArray(vals) ? vals[i] : vals]))
 
-// ----------------------------------------------------------------------------- plateau / synchro avec board.ts
-const boardTs = fs.readFileSync(new URL('../../src/games/dede-party/board.ts', import.meta.url), 'utf8')
-const tsConst = (name) => JSON.parse(boardTs.match(new RegExp(`export const ${name}[^=]*= (\\[.+\\])\\n`))[1].replace(/'/g, '"'))
-const tsCells = tsConst('CELLS')
-const board = (await db.query(`select public._dp_board() b`)).rows[0].b
-const NEXT = (await db.query(`select public._dp_next() b`)).rows[0].b
-const PREV = (await db.query(`select public._dp_prev() b`)).rows[0].b
+// ----------------------------------------------------------------------------- les 5 plateaux : synchro avec boards/<id>.ts + contrôles de tracé
+const MAPS = (await db.query(`select public._dp_maps() m`)).rows[0].m
+ok('5 plateaux : grand, mer, kermesse, camping, ski', canon(MAPS) === '["grand","mer","kermesse","camping","ski"]', canon(MAPS))
+/** Une constante (une seule ligne) d'un fichier boards/<id>.ts. */
+const tsConst = (src, name) => JSON.parse(src.match(new RegExp(`export const ${name}[^=]*= (.+)\\n`))[1].replace(/'/g, '"'))
+const sqlOf = async (fn, id) => (await db.query(`select public.${fn}($1) b`, [id])).rows[0].b
+const MAPDATA = {}
+// Attendus de la spec (§2 à §5) : tour(s) de plateau, nombre de cases de chaque type.
+const EXPECT = {
+  grand: { laps: [36, 44], n: 47, count: { start: 1, clap: 20, pub: 9, env: 8, loge: 9 } },
+  mer: { laps: [36, 44], n: 45, count: { start: 1, clap: 19, pub: 8, env: 8, loge: 9 } },
+  kermesse: { laps: [40], n: 40, count: { start: 1, clap: 16, pub: 7, env: 6, loge: 8, tombola: 2 } },
+  camping: { laps: [36], n: 36, count: { start: 1, clap: 15, pub: 7, env: 6, loge: 7 } },
+  ski: { laps: [49], n: 49, count: { start: 1, clap: 17, pub: 8, env: 7, loge: 8, lift: 5, ice: 3 } },
+}
+for (const id of MAPS) {
+  const src = fs.readFileSync(new URL(`../../src/games/dede-party/boards/${id}.ts`, import.meta.url), 'utf8')
+  const ts = { cells: tsConst(src, 'CELLS'), next: tsConst(src, 'NEXT'), prev: tsConst(src, 'PREV'), xy: tsConst(src, 'XY'), extra: tsConst(src, 'EXTRA') }
+  const sq = { cells: await sqlOf('_dp_board', id), next: await sqlOf('_dp_next', id), prev: await sqlOf('_dp_prev', id), extra: await sqlOf('_dp_map', id) }
+  MAPDATA[id] = { ...sq, xy: ts.xy }
+  const E = EXPECT[id]
+  ok(`${id} : synchro SQL ↔ boards/${id}.ts (CELLS, NEXT, PREV, EXTRA)`, ['cells', 'next', 'prev', 'extra'].every((k) => canon(sq[k]) === canon(ts[k])), ['cells', 'next', 'prev', 'extra'].filter((k) => canon(sq[k]) !== canon(ts[k])).join())
+  const { cells, next, prev, xy, extra } = MAPDATA[id]
+  const n = cells.length
+  const jumps = id === 'ski' ? [[48, 0]] : []
+  const count = (t) => cells.filter((x) => x === t).length
+  ok(`${id} : ${E.n} cases, tableaux de même taille`, n === E.n && next.length === n && prev.length === n && xy.length === n)
+  ok(`${id} : compte de chaque type (${canon(E.count)})`, Object.entries(E.count).every(([t, c]) => count(t) === c) && cells[0] === 'start' && cells.every((t) => t in { start: 1, clap: 1, pub: 1, env: 1, loge: 1, tombola: 1, lift: 1, ice: 1 }) && cells.filter((t) => !(t in E.count)).length === 0)
+  ok(`${id} : Loges ≥ 6, n° ${extra.no}`, count('loge') >= 6 && extra.no === MAPS.indexOf(id) + 1)
+  const cols = 11, rows = id === 'kermesse' ? 7 : 9
+  ok(`${id} : cases dans la grille ${cols} × ${rows}, aucune superposée`, xy.every(([c, r]) => c >= 0 && c < cols && r >= 0 && r < rows) && new Set(xy.map((p) => p.join())).size === n)
+  const links = next.flatMap((x, i) => [x].flat().map((j) => [i, j]))
+  const adj = (i, j) => Math.abs(xy[i][0] - xy[j][0]) + Math.abs(xy[i][1] - xy[j][1]) === 1
+  ok(`${id} : liaisons entre cases voisines (sauf sauts ${canon(jumps)})`, links.every(([i, j]) => jumps.some(([a, b]) => a === i && b === j) || adj(i, j)))
+  const linked = new Set(links.flatMap(([i, j]) => [`${i}-${j}`, `${j}-${i}`]))
+  const amb = []
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (adj(i, j) && !linked.has(`${i}-${j}`)) amb.push(`${i}/${j}`)
+  ok(`${id} : aucune paire de cases voisines non reliées`, amb.length === 0 || id === 'grand', amb.join(' '))
+  ok(`${id} : PREV inverse de NEXT`, prev.every((p, i) => [next[p]].flat().includes(i)))
+  const reach = new Set([0])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const i of [...reach]) for (const j of [next[i]].flat()) if (!reach.has(j)) { reach.add(j); grew = true }
+  }
+  const forkCells = next.map((x, i) => (Array.isArray(x) ? i : -1)).filter((i) => i >= 0)
+  const lapOf = (way) => { let i = 0, k = 0; do { const nx = next[i]; i = Array.isArray(nx) ? nx[way] : nx; k++ } while (i !== 0 && k < 200); return k }
+  const laps = forkCells.length ? [lapOf(0), lapOf(1)] : [lapOf(0)]
+  ok(`${id} : tout est atteignable, tour de ${E.laps.join(' / ')} cases`, reach.size === n && canon(laps) === canon(E.laps), canon(laps))
+  ok(`${id} : un mode d'aiguillage par embranchement`, Array.isArray(extra.forks) && extra.forks.length === forkCells.length)
+  for (const [a, b] of Object.entries(extra.tp ?? {})) {
+    const A = xy[a], B = xy[b]
+    ok(`${id} : téléporteur ${a} → ${b} à 2 cases en ligne droite, arrivée sans téléporteur`, Math.abs(A[0] - B[0]) + Math.abs(A[1] - B[1]) === 2 && (A[0] === B[0] || A[1] === B[1]) && !(b in extra.tp) && (cells[a] === 'lift') === (b > +a) && ['lift', 'ice'].includes(cells[a]))
+  }
+}
+ok('ski : 8 téléporteurs, un par case lift / ice', Object.keys(MAPDATA.ski.extra.tp).length === 8 && MAPDATA.ski.cells.every((t, i) => !['lift', 'ice'].includes(t) || String(i) in MAPDATA.ski.extra.tp))
+ok('_dp_map : fiches de mécanique', MAPDATA.mer.extra.mech === 'tide' && canon(MAPDATA.mer.extra.bank) === '[36,37,38,39,40,41,42,43,44]' && MAPDATA.mer.extra.wash_to === 14 && MAPDATA.camping.extra.riton_start === 18 && MAPDATA.kermesse.extra.mech === 'tombola' && MAPDATA.grand.extra.mech === 'forks')
+ok('plateau inconnu → Grand Plateau (parties lancées avant les 5 plateaux)', canon(await sqlOf('_dp_board', 'lune')) === canon(MAPDATA.grand.cells) && canon(await sqlOf('_dp_next', null)) === canon(MAPDATA.grand.next))
+
+// Grand Plateau : contrôles historiques.
+const board = MAPDATA.grand.cells
+const NEXT = MAPDATA.grand.next
+const PREV = MAPDATA.grand.prev
 const count = (t) => board.filter((x) => x === t).length
-ok('synchro du plateau SQL ↔ board.ts (cases)', JSON.stringify(board) === JSON.stringify(tsCells), JSON.stringify(tsCells))
-ok('synchro du tracé SQL ↔ board.ts (NEXT, PREV)', JSON.stringify(NEXT) === JSON.stringify(tsConst('NEXT')) && JSON.stringify(PREV) === JSON.stringify(tsConst('PREV')))
 ok('plateau : 47 cases (1 Départ, 20 Applaudissements, 9 Pub, 8 Enveloppes, 9 Loges)', board.length === 47 && board[0] === 'start' && count('start') === 1 && count('clap') === 20 && count('pub') === 9 && count('env') === 8 && count('loge') === 9, JSON.stringify([count('clap'), count('pub'), count('env'), count('loge')]))
 const forks = NEXT.map((n, i) => (Array.isArray(n) ? i : -1)).filter((i) => i >= 0)
 ok('tracé : 2 embranchements (cases 13 et 22), chaque case a une suivante et une précédente', NEXT.length === 47 && PREV.length === 47 && JSON.stringify(forks) === '[13,22]')
@@ -90,7 +148,7 @@ ok('12 cartes Enveloppe surprise', cards.length === 12 && new Set(cards.map((c) 
 
 // ----------------------------------------------------------------------------- démarrage
 const s0 = must(await start(), 'start')
-ok('state : game dede-party, phase intro (≈ 5 s), tour 0/9', s0.state.game === 'dede-party' && s0.state.phase === 'intro' && s0.state.round === 0 && s0.state.rounds === 9 && approx(s0.state.deadline, 5))
+ok('state : game dede-party, phase intro (≈ 8 s, le temps de lire le plateau), tour 0/9', s0.state.game === 'dede-party' && s0.state.phase === 'intro' && s0.state.round === 0 && s0.state.rounds === 9 && approx(s0.state.deadline, 8))
 ok('chacun : Départ, 10 pièces, 0 étoile, 1 Triple dé, première étoile à moitié prix', [A, B, C, D].every((p) => s0.state.pos[p] === 0 && s0.state.coins[p] === 10 && s0.state.stars[p] === 0 && s0.state.double_left[p] === 1 && s0.state.half_price[p] === true))
 const starsOk = (st, n) => st.state.star_cells.length === n && new Set(st.state.star_cells).size === n && st.state.star_cells.every((c) => LOGES.includes(c))
 ok('4 joueurs : 2 étoiles posées sur 2 Loges différentes', starsOk(s0, 2), JSON.stringify(s0.state.star_cells))
@@ -106,6 +164,33 @@ ok('options invalides → 9 tours, questions mal formées ignorées', (await (as
 ok('1 joueur → not_enough_players', (await start(OPTS, P.slice(0, 1))).err === 'not_enough_players')
 ok('9 joueurs → too_many_players', (await start(OPTS, P.slice(0, 9))).err === 'too_many_players')
 ok('8 joueurs acceptés', !(await start(OPTS, P.slice(0, 8))).err)
+
+// ----------------------------------------------------------------------------- choix du plateau
+const logesOf = (id) => MAPDATA[id].cells.map((t, i) => (t === 'loge' ? i : -1)).filter((i) => i >= 0)
+const SW_LEN = { grand: 2, mer: 1, kermesse: 0, camping: 0, ski: 0 }
+for (const id of MAPS) {
+  const g = must(await start({ ...OPTS, map: id }, P.slice(0, 7)), 'map ' + id)
+  const m = g.state.mech
+  const mechOk = id === 'mer' ? [0, 1].includes(m.tide) && [1, 2].includes(m.tide_in) && !(m.tide === 1 && m.tide_in === 2) && g.state.sw[0] === 1 - m.tide
+    : id === 'kermesse' ? canon(m) === '{"pot":5}'
+    : id === 'camping' ? canon(m) === '{"riton":18,"sack":0}'
+    : canon(m) === '{}'
+  ok(`option map « ${id} » : plateau, mécanique initiale, ${SW_LEN[id]} aiguillage(s), 3 étoiles sur des Loges du plateau, pas d'épilogue`, g.state.map === id && mechOk && g.state.sw.length === SW_LEN[id] && g.state.sw.every((x) => x === 0 || x === 1) && g.state.star_cells.length === 3 && g.state.star_cells.every((c) => logesOf(id).includes(c)) && g.state.epi === null, canon([g.state.map, m, g.state.sw, g.state.star_cells]))
+  ok(`option map « ${id} » : stats des plateaux à 0`, ['washed', 'toll_paid', 'jackpots', 'jackpot_best', 'robbed', 'loot', 'lifts', 'slides'].every((k) => g.state.stats[A][k] === 0))
+}
+const drawn = new Set()
+const tides = new Set()
+let highOn40 = false
+for (let i = 0; i < 40; i++) {
+  const g = must(await start(i % 2 ? { ...OPTS, map: 'lune' } : { quiz: QUIZ }, P.slice(0, 7)), 'rand')
+  drawn.add(g.state.map)
+  const gm = must(await start({ ...OPTS, map: 'mer' }, P.slice(0, 8)), 'mer phase')
+  tides.add(canon(gm.state.mech))
+  if (gm.state.mech.tide === 1 && gm.state.star_cells.includes(40)) highOn40 = true
+}
+ok('map absent ou inconnu → tirage parmi les 5 plateaux', [...drawn].every((x) => MAPS.includes(x)) && drawn.size >= 3, canon([...drawn]))
+ok('mer : phase de marée tirée parmi 3 (basse 2 tours, basse 1 tour, haute 1 tour)', tides.size === 3 && [...tides].every((t) => ['{"tide":0,"tide_in":2}', '{"tide":0,"tide_in":1}', '{"tide":1,"tide_in":1}'].includes(t)), canon([...tides]))
+ok('mer : à marée haute, jamais d’étoile posée sur la Loge du Phare (40)', !highOn40)
 
 // ----------------------------------------------------------------------------- intro -> lancer
 ok('tick avant l’échéance : sans effet', must(await act(s0, A, tick), 't0').state.phase === 'intro')
@@ -142,19 +227,20 @@ const T0 = must(await act(late(two), A, tick), 'T0')
  * Par défaut : B part de la case 1 et s'arrête en 3 (Loge sans étoile : rien), l'étoile est loin (30),
  * pas de promo de bienvenue, aiguillages tout droit.
  */
-async function turn(st, { pos = {}, coins = {}, stars = {}, star = [30], sw = [0, 0], dist = {}, half = {}, dice = [1, 1], extra = [], diceB = [1, 1], cards = [] } = {}) {
+async function turn(st, { pos = {}, coins = {}, stars = {}, star = [30], sw, dist = {}, half = {}, dice = [1, 1], extra = [], diceB = [1, 1], cards = [], mech = {}, order = [A, B] } = {}) {
   const base = patch(st, {
-    order: [A, B],
+    order,
     pos: { ...st.state.pos, [B]: 1, ...pos },
     coins: { ...st.state.coins, ...coins },
     stars: { ...st.state.stars, ...stars },
     dist: { ...st.state.dist, ...dist },
     half_price: { [A]: false, [B]: false, ...half },
     star_cells: star,
-    sw,
+    sw: sw ?? ((st.state.map ?? 'grand') === 'grand' ? [0, 0] : st.state.sw),
+    mech: { ...st.state.mech, ...mech },
   }, { forced_dice: [...dice, ...diceB, ...extra], dice_i: 0, forced_cards: cards })
-  const a = must(await act(base, A, roll()), 'turn A')
-  return must(await act(a, B, roll()), 'turn B')
+  const a = must(await act(base, order[0], roll()), 'turn A')
+  return must(await act(a, order[1], roll()), 'turn B')
 }
 const evOf = (r, id = A) => r.state.moves.find((m) => m.id === id).steps.flatMap((s) => s.ev)
 
@@ -261,6 +347,152 @@ t = await card('gift_double')
 ok('carte cadeau : +1 Triple dé', t.state.double_left[A] === 2 && cev(t).text.includes('Triple dé'))
 t = await turn(T0, { dice: [2, 3], cards: [] })
 ok('enveloppe sans carte imposée : pioche mélangée', cev(t) && cards.some((c) => c.id === cev(t).card) && t.server.deck.length === 11)
+ok('Grand Plateau : pas d’épilogue, déplacements 2 + 5 s × 2', t.state.epi === null && approx(t.state.deadline, 12) && canon(t.state.mech) === '{}')
+
+// Partie en cours lancée avant les 5 plateaux (state sans map / mech / epi) : continue sur le Grand Plateau.
+{
+  const legacy = { state: { ...T0.state }, server: T0.server }
+  delete legacy.state.map
+  delete legacy.state.mech
+  delete legacy.state.epi
+  t = await turn(legacy, { pos: { [A]: 12 }, sw: [1, 0], dice: [1, 1] })
+  ok('partie sans « map » : Grand Plateau (aiguillage 13 → La Scène), sans épilogue', t.state.pos[A] === 36 && canon(t.state.sw) === '[0,0]' && !t.state.epi && approx(t.state.deadline, 12))
+}
+
+/** Démarre une partie à 2 joueurs (A puis B) sur un plateau, générique passé. */
+const onMap = async (id) => must(await act(late(must(await start({ ...OPTS, map: id }, [A, B]), 'start ' + id)), A, tick), 'intro ' + id)
+const stepsOf = (r, id = A) => r.state.moves.find((m) => m.id === id).steps
+
+// ----------------------------------------------------------------------------- 🏖️ Dédé-sur-Mer : la Grande Marée
+const MER = await onMap('mer')
+// Marée basse : tout le monde coupe par le Banc de sable (12 → 36), l'aiguillage ne bascule pas.
+t = await turn(MER, { pos: { [A]: 11 }, mech: { tide: 0, tide_in: 2 }, sw: [1], dice: [1, 1] })
+ok('mer, marée basse : 11 → 12 → 36 (Banc de sable, +3), pas de bascule', t.state.pos[A] === 36 && t.state.coins[A] === 13 && canon(t.state.sw) === '[1]' && evOf(t).some((e) => e.t === 'fork' && e.fork === 0 && e.way === 1 && e.tide === true))
+t = await turn(MER, { pos: { [A]: 11, [B]: 11 }, mech: { tide: 0, tide_in: 2 }, sw: [1], dice: [1, 1] })
+ok('mer, marée basse : deux pions de suite passent tous les deux par le Banc', t.state.pos[A] === 36 && t.state.pos[B] === 36)
+t = await turn(MER, { pos: { [A]: 11 }, mech: { tide: 1, tide_in: 1 }, sw: [1], dice: [1, 1] })
+ok('mer, marée haute : 11 → 12 → 13 (la Digue, Pub), l’aiguillage suit la mer', t.state.pos[A] === 13 && t.state.coins[A] === 7 && evOf(t).some((e) => e.t === 'fork' && e.way === 0 && e.tide === true))
+t = await turn(MER, { pos: { [A]: 43 }, mech: { tide: 0, tide_in: 2 }, sw: [1], dice: [1, 1] })
+ok('mer : le Banc rejoint la Digue (43 → 44 → 14)', t.state.pos[A] === 14)
+ok('mer : marée qui ne change pas → pas d’épilogue, tide_in − 1, 2 + 5 s × 2', t.state.epi === null && canon(t.state.mech) === '{"tide":0,"tide_in":1}' && approx(t.state.deadline, 12))
+// La mer monte : A s'arrête sur le Banc (37), B sur la boucle.
+t = await turn(MER, { pos: { [A]: 11 }, dist: { [A]: 11 }, mech: { tide: 0, tide_in: 1 }, sw: [1], dice: [1, 2] })
+ok('mer : la mer monte à la fin du tour → épilogue, marée haute pour 1 tour, voie fermée', t.state.epi?.t === 'tide' && t.state.epi.tide === 1 && canon(t.state.mech) === '{"tide":1,"tide_in":1}' && canon(t.state.sw) === '[0]')
+ok('mer : pion emporté → case 14, −5 pièces, dist + le chemin qui restait, stat washed', t.state.pos[A] === 14 && t.state.coins[A] === 8 && t.state.dist[A] === 11 + 3 + 8 && t.state.stats[A].washed === 1 && canon(t.state.epi.washed) === canon([{ id: A, from: 37, d: -5 }]), canon([t.state.pos[A], t.state.coins[A], t.state.dist[A], t.state.epi?.washed]))
+ok('mer : le témoin (sur la boucle) reste au sec', t.state.pos[B] === 3 && t.state.stats[B].washed === 0)
+ok('mer : épilogue → échéance des déplacements 2 + 5 s × 2 + 4 s, instantané after', approx(t.state.deadline, 16) && t.state.epi.after.pos[A] === 14 && t.state.epi.after.mech.tide === 1 && t.state.moves[0].after.mech.tide === 0)
+t = await turn(MER, { pos: { [A]: 11 }, coins: { [A]: 1 }, mech: { tide: 0, tide_in: 1 }, sw: [1], dice: [1, 2] })
+ok('mer : pion emporté pauvre → il perd ce qu’il a (4), Fauché', t.state.coins[A] === 0 && t.state.epi.washed[0].d === -4 && t.state.stats[A].broke === 1)
+t = await turn(MER, { pos: { [A]: 11, [B]: 37 }, mech: { tide: 0, tide_in: 1 }, sw: [1], dice: [1, 2], order: [B, A] })
+ok('mer : plusieurs pions emportés, dans l’ordre de passage', canon(t.state.epi.washed.map((w) => w.id)) === canon([B, A]) && t.state.pos[A] === 14 && t.state.pos[B] === 14)
+t = await turn(MER, { pos: { [A]: 1 }, star: [40, 3], mech: { tide: 0, tide_in: 1 }, sw: [1] })
+ok('mer : étoile sur la Loge du Phare quand la mer monte → elle déménage (pas sur 40)', !t.state.star_cells.includes(40) && t.state.star_cells.includes(3) && canon(t.state.epi.stars) === canon(t.state.star_cells) && t.state.epi.washed.length === 0)
+t = await turn(MER, { pos: { [A]: 1 }, mech: { tide: 1, tide_in: 1 }, sw: [0] })
+ok('mer : la mer redescend → épilogue, marée basse pour 2 tours, le Banc rouvre', t.state.epi?.t === 'tide' && t.state.epi.tide === 0 && canon(t.state.epi.washed) === '[]' && canon(t.state.mech) === '{"tide":0,"tide_in":2}' && canon(t.state.sw) === '[1]')
+{
+  // À marée haute, une étoile qui déménage ne s'installe jamais sur la Loge du Phare.
+  const others = logesOf('mer').filter((c) => c !== 40)
+  let never40 = true
+  for (let i = 0; i < 12; i++) {
+    const st = { ...MER.state, map: 'mer', mech: { tide: 1, tide_in: 1 }, star_cells: [others[0], ...others.slice(2, 8)].slice(0, 7) }
+    const r = (await db.query(`select public._dp_move_star($1::jsonb, $2) s`, [canon(st), others[0]])).rows[0].s
+    if (r.star_cells.includes(40)) never40 = false
+  }
+  ok('mer : étoile qui déménage à marée haute → jamais sur 40', never40)
+}
+/** Joue n tours de suite (dés 1 + 1, personne sur le Banc à la montée) et rend la suite des épilogues. */
+async function tideRun(phase, n = 9) {
+  let st = patch(MER, { mech: phase, sw: [1 - phase.tide] })
+  const out = []
+  for (let r = 0; r < n; r++) {
+    st = patch(st, { phase: 'roll', rolls: { [A]: null, [B]: null }, pos: { [A]: 23, [B]: 23 } }, { forced_dice: [1, 1, 1, 1], dice_i: 0 })
+    st = must(await act(must(await act(st, A, roll()), 'tide A'), B, roll()), 'tide B')
+    out.push(st.state.epi ? (st.state.epi.tide === 1 ? 'H' : 'B') : '·')
+  }
+  return out.join('')
+}
+ok('mer : cycle 2 tours basse / 1 tour haute sur 9 tours, pour les 3 phases de départ (3 montées chacune)',
+  (await tideRun({ tide: 0, tide_in: 2 })) === '·HB·HB·HB' && (await tideRun({ tide: 0, tide_in: 1 })) === 'HB·HB·HB·' && (await tideRun({ tide: 1, tide_in: 1 })) === 'B·HB·HB·H')
+
+// ----------------------------------------------------------------------------- 🎪 La Kermesse : la Tombola
+const KER = await onMap('kermesse')
+t = await turn(KER, { pos: { [A]: 12 }, mech: { pot: 5 }, dice: [1, 1] })
+ok('kermesse : passer sur la Tombola (13) coûte 3 pièces, versées dans la cagnotte', t.state.pos[A] === 14 && t.state.coins[A] === 10 && t.state.mech.pot === 8 && t.state.stats[A].toll_paid === 3 && evOf(t).some((e) => e.t === 'toll' && e.d === -3 && e.pot === 8))
+t = await turn(KER, { pos: { [A]: 12 }, coins: { [A]: 2 }, mech: { pot: 5 }, dice: [1, 1] })
+ok('kermesse : péage partiel (2 pièces)', t.state.coins[A] === 3 && t.state.mech.pot === 7 && evOf(t).some((e) => e.t === 'toll' && e.d === -2))
+t = await turn(KER, { pos: { [A]: 12 }, coins: { [A]: 0 }, mech: { pot: 5 }, dice: [1, 1] })
+ok('kermesse : sans pièce, on passe gratuitement (évènement d : 0)', t.state.coins[A] === 3 && t.state.mech.pot === 5 && evOf(t).some((e) => e.t === 'toll' && e.d === 0) && t.state.stats[A].broke === 0)
+t = await turn(KER, { pos: { [A]: 13 }, mech: { pot: 5 }, dice: [1, 1] })
+ok('kermesse : repartir d’une case Tombola ne coûte rien', t.state.pos[A] === 15 && t.state.coins[A] === 10 && t.state.mech.pot === 5)
+t = await turn(KER, { pos: { [A]: 33 }, mech: { pot: 5 }, dice: [1, 1], cards: ['back3'] })
+ok('kermesse : reculer sur la Tombola (carte) ne coûte rien', t.state.pos[A] === 32 && t.state.coins[A] === 10 && t.state.mech.pot === 5)
+t = await turn(KER, { pos: { [A]: 11 }, mech: { pot: 14 }, dice: [1, 1] })
+ok('kermesse : pile sur la Tombola → gros lot (14), cagnotte remise à 5', t.state.pos[A] === 13 && t.state.coins[A] === 24 && t.state.mech.pot === 5 && t.state.stats[A].jackpots === 1 && t.state.stats[A].jackpot_best === 14 && evOf(t).some((e) => e.t === 'jackpot' && e.d === 14 && e.pot === 5) && !evOf(t).some((e) => e.t === 'toll'))
+ok('kermesse : gros lot = meilleur moment', canon(t.state.stats[A].best_card) === canon({ card: 'jackpot', text: 'Gros lot de la Tombola', gain: 14 }))
+t = await turn(KER, { pos: { [A]: 10 }, mech: { pot: 5 }, dice: [1, 1], cards: ['fwd3'] })
+ok('kermesse : carte qui franchit la Tombola → péage', t.state.pos[A] === 15 && t.state.coins[A] === 7 && t.state.mech.pot === 8)
+t = await turn(KER, { pos: { [A]: 10 }, mech: { pot: 9 }, dice: [1, 1], cards: ['reroll'], extra: [1] })
+ok('kermesse : carte qui s’arrête sur la Tombola → ni péage ni gros lot', t.state.pos[A] === 13 && t.state.coins[A] === 10 && t.state.mech.pot === 9)
+ok('kermesse : pas d’épilogue', t.state.epi === null && approx(t.state.deadline, 12))
+t = await turn(KER, { pos: { [A]: 12, [B]: 11 }, mech: { pot: 5 }, dice: [1, 1], diceB: [1, 1] })
+ok('kermesse : A paie le péage (8), puis B s’arrête pile et touche 8', t.state.coins[A] === 10 && t.state.coins[B] === 18 && t.state.mech.pot === 5 && t.state.moves[0].after.mech.pot === 8)
+
+// ----------------------------------------------------------------------------- 🏕️ Le Camping : Riton le raton
+const CAMP = await onMap('camping')
+const ritonOf = (r, id = A) => evOf(r, id).filter((e) => e.t === 'riton')
+// B loin de Riton (26 → 28) ; Riton fait 1 case à la fin du tour (dé imposé après ceux des joueurs).
+t = await turn(CAMP, { pos: { [A]: 2, [B]: 26 }, mech: { riton: 4, sack: 0 }, dice: [1, 1], extra: [1] })
+ok('camping : s’arrêter sur Riton (sac vide) → il pique 5 pièces (puis Applaudissements +3)', t.state.coins[A] === 8 && ritonOf(t).length === 1 && ritonOf(t)[0].k === 'steal' && ritonOf(t)[0].d === -5 && ritonOf(t)[0].sack === 5 && t.state.stats[A].robbed === 1)
+ok('camping : épilogue à chaque tour (dé de Riton, à contresens), échéance + 4 s', t.state.epi?.t === 'riton' && t.state.epi.die === 1 && t.state.epi.from === 4 && canon(t.state.epi.path) === '[3]' && canon(t.state.mech) === '{"riton":3,"sack":5}' && approx(t.state.deadline, 16))
+t = await turn(CAMP, { pos: { [A]: 2, [B]: 26 }, mech: { riton: 3, sack: 5 }, dice: [1, 1], extra: [1] })
+ok('camping : passer sur Riton (sac plein) → il lâche tout', t.state.coins[A] === 18 && ritonOf(t)[0].k === 'drop' && ritonOf(t)[0].d === 5 && t.state.stats[A].loot === 5 && t.state.moves[0].after.mech.sack === 0)
+ok('camping : sac de Riton = meilleur moment', canon(t.state.stats[A].best_card) === canon({ card: 'riton', text: 'Le sac de Riton', gain: 5 }))
+t = await turn(CAMP, { pos: { [A]: 2, [B]: 26 }, coins: { [A]: 0 }, mech: { riton: 3, sack: 0 }, dice: [1, 1], extra: [1] })
+ok('camping : sans pièce, Riton repart bredouille', t.state.coins[A] === 3 && ritonOf(t)[0].k === 'none' && t.state.moves[0].after.mech.sack === 0 && t.state.stats[A].robbed === 0)
+t = await turn(CAMP, { pos: { [A]: 2, [B]: 26 }, coins: { [A]: 3 }, mech: { riton: 3, sack: 0 }, dice: [1, 1], extra: [1] })
+ok('camping : pion pauvre → Riton prend ce qu’il a (3)', ritonOf(t)[0].d === -3 && t.state.moves[0].after.mech.sack === 3)
+// En reculant (carte) : 3 → 5 (Enveloppe), recule 4, 3 (Riton : vol), 2 ; puis la ronde de Riton (3 → 2) recroise A : il lâche le sac.
+t = await turn(CAMP, { pos: { [A]: 3, [B]: 26 }, mech: { riton: 3, sack: 0 }, dice: [1, 1], cards: ['back3'], extra: [1] })
+ok('camping : croiser Riton en reculant (carte) → vol', t.state.moves[0].after.coins[A] === 5 && ritonOf(t).some((e) => e.k === 'steal') && t.state.moves[0].after.pos[A] === 2)
+ok('camping : pendant la ronde, Riton arrive sur A → sac lâché', canon(t.state.epi.hits) === canon([{ id: A, cell: 2, k: 'drop', d: 5, sack: 0 }]) && t.state.coins[A] === 10 && canon(t.state.mech) === '{"riton":2,"sack":0}')
+ok('camping : quitter la case de Riton n’est pas un croisement (un seul vol, en reculant)', ritonOf(t).length === 1 && t.state.stats[A].robbed === 1)
+// Ronde de 4 cases (20 → 19, 18, 17, 16) : A posé en 18 (vol), B en 17 (lâcher).
+t = await turn(CAMP, { pos: { [A]: 16, [B]: 15 }, mech: { riton: 20, sack: 0 }, dice: [1, 1], diceB: [1, 1], extra: [4] })
+ok('camping : ronde de Riton → plusieurs pions dans l’ordre des cases (vol, puis lâcher)', canon(t.state.epi.path) === '[19,18,17,16]' && canon(t.state.epi.hits.map((h) => [h.id, h.cell, h.k, h.d])) === canon([[A, 18, 'steal', -5], [B, 17, 'drop', 5]]) && t.state.coins[A] === 5 && t.state.coins[B] === 12 && t.state.mech.riton === 16 && t.state.mech.sack === 0)
+t = await turn(CAMP, { pos: { [A]: 16, [B]: 16 }, mech: { riton: 20, sack: 0 }, dice: [1, 1], diceB: [1, 1], extra: [2], order: [B, A] })
+ok('camping : deux pions sur la même case → dans l’ordre de passage', canon(t.state.epi.hits.map((h) => [h.id, h.k])) === canon([[B, 'steal'], [A, 'drop']]))
+t = await turn(CAMP, { pos: { [A]: 18, [B]: 26 }, mech: { riton: 20, sack: 0 }, dice: [1, 1], extra: [1] })
+ok('camping : A s’arrête sur Riton (vol), Riton s’en va sans le recroiser', ritonOf(t).length === 1 && t.state.epi.hits.length === 0 && t.state.epi.from === 20 && t.state.mech.riton === 19)
+t = await turn(CAMP, { pos: { [A]: 11, [B]: 26 }, coins: { [A]: 32 }, star: [13], mech: { riton: 13, sack: 0 }, dice: [1, 1], extra: [1] })
+ok('camping : Riton passe avant l’étoile (32 − 5 = 27 < 30 → ratée)', t.state.stars[A] === 0 && canon(stepsOf(t)[1].ev.map((e) => e.t)) === '["riton","star_poor"]')
+t = await turn(CAMP, { pos: { [A]: 3, [B]: 26 }, mech: { riton: 30, sack: 0 }, dice: [1, 1], cards: ['reroll'], extra: [2, 5] })
+ok('camping : dé de Riton après tous les dés du tour (lancers puis « Bis »)', cev(t).die === 2 && t.state.epi.die === 5 && canon(t.state.epi.path) === '[29,28,27,26,25]')
+ok('camping : Riton croise B sur sa ronde (B arrivé en 28)', t.state.epi.hits.some((h) => h.id === B && h.cell === 28))
+
+// ----------------------------------------------------------------------------- ⛷️ Dédé 2000 : télésièges, verglas, Grande Luge
+const SKI = await onMap('ski')
+for (const [from, to] of Object.entries(MAPDATA.ski.extra.tp).map(([a, b]) => [Number(a), b])) {
+  const k = to > from ? 'lift' : 'ice'
+  t = await turn(SKI, { pos: { [A]: from - 2 }, dist: { [A]: 100 }, dice: [1, 1], diceB: [1, 2] })
+  const st = stepsOf(t)
+  const last = st[st.length - 1]
+  ok(`ski : ${k === 'lift' ? 'télésiège' : 'verglas'} ${from} → ${to} (pile dessus)`, t.state.pos[A] === to && t.state.dist[A] === 100 + 2 + (to - from) && t.state.coins[A] === 10 && st.length === 3 && last.cell === to && last.tp === k && canon(last.ev[0]) === canon({ t: 'tp', k, from, to }) && t.state.stats[A][k === 'lift' ? 'lifts' : 'slides'] === 1, canon(st))
+}
+t = await turn(SKI, { pos: { [A]: 1 }, dice: [1, 2], diceB: [1, 2] })
+ok('ski : passer sur un télésiège ne fait rien', t.state.pos[A] === 4 && t.state.stats[A].lifts === 0)
+t = await turn(SKI, { pos: { [A]: 12 }, dice: [1, 1], diceB: [1, 2], cards: ['reroll'], extra: [1] })
+ok('ski : une carte qui s’arrête sur un télésiège ne le déclenche pas', t.state.pos[A] === 15 && t.state.stats[A].lifts === 0)
+t = await turn(SKI, { pos: { [A]: 1 }, coins: { [A]: 30 }, star: [37], dice: [1, 1], diceB: [1, 2] })
+ok('ski : étoile achetée à l’arrivée du télésiège (Pile dessus)', t.state.stars[A] === 1 && t.state.stats[A].star_exact === 1 && stepsOf(t)[2].ev.some((e) => e.t === 'star' && e.exact === true))
+t = await turn(SKI, { pos: { [A]: 1 }, coins: { [A]: 20 }, star: [37], dice: [1, 1], diceB: [1, 2] })
+ok('ski : pas assez de pièces à l’arrivée → star_poor', t.state.stars[A] === 0 && stepsOf(t)[2].ev.some((e) => e.t === 'star_poor'))
+t = await turn(SKI, { pos: { [A]: 47 }, dice: [1, 1], diceB: [1, 2] })
+ok('ski : Grande Luge 48 → 0, +5 au Départ', t.state.pos[A] === 0 && t.state.coins[A] === 15 && canon(stepsOf(t).map((s) => s.cell)) === '[48,0]')
+{
+  const w = (await db.query(`select public._dp_walk($1::jsonb, $2, 3, -1) w`, [canon({ ...SKI.state, pos: { ...SKI.state.pos, [A]: 1 } }), A])).rows[0].w
+  ok('ski : carte « recule » à travers la Grande Luge (1 → 0, 48, 47), sans bonus', canon(w.steps.map((s) => s.cell)) === '[0,48,47]' && w.state.coins[A] === 10)
+}
+ok('ski : pas d’épilogue', t.state.epi === null && approx(t.state.deadline, 12))
 
 // ----------------------------------------------------------------------------- enchaînement des phases
 let G = auto
@@ -451,6 +683,7 @@ const tr = (await db.query(`select slot, id, rule from public.trophies where ten
 ok('catalogue : 11 trophées party_* actifs (slots 2 à 12)', tr.length === 11 && tr[0].slot === 2 && tr[10].slot === 12 && tr.every((x) => x.id.startsWith('party_')), String(tr.length))
 const keys = Object.keys(fr(C).stats)
 ok('trophées : toutes les stats du catalogue sont posées par le moteur', tr.filter((x) => x.rule.stat && x.rule.stat !== 'won').every((x) => keys.includes(x.rule.stat)), JSON.stringify(tr.map((x) => x.rule.stat)))
+ok('stats de fin : compteurs des plateaux et map_no (1 = Grand Plateau)', fr(C).stats.map_no === 1 && ['washed', 'toll_paid', 'jackpots', 'jackpot_best', 'robbed', 'loot', 'lifts', 'slides'].every((k) => fr(C).stats[k] === 0))
 
 // ----------------------------------------------------------------------------- parties complètes (simulation d'équilibrage)
 // Deux familles : « hasard » (tout le monde joue au pif) et « niveaux » (le joueur 0 est le plus fort aux
@@ -482,12 +715,14 @@ function skilledPayload(st, lvl) {
   if (k === 'etoiles') return { score: Math.round(5 + 15 * lvl + rnd(9)) }
   return { ms: Math.round(7000 + (Math.random() - 0.5) * 2 * (150 + 1800 * (1 - lvl))) }
 }
-async function simulate(n, rounds, skilled = false) {
+async function simulate(n, rounds, skilled = false, map = 'grand') {
   const players = P.slice(0, n)
   const lvl = (p) => 1 - players.indexOf(p) / (n - 1)
-  let st = must(await start({ ...OPTS, rounds }, players), 'sim')
+  let st = must(await start({ ...OPTS, rounds, map }, players), 'sim')
   st = must(await act(late(st), players[0], tick), 'sim intro')
   let moveS = 0
+  // Évènements signature du plateau, comptés dans les scénarios publiés.
+  const ev = { rises: 0, washed: 0, tolls: 0, jackpots: 0, jackpotSum: 0, jackpotMax: 0, steals: 0, drops: 0, nones: 0, lifts: 0, slides: 0, luges: 0, starts: 0 }
   for (let guard = 0; guard < 400 && st.state.phase !== 'finished'; guard++) {
     const ph = st.state.phase
     if (ph === 'roll') {
@@ -499,6 +734,18 @@ async function simulate(n, rounds, skilled = false) {
       }
       if (st.state.phase === 'roll') st = must(await act(late(st), players[0], tick), 'sim roll tick')
       moveS = Math.max(moveS, ...st.state.moves.map((m) => m.steps.length))
+      const all = st.state.moves.flatMap((m) => m.steps.flatMap((s) => s.ev))
+      for (const e of all) {
+        if (e.t === 'toll') ev.tolls++
+        if (e.t === 'jackpot') { ev.jackpots++; ev.jackpotSum += e.d; ev.jackpotMax = Math.max(ev.jackpotMax, e.d) }
+        if (e.t === 'riton') ev[e.k === 'steal' ? 'steals' : e.k === 'drop' ? 'drops' : 'nones']++
+        if (e.t === 'tp') ev[e.k === 'lift' ? 'lifts' : 'slides']++
+        if (e.t === 'start') ev.starts++
+      }
+      const epi = st.state.epi
+      if (epi?.t === 'tide' && epi.tide === 1) { ev.rises++; ev.washed += epi.washed.length }
+      if (epi?.t === 'riton') for (const h of epi.hits) ev[h.k === 'steal' ? 'steals' : h.k === 'drop' ? 'drops' : 'nones']++
+      if (st.state.moves.some((m) => m.steps.some((s, k) => s.cell === 0 && (k === 0 ? m.from : m.steps[k - 1].cell) === 48 && map === 'ski'))) ev.luges++
     } else if (ph === 'mg_play') {
       if (st.state.mg.kind === 'buzzer') st = patch(st, { mg: { ...st.state.mg, data: { ...st.state.mg.data, go_at: iso(-2) } } })
       for (const p of players) {
@@ -511,7 +758,7 @@ async function simulate(n, rounds, skilled = false) {
       st = must(await act(late(st), players[0], tick), 'sim tick ' + ph)
     }
   }
-  return { st, maxSteps: moveS }
+  return { st, maxSteps: moveS, ev }
 }
 const t0 = Date.now()
 const CONFIGS = [[4, 9, false], [6, 9, false], [8, 9, false], [2, 9, false], [3, 6, false], [4, 12, false], [4, 9, true], [6, 9, true], [8, 9, true]]
@@ -545,6 +792,60 @@ for (const [n, rounds, skilled] of CONFIGS) {
   }
   console.log(line)
 }
+
+// ----------------------------------------------------------------------------- simulation des 5 plateaux (2, 4 et 8 joueurs, 9 tours)
+// Comparée aux chiffres du modèle JS de la spec (§2 à §6) : écart > 15 % signalé (pas un échec : le modèle
+// JS tire les mini-jeux au sort sans absents, la simulation SQL joue des envois au hasard avec des absents).
+const SPEC = {
+  // étoiles par joueur (bonus de cérémonie compris), à 2 / 4 / 8 joueurs
+  stars: { grand: [2.61, 2.37, 1.97], mer: [2.62, 2.32, 1.89], kermesse: [2.58, 2.31, 1.89], camping: [2.76, 2.47, 2.04], ski: [2.32, 2.22, 1.89] },
+  // évènements signature par partie, à 2 / 4 / 8 joueurs (null : pas de chiffre dans la spec)
+  ev: {
+    mer: { rises: [3, 3, 3], washed: [0.77 * 2, 3.1, 0.77 * 8] },
+    kermesse: { jackpots: [0.9, 1.7, 3.5], tolls: [null, 11, null] },
+    camping: { steals: [3, 5.9, 11.5] },
+    ski: { lifts: [2.2, 4.5, 8.9], slides: [0.9, 1.8, 3.5] },
+  },
+}
+const t1 = Date.now()
+const mapSims = []
+for (const map of MAPS) {
+  for (const n of [2, 4, 8]) {
+    for (let i = 0; i < MAP_SIMS; i++) {
+      const r = await simulate(n, 9, false, map)
+      mapSims.push({ map, n, ...r })
+    }
+  }
+}
+ok(`simulation des 5 plateaux : ${mapSims.length} parties complètes (2, 4, 8 joueurs) jusqu’à finished`, mapSims.every((x) => x.st.state.phase === 'finished' && x.st.results.length === x.n))
+ok('simulation des 5 plateaux : jamais plus de 24 pas pour un pion en un tour', mapSims.every((x) => x.maxSteps <= 24), String(Math.max(...mapSims.map((x) => x.maxSteps))))
+ok('simulation des 5 plateaux : pièces jamais négatives, map_no dans les stats de fin', mapSims.every((x) => Object.values(x.st.state.coins).every((v) => v >= 0) && x.st.results.every((r) => r.stats.map_no === MAPS.indexOf(x.map) + 1)))
+ok('simulation des 5 plateaux : les mécaniques se déclenchent (marée, gros lot, Riton, télésiège)', !mapSims.length || ['mer:rises', 'kermesse:tolls', 'camping:steals', 'ski:lifts'].every((k) => { const [m, e] = k.split(':'); return mapSims.filter((x) => x.map === m).some((x) => x.ev[e] > 0) }))
+const ecarts = []
+const vs = (label, got, ref) => {
+  if (ref == null || !mapSims.length) return `${label} ${got.toFixed(2)}`
+  const d = (got - ref) / ref
+  if (Math.abs(d) > 0.15) ecarts.push(`${label} : ${got.toFixed(2)} contre ${ref} dans la spec (${d > 0 ? '+' : ''}${Math.round(d * 100)} %)`)
+  return `${label} ${got.toFixed(2)} (spec ${ref})`
+}
+console.log(`\n— Simulation des 5 plateaux (${MAP_SIMS} parties par config, 9 tours, ${((Date.now() - t1) / 1000).toFixed(1)} s) —`)
+for (const map of MAPS) {
+  for (const [k, n] of [2, 4, 8].entries()) {
+    const g = mapSims.filter((x) => x.map === map && x.n === n)
+    if (!g.length) continue
+    const all = g.flatMap((x) => x.st.results)
+    const per = (f) => g.reduce((a, x) => a + f(x), 0) / g.length
+    let line = `  ${map.padEnd(8)} ${n} joueurs : ${vs('étoiles/joueur', all.reduce((a, r) => a + r.stats.stars, 0) / all.length, SPEC.stars[map][k])} · vainqueur ${avg(g.map((x) => Math.max(...x.st.results.map((r) => r.stats.stars))))} ★ · sans étoile ${pct(all.filter((r) => r.stats.no_star).length, all.length)} · fauché ${pct(all.filter((r) => r.stats.broke).length, all.length)} · pubs≥3 ${pct(all.filter((r) => r.stats.pubs >= 3).length, all.length)} · Départ/joueur ${(per((x) => x.ev.starts) / n).toFixed(2)} · pas max ${Math.max(...g.map((x) => x.maxSteps))}`
+    const E = SPEC.ev[map] ?? {}
+    if (map === 'mer') line += `\n             marée : ${vs('montées', per((x) => x.ev.rises), E.rises[k])} · ${vs('pions emportés', per((x) => x.ev.washed), E.washed[k])}`
+    if (map === 'kermesse') line += `\n             tombola : ${vs('péages', per((x) => x.ev.tolls), E.tolls[k])} · ${vs('gros lots', per((x) => x.ev.jackpots), E.jackpots[k])} · gros lot moyen ${(g.reduce((a, x) => a + x.ev.jackpotSum, 0) / Math.max(1, g.reduce((a, x) => a + x.ev.jackpots, 0))).toFixed(1)} · record ${Math.max(...g.map((x) => x.ev.jackpotMax))}`
+    if (map === 'camping') line += `\n             Riton : ${vs('vols', per((x) => x.ev.steals), E.steals[k])} · sacs lâchés ${per((x) => x.ev.drops).toFixed(2)} · bredouilles ${per((x) => x.ev.nones).toFixed(2)}`
+    if (map === 'ski') line += `\n             ski : ${vs('télésièges', per((x) => x.ev.lifts), E.lifts[k])} · ${vs('glissades', per((x) => x.ev.slides), E.slides[k])} · Grandes Luges ${per((x) => x.ev.luges).toFixed(2)}`
+    console.log(line)
+  }
+}
+if (ecarts.length) console.log(`\n⚠ Écarts > 15 % avec la spec (${MAP_SIMS} parties par config : à relire avec plus de parties) :\n  - ${ecarts.join('\n  - ')}`)
+else console.log('\nAucun écart > 15 % avec les chiffres de la spec.')
 
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)
