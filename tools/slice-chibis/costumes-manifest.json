@@ -21,7 +21,11 @@
       "tycoon",
       "admiral",
       "pirate",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ],
     "portraits": [
       "spy",
@@ -44,7 +48,11 @@
       "teacher",
       "star",
       "racer",
-      "hacker"
+      "hacker",
+      "chess",
+      "golfer",
+      "host",
+      "cowboy"
     ]
   },
   "cecile": {
