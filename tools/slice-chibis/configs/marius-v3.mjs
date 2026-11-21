@@ -6,10 +6,10 @@ const GRID = ['tictactoe', 'archer', 'werewolf', 'painter'];
 // painter : sans « pockets » (sinon le contour noir du dessin est pris pour du fond).
 // strategist : liserés soudés partout -> séparation par érosion (la grille mélange les cases).
 const ERODE = ['strategist'];
-const S = (name) => ({ name, file: `marius-${name}.png`, n: 12, dir: name, map: MAP, white: name === 'racer', tol: 24, ...(GRID.includes(name) ? { split: 'grid', pockets: name !== 'painter' } : {}), ...(ERODE.includes(name) ? { split: true } : {}) });
+const S = (name) => ({ name, file: `marius-${name}.png`, n: 12, dir: name, map: MAP, white: name === 'racer', tol: name === 'elf' ? 8 : 24, ...(GRID.includes(name) ? { split: 'grid', pockets: name !== 'painter' } : {}), ...(ERODE.includes(name) ? { split: true } : {}) });
 export default {
   slug: 'marius',
   src: 'assets-source/costumes/marius-v3',
-  sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker chess golfer host cowboy'.split(' ').map(S),
-  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema hacker chess golfer host cowboy'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker chess golfer host cowboy elf'.split(' ').map(S),
+  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
 };
