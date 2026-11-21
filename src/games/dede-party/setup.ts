@@ -10,7 +10,7 @@ export const DP_ROUNDS = [6, 9, 12] as const
 export type DpRounds = (typeof DP_ROUNDS)[number]
 /** Plateau choisi par l'hôte : un des 5, ou « Au hasard » (résolu ici, le serveur reçoit toujours un id). */
 export type DpMapChoice = MapId | 'random'
-export const DP_DEFAULT_OPTIONS = { rounds: 9 as DpRounds, map: 'random' as DpMapChoice }
+export const DP_DEFAULT_OPTIONS = { rounds: 9 as DpRounds, map: 'random' as DpMapChoice, bots: 0 }
 
 /** Dernier plateau joué sur cet appareil (pas de redite au tirage « Au hasard »). */
 const LAST_MAP_KEY = 'dp:last-map'
@@ -42,9 +42,11 @@ export const DP_DURATION: Record<DpRounds, { label: string; minutes: string }> =
   12: { label: 'Longue', minutes: '≈ 20 min' },
 }
 
-export function normalizeOptions(o: Record<string, unknown>): { rounds: DpRounds; map: DpMapChoice } {
+export function normalizeOptions(o: Record<string, unknown>): { rounds: DpRounds; map: DpMapChoice; bots: number } {
   const r = Number(o.rounds)
+  const b = Number(o.bots)
   return {
+    bots: Number.isInteger(b) && b >= 0 && b <= 7 ? b : 0,
     rounds: (DP_ROUNDS as readonly number[]).includes(r) ? (r as DpRounds) : DP_DEFAULT_OPTIONS.rounds,
     map: isMapId(o.map) ? o.map : 'random',
   }
@@ -80,5 +82,5 @@ export async function prepareDedePartyStart(options: Record<string, unknown>): P
     .slice(0, COUNTS.pif)
     .map((q) => ({ prompt: q.prompt, answer: q.answer, unit: q.unit ?? null }))
   const majorite = shuffle(QDN).slice(0, COUNTS.majorite).map((q) => q.text)
-  return { rounds: o.rounds, map, quiz, pif, majorite }
+  return { rounds: o.rounds, map, bots: o.bots, quiz, pif, majorite }
 }

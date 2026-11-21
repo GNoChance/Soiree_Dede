@@ -164,7 +164,30 @@ ok('options invalides → 9 tours, questions mal formées ignorées', (await (as
   const r = must(await start({ rounds: 7, quiz: [{ prompt: 'x' }, QUIZ[0]], pif: [{ prompt: 'y', answer: 'abc' }], majorite: [3, 'ok'] }), 'bad')
   return r.state.rounds === 9 && r.server.q.quiz.length === 1 && r.server.q.pif.length === 0 && r.server.q.majorite.length === 1
 })()))
-ok('1 joueur → not_enough_players', (await start(OPTS, P.slice(0, 1))).err === 'not_enough_players')
+ok('0 joueur → not_enough_players', (await start(OPTS, [])).err === 'not_enough_players')
+// ----------------------------------------------------------------------------- bots
+{
+  const solo = must(await start(OPTS, P.slice(0, 1)), 'solo')
+  ok('1 joueur seul → 1 bot ajouté d’office', JSON.stringify(solo.state.bots) === '["bot1"]' && solo.state.players.length === 2 && solo.state.coins.bot1 === 10)
+  const b3 = must(await start({ ...OPTS, bots: 3 }, P.slice(0, 2)), 'b3')
+  ok('option bots : 2 joueurs + 3 bots = 5 participants', b3.state.players.length === 5 && b3.state.bots.length === 3 && b3.state.size === 's')
+  ok('bots plafonnés à 8 participants', must(await start({ ...OPTS, bots: 9 }, P.slice(0, 6)), 'b9').state.players.length === 8)
+  // partie complète en solo + 3 bots : le joueur ne fait rien, tout avance aux échéances
+  let st = must(await start({ ...OPTS, rounds: 6, bots: 3 }, P.slice(0, 1)), 'bots-game')
+  let res = null
+  let botsRolled = true
+  let botsPlayed = true
+  for (let i = 0; i < 200 && st.state.phase !== 'finished'; i++) {
+    const r = must(await act(late(st), A, tick), 'tick ' + st.state.phase)
+    if (r.state.phase === 'roll') botsRolled &&= r.state.bots.every((b) => r.state.rolls[b]?.dice?.length >= 2)
+    if (r.state.phase === 'mg_result') botsPlayed &&= r.state.bots.every((b) => r.state.mg.results.find((x) => x.id === b)?.played)
+    if (r.results) res = r.results
+    st = r
+  }
+  ok('bots : dés lancés dès l’ouverture du lancer', botsRolled)
+  ok('bots : jouent chaque mini-jeu', botsPlayed)
+  ok('bots : partie terminée, seul le vrai joueur va dans finish_match', st.state.phase === 'finished' && res?.length === 1 && res[0].profile_id === A && st.state.results.length === 4, JSON.stringify(res))
+}
 ok('9 joueurs → too_many_players', (await start(OPTS, P.slice(0, 9))).err === 'too_many_players')
 ok('8 joueurs acceptés', !(await start(OPTS, P.slice(0, 8))).err)
 

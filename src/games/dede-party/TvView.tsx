@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { cn } from '@/lib/cn'
 import { playSound } from '@/lib/feedback'
-import { playerOrPlaceholder } from '@/features/soiree/players'
+import { useGet } from './bots'
 import { useViewport } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
 import { moverLine, rollLine, useBoardView } from './anim'
@@ -23,7 +23,7 @@ export function DedePartyTv({ state, act, players }: GamePlayProps) {
   const live = state as unknown as DedePartyState
   // Rideau de théâtre entre le plateau, les mini-jeux et la cérémonie : `s` = state affiché.
   const { shown: s, closed } = useCurtain(live)
-  const get: Get = useCallback((id: string) => playerOrPlaceholder(players, id), [players])
+  const get: Get = useGet(players, live)
   const { w, h } = useViewport()
   const landscape = w > h * 1.05
   const left = useDeadlineTick(live, act, true)

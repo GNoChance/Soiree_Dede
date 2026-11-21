@@ -222,6 +222,8 @@ export interface DedePartyState {
   phase: DpPhase
   seq?: number
   players: string[]
+  /** Bots joués par le serveur (ids 'bot1'…, aussi dans players ; absent : partie lancée avant les bots). */
+  bots?: string[]
   round: number
   rounds: number
   total_rounds?: number

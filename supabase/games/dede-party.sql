@@ -992,6 +992,8 @@ begin
     when 'chrono' then interval '22 seconds'
     else interval '12 seconds' end;
   p_state := jsonb_set(p_state, '{mg,started_at}', to_jsonb(v_now));
+  -- Les bots sont « déjà prêts » (leur envoi est tiré à la clôture, cf. _dp_bot_sub).
+  p_state := jsonb_set(p_state, '{mg,submitted}', coalesce(p_state->'bots', '[]'::jsonb));
   if v_kind = 'buzzer' then
     -- L'écran passe au vert à un moment surprise (2,5 à 6,5 s après le départ).
     v_go := v_now + make_interval(secs => 2.5 + random() * 4);
@@ -1095,6 +1097,13 @@ declare
   pl       text;
   i        integer;
 begin
+  -- Envois des bots (tirés maintenant : les réponses secrètes sont connues).
+  for pl in select x from jsonb_array_elements_text(coalesce(p_state->'bots', '[]'::jsonb)) x loop
+    if not (v_subs ? pl) then
+      v_sub := public._dp_bot_sub(p_state, v_secret);
+      if v_sub is not null then v_subs := v_subs || jsonb_build_object(pl, v_sub); end if;
+    end if;
+  end loop;
   -- Clé de tri (petit = meilleur ; null = dernier) et score affiché, par envoi.
   if v_kind = 'majorite' then
     select coalesce(jsonb_object_agg(t, n), '{}'::jsonb) into v_counts
@@ -1265,7 +1274,68 @@ begin
     into v_results
     from jsonb_array_elements(p_state->'ranking') e;
   p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null, 'results', v_results);
-  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+  -- Les bots ne sont pas des profils : hors de finish_match (XP, stats, trophées), leur rang compte quand même.
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results',
+    (select coalesce(jsonb_agg(r order by o), '[]'::jsonb) from jsonb_array_elements(v_results) with ordinality t(r, o)
+      where not (coalesce(p_state->'bots', '[]'::jsonb) ? (r->>'profile_id'))));
+end $$;
+
+-- Bots : ils lancent dès l'ouverture du lancer (Triple dé gardé pour la finale). Renvoie {state, server}.
+create or replace function public._dp_bots_roll(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql
+set search_path = public, extensions
+as $$
+declare
+  v_r jsonb;
+  b   text;
+begin
+  for b in select x from jsonb_array_elements_text(coalesce(p_state->'bots', '[]'::jsonb)) x loop
+    if jsonb_typeof(p_state->'rolls'->b) is distinct from 'object' then
+      v_r := public._dp_do_roll(p_state, p_server, b,
+        (p_state->>'round')::integer >= (p_state->>'rounds')::integer and coalesce((p_state->'double_left'->>b)::integer, 0) > 0);
+      p_state := v_r->'state';
+      p_server := v_r->'server';
+    end if;
+  end loop;
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Envoi d'un bot pour le mini-jeu en cours (déjà normalisé, comme _dp_check_submit) : un joueur moyen,
+-- battable mais pas ridicule.
+create or replace function public._dp_bot_sub(p_state jsonb, p_secret jsonb)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_kind text := p_state->'mg'->>'kind';
+  v_ans  numeric;
+  v_a    jsonb := '[]'::jsonb;
+  v_m    jsonb := '[]'::jsonb;
+  v_ok   integer;
+  i      integer;
+begin
+  if v_kind = 'quiz' then
+    for i in 0 .. 2 loop
+      v_ok := (p_secret->'answers'->>i)::integer;
+      v_a := v_a || to_jsonb(case when random() < 0.55 then v_ok else (v_ok + 1 + floor(random() * 3)::integer) % 4 end);
+      v_m := v_m || to_jsonb(1500 + floor(random() * 5000)::integer);
+    end loop;
+    return jsonb_build_object('answers', v_a, 'ms', v_m);
+  elsif v_kind = 'pif' then
+    v_ans := (p_secret->>'answer')::numeric;
+    v_ans := v_ans * (1 + (random() - 0.5) * 0.8);
+    return jsonb_build_object('value', case when abs(v_ans) >= 10 then round(v_ans) else round(v_ans, 1) end);
+  elsif v_kind = 'majorite' then
+    return jsonb_build_object('target', p_state->'players'->floor(random() * jsonb_array_length(p_state->'players'))::integer);
+  elsif v_kind = 'buzzer' then
+    if random() < 0.1 then return '{"false_start":true}'::jsonb; end if;
+    return jsonb_build_object('ms', 260 + floor(random() * 400)::integer);
+  elsif v_kind = 'etoiles' then
+    return jsonb_build_object('score', least(6 + floor(random() * 17)::integer, (p_state->'mg'->'data'->>'cap')::integer));
+  elsif v_kind = 'chrono' then
+    return jsonb_build_object('ms', (public._dp_const()->>'chrono_target')::integer + floor((random() - 0.5) * 1600)::integer);
+  end if;
+  return null;
 end $$;
 
 -- Passe à la phase suivante (échéance atteinte, ou `skip` de l'hôte).
@@ -1277,7 +1347,7 @@ declare
   v_phase text := p_state->>'phase';
 begin
   if v_phase = 'intro' then
-    return jsonb_build_object('state', public._dp_open_roll(p_state), 'server', p_server);
+    return public._dp_bots_roll(public._dp_open_roll(p_state), p_server);
   elsif v_phase = 'roll' then
     return public._dp_resolve(p_state, p_server);
   elsif v_phase = 'move' then
@@ -1290,7 +1360,7 @@ begin
     if (p_state->>'round')::integer >= (p_state->>'rounds')::integer then
       return jsonb_build_object('state', public._dp_awards(p_state), 'server', p_server);
     end if;
-    return jsonb_build_object('state', public._dp_open_roll(p_state), 'server', p_server);
+    return public._dp_bots_roll(public._dp_open_roll(p_state), p_server);
   elsif v_phase = 'awards' then
     return public._dp_finish(p_state, p_server);
   end if;
@@ -1321,13 +1391,24 @@ declare
   v_star   jsonb;
   v_size   text;
   v_fiche  jsonb;
-  v_n      integer := coalesce(cardinality(p_players), 0);
+  v_bots   jsonb;
+  v_ids    jsonb;
+  v_nb     integer;
+  v_n      integer;
   v_pos    jsonb;
   v_spots  jsonb;
   v_zone   jsonb;
 begin
-  if coalesce(cardinality(p_players), 0) < 2 then raise exception 'not_enough_players'; end if;
+  if coalesce(cardinality(p_players), 0) < 1 then raise exception 'not_enough_players'; end if;
   if cardinality(p_players) > 8 then raise exception 'too_many_players'; end if;
+  -- Bots (option bots, 0 à 8 − joueurs) : des participants comme les autres, ids 'bot1'…, joués par le serveur
+  -- (dés lancés à l'ouverture du lancer, envoi de mini-jeu tiré à la clôture), jamais dans les résultats.
+  -- Seul devant son écran : au moins 1 bot.
+  v_nb := case when coalesce(p_options->>'bots', '') ~ '^\d$' then (p_options->>'bots')::integer else 0 end;
+  v_nb := least(greatest(v_nb, 2 - cardinality(p_players)), 8 - cardinality(p_players));
+  select coalesce(jsonb_agg('bot' || g order by g), '[]'::jsonb) into v_bots from generate_series(1, v_nb) g;
+  v_ids := (select jsonb_agg(p::text order by o) from unnest(p_players) with ordinality t(p, o)) || v_bots;
+  v_n := jsonb_array_length(v_ids);
 
   v_rounds := case when coalesce(p_options->>'rounds', '') ~ '^\d{1,2}$' then (p_options->>'rounds')::integer else 9 end;
   if v_rounds not in (6, 9, 12) then v_rounds := 9; end if;
@@ -1376,7 +1457,7 @@ begin
     from jsonb_array_elements(case when jsonb_typeof(p_options->'majorite') = 'array' then p_options->'majorite' else '[]'::jsonb end) q
    where jsonb_typeof(q) = 'string';
 
-  select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
+  select jsonb_agg(p::text order by random()) into v_order from jsonb_array_elements_text(v_ids) p;
   if jsonb_typeof(v_fiche->'stars') = 'array' then
     -- Grande taille : des étoiles par zone (la base : 2 ou 3 selon le nombre de joueurs ; chaque quartier : n).
     v_star := '[]'::jsonb;
@@ -1394,7 +1475,7 @@ begin
              where x = 'loge' and not v_wet @> to_jsonb((o - 1)::integer) order by random()
              limit (c->'star_count'->>(v_n - 2))::integer) z;
   end if;
-  select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
+  select jsonb_object_agg(p::text, 0) into v_zero from jsonb_array_elements_text(v_ids) p;
   -- Départs : tout le monde au Départ ; en taille L, par deux sur ceil(n / 2) haltes tirées au sort (le joueur de
   -- rang k dans l'ordre de passage part de la halte k mod nb), sans bonus de halte au placement.
   v_pos := v_zero;
@@ -1408,14 +1489,15 @@ begin
   v_state := jsonb_build_object(
     'game', 'dede-party',
     'phase', 'intro',
-    'players', to_jsonb(p_players),
+    'players', v_ids,
+    'bots', v_bots,
     'round', 0,
     'rounds', v_rounds,
     'total_rounds', v_rounds,
     'order', v_order,
     'pos', v_pos,
     'dist', v_zero,
-    'coins', (select jsonb_object_agg(p::text, (c->>'start_coins')::integer) from unnest(p_players) p),
+    'coins', (select jsonb_object_agg(p::text, (c->>'start_coins')::integer) from jsonb_array_elements_text(v_ids) p),
     'stars', v_zero,
     'star_cells', v_star,
     'map', v_map,
@@ -1426,9 +1508,9 @@ begin
     'sw', v_sw,
     'epi', null,
     -- Promo de bienvenue : la première étoile de chacun est à moitié prix.
-    'half_price', (select jsonb_object_agg(p::text, true) from unnest(p_players) p),
-    'double_left', (select jsonb_object_agg(p::text, 1) from unnest(p_players) p),
-    'rolls', (select jsonb_object_agg(p::text, null) from unnest(p_players) p),
+    'half_price', (select jsonb_object_agg(p::text, true) from jsonb_array_elements_text(v_ids) p),
+    'double_left', (select jsonb_object_agg(p::text, 1) from jsonb_array_elements_text(v_ids) p),
+    'rolls', (select jsonb_object_agg(p::text, null) from jsonb_array_elements_text(v_ids) p),
     'moves', '[]'::jsonb,
     'moves_at', null,
     'before', null,
@@ -1439,7 +1521,7 @@ begin
     'winners', null,
     'results', null,
     'forced', false,
-    'stats', (select jsonb_object_agg(p::text, '{"pubs":0,"broke":0,"coins_earned":0,"envelopes":0,"star_exact":0,"stars_bought":0,"mg_wins":0,"mg_streak":0,"mg_streak_max":0,"doubles":0,"washed":0,"toll_paid":0,"jackpots":0,"jackpot_best":0,"robbed":0,"loot":0,"lifts":0,"slides":0}'::jsonb) from unnest(p_players) p),
+    'stats', (select jsonb_object_agg(p::text, '{"pubs":0,"broke":0,"coins_earned":0,"envelopes":0,"star_exact":0,"stars_bought":0,"mg_wins":0,"mg_streak":0,"mg_streak_max":0,"doubles":0,"washed":0,"toll_paid":0,"jackpots":0,"jackpot_best":0,"robbed":0,"loot":0,"lifts":0,"slides":0}'::jsonb) from jsonb_array_elements_text(v_ids) p),
     -- Générique : 8 s (S), 10 s (M : on survole les quartiers), 12 s (L : et on dépose les pions sur leurs haltes).
     'deadline', now() + make_interval(secs => (c->>(case v_size when 'l' then 'intro_l' when 'm' then 'intro_m' else 'intro_s' end))::integer));
 
@@ -1565,6 +1647,8 @@ revoke all on function public._dp_close_mg(jsonb, jsonb) from public, anon, auth
 revoke all on function public._dp_awards(jsonb) from public, anon, authenticated;
 revoke all on function public._dp_tstats(jsonb, text, boolean) from public, anon, authenticated;
 revoke all on function public._dp_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._dp_bots_roll(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._dp_bot_sub(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._dp_advance(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_dede_party_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_dede_party_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

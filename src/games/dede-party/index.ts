@@ -14,10 +14,11 @@ export const definition: GameDefinition = {
   tagline: 'Le jeu télé de Dédé : un plateau, des dés, des étoiles et un mini-jeu à chaque tour !',
   emoji: '🎤',
   color: '#FFB703',
-  minPlayers: 2,
+  // seul : au moins 1 bot (option « Bots »)
+  minPlayers: 1,
   maxPlayers: 8,
   rules:
-    'Tout le monde lance ses 2 dés en même temps, les pions avancent tout seuls sur l’un des 5 plateaux de Dédé (aiguillages, marée, Tombola, Riton le raton ou télésièges : chaque plateau a sa surprise, personne n’a rien à choisir). À 5 joueurs et plus, le plateau s’agrandit : des quartiers s’ouvrent (un bac, une télécabine, un tourniquet t’y emmène un tour sur deux), chacun avec son étoile. Passe sur une étoile avec 30 pièces (15 pour ta première) : elle est à toi ! À chaque tour, un mini-jeu rapporte des pièces (1er 10, 2e 6, 3e 4). Le plus d’étoiles gagne !',
+    'Tout le monde lance ses 2 dés en même temps, les pions avancent tout seuls sur l’un des 5 plateaux de Dédé (aiguillages, marée, Tombola, Riton le raton ou télésièges : chaque plateau a sa surprise, personne n’a rien à choisir). À 5 joueurs et plus, le plateau s’agrandit : des quartiers s’ouvrent (un bac, une télécabine, un tourniquet t’y emmène un tour sur deux), chacun avec son étoile. Passe sur une étoile avec 30 pièces (15 pour ta première) : elle est à toi ! À chaque tour, un mini-jeu rapporte des pièces (1er 10, 2e 6, 3e 4). Le plus d’étoiles gagne ! Pas assez de monde ? Ajoute des bots dans les options (seul, tu joues contre au moins un bot).',
   Play,
   tv: true,
   Options: DedePartyOptions,

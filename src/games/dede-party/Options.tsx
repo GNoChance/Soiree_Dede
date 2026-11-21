@@ -3,6 +3,7 @@ import { cn } from '@/lib/cn'
 import type { GameOptionsProps } from '../types'
 import { BOARDS, MAP_IDS, SIZED, SIZE_LABEL, sizeFor, type MapId, type SizeId } from './board'
 import { BoardThumb } from './BoardThumb'
+import { effectiveBots } from './bots'
 import { DP_DURATION, DP_ROUNDS, normalizeOptions, type DpMapChoice } from './setup'
 
 /** Pastille de format d'un plateau selon le nombre de joueurs du salon (rien en format classique). */
@@ -24,8 +25,12 @@ function randomPill(players: number): string | null {
 }
 
 /** Options (hôte) : plateau (défaut « Au hasard »), durée de l'émission + rappel du mode télé. */
-export function DedePartyOptions({ options, onChange, playerCount }: GameOptionsProps) {
+export function DedePartyOptions({ options, onChange, playerCount: humans }: GameOptionsProps) {
   const o = normalizeOptions(options)
+  const bots = effectiveBots(o.bots, humans)
+  // les bots comptent comme des joueurs (taille du plateau, nombre d'étoiles)
+  const playerCount = humans + bots
+  const maxBots = Math.max(0, 8 - humans)
   const pick = (map: DpMapChoice) => onChange({ ...options, map })
   const card = (selected: boolean) =>
     cn(
@@ -77,6 +82,24 @@ export function DedePartyOptions({ options, onChange, playerCount }: GameOptions
           {o.rounds} tours ({DP_DURATION[o.rounds].minutes}) : un lancer de dé et un mini-jeu à chaque tour. Le plus d’étoiles gagne !
         </p>
       </div>
+      {maxBots > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="font-display text-lg font-extrabold">🤖 Bots</span>
+          <SegmentedControl
+            ariaLabel="Bots"
+            value={String(bots)}
+            onChange={(v) => onChange({ ...options, bots: Number(v) })}
+            options={Array.from({ length: Math.min(maxBots, 4) + 1 }, (_, k) => k)
+              .filter((k) => k >= 2 - humans)
+              .map((k) => ({ value: String(k), label: k ? String(k) : 'Aucun' }))}
+          />
+          <p className="text-sm text-muted">
+            {bots
+              ? `${bots} bot${bots > 1 ? 's' : ''} lance${bots > 1 ? 'nt' : ''} les dés et joue${bots > 1 ? 'nt' : ''} les mini-jeux tout seul${bots > 1 ? 's' : ''}. Ils ne gagnent pas d’XP.`
+              : 'Que des vrais joueurs.'}
+          </p>
+        </div>
+      )}
       <div className="sticker-sm flex items-center gap-3 bg-sky/20 px-3 py-2">
         <span className="text-3xl">📺</span>
         <p className="text-sm font-bold leading-tight">Mets la télé pour le plateau en grand : bouton « Mode télé » une fois la partie lancée. Sans télé, chaque téléphone montre aussi le plateau.</p>

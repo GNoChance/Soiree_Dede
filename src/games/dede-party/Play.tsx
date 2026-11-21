@@ -7,7 +7,8 @@ import { BottomSheet } from '@/components/ui/Modal'
 import { cn } from '@/lib/cn'
 import { fx, playSound } from '@/lib/feedback'
 import { ConfirmModal } from '@/features/soiree/components'
-import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { mood } from '@/features/soiree/players'
+import { useGet } from './bots'
 import { TvButton } from '@/features/tv/TvButton'
 import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
@@ -41,7 +42,7 @@ function PhoneView({ soireeId, state, meId, isHost, players, act, pending }: Gam
   const live = state as unknown as DedePartyState
   // Rideau de théâtre entre le plateau, les mini-jeux et la cérémonie : `s` = state affiché.
   const { shown: s, closed } = useCurtain(live)
-  const get: Get = useCallback((id: string) => playerOrPlaceholder(players, id), [players])
+  const get: Get = useGet(players, live)
   const isPlayer = s.players.includes(meId)
   const left = useDeadlineTick(live, act, isPlayer || isHost)
   const r = useRoll(s, meId, act)

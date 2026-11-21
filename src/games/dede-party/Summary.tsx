@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion'
 import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
-import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { mood } from '@/features/soiree/players'
+import { makeGet } from './bots'
 import { useTv } from '@/features/tv/tv'
 import type { GameSummaryProps } from '../types'
 import { boardOf } from './board'
@@ -14,7 +15,7 @@ export default function DedePartySummary({ state, meId, players }: GameSummaryPr
   const s = state as unknown as DedePartyState
   const tv = useTv()
   if (!s.ranking?.length) return null
-  const get = (id: string) => playerOrPlaceholder(players, id)
+  const get = makeGet(players, s)
   const winners = s.ranking.filter((r) => r.rank === 1)
   const bonus = (id: string) =>
     (s.awards ?? [])
