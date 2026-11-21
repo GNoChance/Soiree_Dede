@@ -7,6 +7,6 @@ const S = (name) => ({ name, file: `nini-${name}.png`, n: 12, dir: name, map: MA
 export default {
   slug: 'nini',
   src: 'assets-source/costumes/nini-v3',
-  sheets: 'star spy croupier teacher student painter werewolf pyro pirate philosopher tictactoe coach strategist actor archer cinema tycoon admiral bowler racer hacker chess golfer host cowboy'.split(' ').map(S),
-  portraits: 'racer archer actor coach tictactoe admiral tycoon strategist cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star hacker cowboy host chess golfer'.split(' ').map((n) => ({ file: `nini-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'star spy croupier teacher student painter werewolf pyro pirate philosopher tictactoe coach strategist actor archer cinema tycoon admiral bowler racer hacker chess golfer host cowboy elf'.split(' ').map(S),
+  portraits: 'racer archer actor coach tictactoe admiral tycoon strategist cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star hacker cowboy host chess golfer elf'.split(' ').map((n) => ({ file: `nini-${n}-portrait.png`, dir: n, cutout: true })),
 };

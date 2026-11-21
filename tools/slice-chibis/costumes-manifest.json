@@ -482,7 +482,8 @@
       "golfer",
       "host",
       "cowboy",
-      "irma"
+      "irma",
+      "elf"
     ],
     "portraits": [
       "racer",
@@ -509,7 +510,8 @@
       "cowboy",
       "host",
       "chess",
-      "golfer"
+      "golfer",
+      "elf"
     ]
   }
 }

@@ -235,6 +235,7 @@ export const TENUE_ART: readonly string[] = [
   'nini/host',
   'nini/cowboy',
   'nini/irma',
+  'nini/elf',
 ]
 
 // "slug/dossier" des portraits de tenue (public/chibis/<slug>/portraits/<dossier>.webp).
@@ -464,6 +465,7 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'nini/host',
   'nini/chess',
   'nini/golfer',
+  'nini/elf',
 ]
 
 // Stickers bonus hors liste (extra1..extraN.webp) : "slug/dossier" -> nombre. Libellés : src/data/tenue-extras.ts.
@@ -1173,6 +1175,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'nini/irma/pouces',
   'nini/irma/timide',
   'nini/irma/determine',
+  'nini/elf/pouces',
+  'nini/elf/timide',
+  'nini/elf/determine',
 ]
 
 // Cases vides (expression standard absente ou ratée) comblées par un sticker dessiné hors liste : "slug/dossier" -> { absente: remplaçant }.
@@ -2343,6 +2348,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "nini/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "nini/elf": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
