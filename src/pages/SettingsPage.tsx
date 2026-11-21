@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
 import { CHARACTERS } from '@/data/characters'
 import { AdminSoirees } from '@/features/admin/AdminSoirees'
-import { PushInviteCard } from '@/features/push/PushInviteCard'
 import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -139,9 +138,6 @@ export function SettingsPage() {
       </StaggerItem>
       <StaggerItem>
         <PushReminderCard />
-      </StaggerItem>
-      <StaggerItem>
-        <PushInviteCard />
       </StaggerItem>
       {profile?.is_admin && (
         <StaggerItem>
