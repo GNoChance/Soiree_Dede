@@ -66,6 +66,8 @@ export function useGolfNet(matchId: string, onMsg: Listener) {
     on.current = onMsg
   })
   useEffect(() => {
+    // Entraînement (« solo:… ») : aucun canal, rien n'est diffusé.
+    if (matchId.startsWith('solo:')) return
     const e = acquire(matchId)
     entry.current = e
     const l: Listener = (m) => on.current(m)

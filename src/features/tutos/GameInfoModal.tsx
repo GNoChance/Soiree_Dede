@@ -1,6 +1,8 @@
 import { useNavigate } from 'react-router'
 import { Modal } from '@/components/ui/Modal'
 import { isSoloGame } from '@/features/solo/games'
+import { KEMS_SOLO_ID } from '@/features/solo/kems/ids'
+import { isTrainingGame } from '@/features/entrainement/games'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { TENUES } from '@/data/tenues'
@@ -11,6 +13,8 @@ import { TutoButton } from './TutoButton'
  * Fiche d'un jeu consultable hors soirée (depuis le hub) : règles, vidéo
  * « Comment on joue ? » (si elle existe) et tenue à gagner.
  */
+const hasSolo = (id: string) => isSoloGame(id) || id === KEMS_SOLO_ID
+
 export function GameInfoModal({ game, onClose }: { game: GameDefinition | null; onClose: () => void }) {
   const navigate = useNavigate()
   const tenue = game ? TENUES.find((t) => t.gameId === game.id) : undefined
@@ -34,7 +38,7 @@ export function GameInfoModal({ game, onClose }: { game: GameDefinition | null; 
               {tenue.emoji} Tenue à gagner : <b>{tenue.label}</b> ({tenue.condition})
             </p>
           )}
-          {isSoloGame(game.id) && (
+          {hasSolo(game.id) && (
             <Button
               size="lg"
               fullWidth
@@ -46,10 +50,22 @@ export function GameInfoModal({ game, onClose }: { game: GameDefinition | null; 
               Jouer seul 🤖
             </Button>
           )}
+          {isTrainingGame(game.id) && (
+            <Button
+              size="lg"
+              fullWidth
+              onClick={() => {
+                onClose()
+                navigate(`/entrainement/${game.id}`)
+              }}
+            >
+              S’entraîner seul 🏋️
+            </Button>
+          )}
           <p className="text-sm text-muted">
-            {isSoloGame(game.id) ? 'Ou lance une soirée depuis l’accueil pour jouer à plusieurs !' : 'Pour jouer, lance une soirée depuis l’accueil !'}
+            {hasSolo(game.id) || isTrainingGame(game.id) ? 'Ou lance une soirée depuis l’accueil pour jouer à plusieurs !' : 'Pour jouer, lance une soirée depuis l’accueil !'}
           </p>
-          <Button variant={isSoloGame(game.id) ? 'secondary' : 'primary'} onClick={onClose}>Compris !</Button>
+          <Button variant={hasSolo(game.id) || isTrainingGame(game.id) ? 'secondary' : 'primary'} onClick={onClose}>Compris !</Button>
         </div>
       )}
     </Modal>
