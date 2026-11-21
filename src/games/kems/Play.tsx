@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
@@ -201,7 +201,8 @@ function SignsScreen({ s, meId, sec, players, act }: { s: KemsState; meId: strin
 
 type Sel = { zone: 'hand' | 'center'; id: string } | null
 
-function PlayingScreen({ s, meId, sec, players, act }: { s: KemsState; meId: string; sec: KemsSecret | null; players: Record<string, PlayerInfo>; act: GamePlayProps['act'] }) {
+/** `above` / `signSlot` : ajouts du mode solo (bots + bouton « Faire le signe »), absents en soirée. */
+export function PlayingScreen({ s, meId, sec, players, act, above, signSlot }: { s: KemsState; meId: string; sec: KemsSecret | null; players: Record<string, PlayerInfo>; act: GamePlayProps['act']; above?: ReactNode; signSlot?: ReactNode }) {
   const team = teamOf(s, meId)
   const serverHand = useMemo(() => sec?.hand ?? [], [sec])
   const [sel, setSel] = useState<Sel>(null)
@@ -277,6 +278,7 @@ function PlayingScreen({ s, meId, sec, players, act }: { s: KemsState; meId: str
 
   return (
     <div className="flex flex-col gap-2.5">
+      {above}
       <ScorePills s={s} meTeam={team?.id} />
 
       <div className="flex items-start justify-between gap-2">
@@ -352,13 +354,13 @@ function PlayingScreen({ s, meId, sec, players, act }: { s: KemsState; meId: str
               <motion.span animate={{ scale: [1, 1.08, 1] }} transition={{ repeat: Infinity, duration: 1 }} className="rounded-full border-2 border-ink bg-mint px-3 py-0.5 text-sm font-extrabold text-ink">
                 🃏 Carré ! Fais ton signe 🤫
               </motion.span>
-            ) : (
+            ) : signSlot ? null : (
               <button type="button" onClick={() => setIdeas((v) => !v)} className="text-xs font-bold text-muted underline">
                 🤫 Le signe se fait en vrai ! · idées
               </button>
             )}
           </div>
-          {ideas && !square && (
+          {ideas && !square && !signSlot && (
             <ul className="sticker-sm flex flex-col gap-0.5 rounded-chip bg-surface p-2 text-xs font-bold">
               {(sec?.sign_ideas ?? []).map((i) => (
                 <li key={i}>💡 {i}</li>
@@ -373,6 +375,7 @@ function PlayingScreen({ s, meId, sec, players, act }: { s: KemsState; meId: str
             {hand.length === 0 && [0, 1, 2, 3].map((i) => <div key={i} className="aspect-[5/7] animate-pulse rounded-xl border-[3px] border-dashed border-ink/40" />)}
           </div>
 
+          {signSlot}
           {/* KEMS / CONTRE-KEMS : loin des cartes, appui long */}
           <div className="mt-3 flex flex-col gap-2">
             <div className="flex gap-2">
