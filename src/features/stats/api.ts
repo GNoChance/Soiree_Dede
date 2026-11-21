@@ -130,3 +130,18 @@ export function fmtDuration(min: number) {
 export function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 }
+
+/** Miroir de la RPC head_to_head (supabase/features/face-a-face.sql). */
+export interface HeadToHead {
+  played: number
+  me_wins: number
+  other_wins: number
+  duels: number
+  me_duel_wins: number
+  other_duel_wins: number
+  me_best_game: { game_id: string; ahead: number; played: number } | null
+  other_best_game: { game_id: string; ahead: number; played: number } | null
+  last: { game_id: string; finished_at: string | null; winner: 'me' | 'other' | null } | null
+  other: { id: string; slug: string; nickname: string; equipped_tenue: string }
+}
+export const useHeadToHead = (otherId: string | undefined) => useRpc<HeadToHead>('head_to_head', otherId ? { p_other: otherId } : null)

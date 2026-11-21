@@ -13,6 +13,7 @@
 --   on conflict (id) do update set reminder_url = excluded.reminder_url, secret = excluded.secret, updated_at = now();
 -- Test immediat (ignore l'heure, envoie a tous ceux qui n'ont pas joue aujourd'hui) :
 --   select public._push_daily_tick(true);
+-- Invitations « X t'invite a sa soiree » : voir supabase/features/push_invites.sql (URL deduite de reminder_url).
 -- =============================================================================
 
 create table if not exists public.push_subscriptions (
