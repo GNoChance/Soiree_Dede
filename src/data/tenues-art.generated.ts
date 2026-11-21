@@ -160,6 +160,7 @@ export const TENUE_ART: readonly string[] = [
   'manon/host',
   'manon/cowboy',
   'manon/irma',
+  'manon/elf',
   'marius/admiral',
   'marius/tycoon',
   'marius/tictactoe',
@@ -396,6 +397,7 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'manon/golfer',
   'manon/host',
   'manon/cowboy',
+  'manon/elf',
   'marius/painter',
   'marius/student',
   'marius/teacher',
@@ -956,6 +958,9 @@ export const TENUE_ART_BAD: readonly string[] = [
   'manon/irma/pouces',
   'manon/irma/timide',
   'manon/irma/determine',
+  'manon/elf/pouces',
+  'manon/elf/timide',
+  'manon/elf/determine',
   'marius/admiral/pouces',
   'marius/admiral/timide',
   'marius/admiral/determine',
@@ -1988,6 +1993,11 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "manon/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "manon/elf": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
