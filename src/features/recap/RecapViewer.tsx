@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, useReducedMotion, type PanInfo } from 'framer-motion'
-import { ChevronLeft, ChevronRight, Home, Share2, X } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, Home, Share2, X } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +17,7 @@ import { useSession } from '@/store/session'
 import { fetchRecap, type SoireeRecap } from './api'
 import { buildCards, type AwardView, type RecapCard } from './cards'
 import { shareRecap } from './share'
+import { shareSouvenir } from './souvenir'
 
 const BASE = 'sticker flex w-full flex-1 flex-col items-center justify-center gap-4 overflow-y-auto rounded-bubble p-5 text-center text-[#1f1b2e]'
 
@@ -123,7 +124,7 @@ function StandingsCard({ r, meId, onShare, busy }: { r: SoireeRecap; meId?: stri
   )
 }
 
-function FinalCard({ r, onShare, busy, onDone, doneLabel }: { r: SoireeRecap; onShare: () => void; busy: boolean; onDone: () => void; doneLabel: string }) {
+function FinalCard({ r, onShare, onSouvenir, busy, onDone, doneLabel }: { r: SoireeRecap; onShare: () => void; onSouvenir: () => void; busy: boolean; onDone: () => void; doneLabel: string }) {
   return (
     <div className={cn(BASE, 'bg-sun')}>
       <div className="flex flex-wrap justify-center -space-x-2">
@@ -137,6 +138,9 @@ function FinalCard({ r, onShare, busy, onDone, doneLabel }: { r: SoireeRecap; on
       <p className="text-xl font-bold">Merci d’avoir joué, rendez-vous à la prochaine soirée. 🎈</p>
       <Button size="lg" fullWidth loading={busy} icon={<Share2 className="size-6" />} onClick={onShare}>
         Partager
+      </Button>
+      <Button variant="secondary" fullWidth loading={busy} icon={<Camera className="size-5" />} onClick={onSouvenir}>
+        Photo souvenir
       </Button>
       <Button variant="secondary" fullWidth icon={<Home className="size-5" />} onClick={onDone}>
         {doneLabel}
@@ -222,6 +226,19 @@ export function SoireeRecap({ soireeId, recap, onDone, doneLabel = 'Terminer' }:
     }
   }
 
+  const souvenir = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await shareSouvenir(data)
+      if (res === 'downloaded') toast.success('Photo enregistrée !')
+    } catch {
+      toast.error('Impossible de créer la photo. Réessaie !')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.x < -60 || info.velocity.x < -400) go(1)
     else if (info.offset.x > 60 || info.velocity.x > 400) go(-1)
@@ -233,7 +250,7 @@ export function SoireeRecap({ soireeId, recap, onDone, doneLabel = 'Terminer' }:
   else if (card.kind === 'topgame') body = <TopGameCard r={data} />
   else if (card.kind === 'award') body = <AwardCard v={card.view} />
   else if (card.kind === 'standings') body = <StandingsCard r={data} meId={meId} onShare={share} busy={busy} />
-  else body = <FinalCard r={data} onShare={share} busy={busy} onDone={() => doneRef.current()} doneLabel={doneLabel} />
+  else body = <FinalCard r={data} onShare={share} onSouvenir={souvenir} busy={busy} onDone={() => doneRef.current()} doneLabel={doneLabel} />
 
   return createPortal(
     <div className="fixed inset-0 z-[67] flex justify-center bg-[#07050f]/80 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Récap de la soirée">

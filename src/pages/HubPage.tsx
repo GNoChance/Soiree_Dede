@@ -6,6 +6,7 @@ import { GAMES } from '@/games/registry'
 import type { GameDefinition } from '@/games/types'
 import { GameInfoModal } from '@/features/tutos/GameInfoModal'
 import { DailyCard } from '@/features/daily/DailyCard'
+import { WrappedBanner } from '@/features/wrapped/WrappedBanner'
 import { SoireeLauncher } from '@/features/soiree/SoireeLauncher'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -48,6 +49,9 @@ export function HubPage() {
           </Card>
         </StaggerItem>
       )}
+      <StaggerItem className="empty:hidden">
+        <WrappedBanner />
+      </StaggerItem>
       <StaggerItem>
         <DailyCard />
       </StaggerItem>

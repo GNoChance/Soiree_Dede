@@ -16,6 +16,7 @@ import { rpcErrorMessage } from '@/lib/rpcError'
 import { useSession } from '@/store/session'
 import { gameLabel, useProfileStats } from './api'
 import { WeeklyMedals } from './WeeklyMedals'
+import { WrappedButton } from '@/features/wrapped/WrappedBanner'
 
 function Stat({ label, value, suffix, tone }: { label: string; value: number; suffix?: string; tone: string }) {
   return (
@@ -71,6 +72,13 @@ export function ProfilePage() {
               <XpBar xp={data.profile.xp} />
             </Card>
           </StaggerItem>
+          {!mine && (
+            <StaggerItem>
+              <Button className="w-full" onClick={() => navigate(`/face-a-face/${data.profile.id}`)}>
+                ⚔️ Toi vs {data.profile.nickname}
+              </Button>
+            </StaggerItem>
+          )}
           <StaggerItem>
             <div className="flex gap-3">
               <Stat label="parties jouées" value={data.games_played} tone="bg-sky" />
@@ -78,6 +86,11 @@ export function ProfilePage() {
               <Stat label="de victoires" value={data.win_rate} suffix=" %" tone="bg-mint" />
             </div>
           </StaggerItem>
+          {mine && (
+            <StaggerItem>
+              <WrappedButton />
+            </StaggerItem>
+          )}
           {/* empty:hidden : sans médaille (profil d'un autre), pas de trou dans la liste */}
           <StaggerItem className="empty:hidden">
             <WeeklyMedals profileId={id} mine={mine} />
