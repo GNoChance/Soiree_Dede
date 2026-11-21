@@ -11,7 +11,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 
 ## Commandes
 - `npm run dev` · `npm run build` (tsc + vite) · `npm run lint`
-- `npm run sql` → régénère `supabase/install.sql` (schema + features + games + seed). C'est **ce** fichier que l'utilisateur colle dans le SQL Editor Supabase → le rappeler après toute modif SQL.
+- `npm run sql` → régénère `supabase/install.sql` (schema + features + games + seed, pour les tests PGlite) **et** `supabase/install-parts/1.sql, 2.sql…` (même contenu découpé : install.sql dépasse la limite ~1 Mo du SQL Editor). L'utilisateur colle **les morceaux, dans l'ordre**, dans le SQL Editor Supabase → le rappeler après toute modif SQL.
 - Chibis : `cd tools/slice-chibis && node slice.mjs [--tenues | <slug>-<tenue>]` (package.json séparé).
 
 ## Arborescence clé

@@ -1,4 +1,4 @@
--- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent : à coller en entier dans Supabase > SQL Editor > Run.
+-- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent. Trop gros pour le SQL Editor : coller plutôt supabase/install-parts/*.sql dans l'ordre.
 
 -- ===== schema.sql =====
 -- =============================================================================
