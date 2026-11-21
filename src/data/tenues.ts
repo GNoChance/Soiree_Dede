@@ -91,7 +91,7 @@ export const TENUES: TenueDef[] = [
 export const SECRET_TENUES: TenueDef[] = [
   // 12 stickers « voyante » (public/chibis/<slug>/irma/), trophée « Madame Irma » = 3 bons pronostics d'affilée.
   { id: 'irma', label: 'Madame Irma', emoji: '🔮', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'irma', secretTrophy: 'gen_madame_irma' },
-  // Tenue de Noël (dossier d'art `elf`, planches à venir : en attendant, planche de base), trophée « Esprit de Noël » = 12 cases de l'Avent.
+  // Tenue de Noël (dossier d'art `elf`, planches + portraits des 9 persos), trophée « Esprit de Noël » = 12 cases de l'Avent.
   { id: 'lutin', label: 'Lutin', emoji: '🧝', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'elf', secretTrophy: 'gen_esprit_noel' },
 ]
 
