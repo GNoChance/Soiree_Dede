@@ -10,6 +10,6 @@ export default {
   slug: 'cycy',
   src: 'assets-source/costumes/cycy-v3',
   // golfer : découpé par closed-sheet.mjs (sticker « boude » délavé par free-sheet), pas ici
-  sheets: [...NAMES, 'chess', 'host', 'cowboy'].map((n) => ({ ...S(n), ...(OV[n] ?? {}) })),
-  portraits: [...NAMES, 'chess', 'golfer', 'host', 'cowboy'].map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: [...NAMES, 'chess', 'host', 'cowboy', 'elf'].map((n) => ({ ...S(n), ...(OV[n] ?? {}) })),
+  portraits: [...NAMES, 'chess', 'golfer', 'host', 'cowboy', 'elf'].map((n) => ({ file: `cycy-${n}-portrait.png`, dir: n, cutout: true })),
 };
