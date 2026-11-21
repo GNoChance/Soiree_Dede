@@ -1046,8 +1046,9 @@ export class Game {
     // dérapage automatique (mon kart) : on tourne franchement un instant -> la glisse part toute seule ;
     // on redresse (ou on lâche le doigt) -> fin de glisse et mini-turbo. Espace = dérapage manuel au clavier.
     if (isMe) {
-      r.autoT = Math.abs(steer) > 0.55 && r.speed > 14 && !off ? r.autoT + dt : 0
-      drift = drift || (r.driftDir ? steer * r.driftDir > 0.3 : r.autoT > 0.3)
+      // (déclenchement tardif : seulement dans un vrai grand virage, pas à chaque petit coup de volant)
+      r.autoT = Math.abs(steer) > 0.75 && r.speed > 14 && !off ? r.autoT + dt : 0
+      drift = drift || (r.driftDir ? steer * r.driftDir > 0.2 : r.autoT > 0.55)
     }
     // la glisse charge un mini-turbo tant qu'elle dure
     if (!r.driftDir && drift && Math.abs(steer) > 0.25 && r.speed > 14 && !off && r.air <= 0) {
@@ -1074,7 +1075,8 @@ export class Game {
     }
     const grip = clamp(r.speed / 12, 0, 1)
     // un peu moins vif à pleine vitesse, plus stable
-    const omega = r.driftDir ? r.driftDir * 1.1 + steer * 0.7 : steer * 1.7 * (1 - 0.2 * clamp(r.speed / MAX, 0, 1))
+    // en glisse, le virage suit le doigt (on peut desserrer sans sortir de la glisse) au lieu d'être verrouillé serré
+    const omega = r.driftDir ? r.driftDir * (0.35 + 1.25 * Math.max(0, steer * r.driftDir)) : steer * 1.7 * (1 - 0.2 * clamp(r.speed / MAX, 0, 1))
     r.heading += (omega + assist) * grip * dt
     r.x += Math.cos(r.heading) * r.speed * dt
     r.z += Math.sin(r.heading) * r.speed * dt
