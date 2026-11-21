@@ -106,3 +106,21 @@ Planche de 12 stickers chibi du personnage de référence (même visage, mêmes 
 1 joie : bras levés, la boule de cristal brille d'une lumière dorée · 2 colère : secoue une boule de cristal embrumée, éclair rouge · 3 pleurs : pleure à chaudes larmes sur une boule de cristal fissurée · 4 boude : bras croisés, dos tourné à la boule de cristal, petit nuage noir · 5 réflexion : mains en éventail au-dessus de la boule de cristal, bulle de pensée avec un point d'interrogation violet · 6 dodo : endormi la joue posée sur la boule de cristal, « Zzz » · 7 bisou : envoie un bisou à la boule de cristal, petit cœur · 8 clin d'œil : clin d'œil malicieux, tient une carte de tarot face cachée · 9 surprise : yeux écarquillés, la boule de cristal lance des étincelles · 10 amoureux : cœurs dans les yeux, la boule de cristal montre un cœur rose · 11 cool : lunettes de soleil étoilées, fait tourner une carte de tarot entre deux doigts · 12 champion : lève un trophée doré en forme de boule de cristal sur un socle doré.
 Style sticker : contour noir épais autour du personnage, y compris sur le châle sombre et la boule de cristal, couleurs vives et flat, GROSSE BORDURE BLANCHE épaisse autour de chaque buste. Fond noir uni #000000, sans dégradé ni ombre. Pas de texte.
 ```
+
+---
+
+## 🧝 Lutin — succès secret « Esprit de Noël » (ouvrir 12 cases du calendrier de l'Avent)
+
+Tenue de Noël secrète. Dossier : `elf` (id de tenue `lutin`). Même prompt pour les 9 persos (joindre la référence du perso) ; pour Karo, remplacer « 10 amoureux » par « 10 charmée : cœurs dans les yeux, rougit, tient le cadeau contre elle ».
+
+### Planche
+```
+Planche de 12 stickers chibi du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), grille 4 colonnes × 3 lignes, 12 cases bien séparées, BUSTES uniquement (tête, épaules, haut du torse), en lutin de Noël : grand bonnet pointu vert à bout rouge avec un petit grelot doré, oreilles pointues, col blanc dentelé en zigzag, tunique rouge et verte avec un gros bouton doré, ceinture noire à boucle dorée. Chaque sticker a une pose différente. Ordre de gauche à droite, ligne par ligne :
+1 joie : bras levés, une pluie de confettis et de flocons · 2 colère : secoue un cadeau cassé, petit nuage rouge · 3 pleurs : pleure à chaudes larmes, un cadeau déballé vide à la main · 4 boude : bras croisés, dos tourné au sapin, petit nuage noir · 5 réflexion : main au menton, bulle de pensée avec un cadeau et un point d'interrogation · 6 dodo : endormi sur une pile de cadeaux, bonnet de travers, « Zzz » · 7 bisou : envoie un bisou, petit cœur et une branche de gui · 8 clin d'œil : clin d'œil malicieux, un doigt sur les lèvres, un cadeau caché derrière le dos · 9 surprise : yeux écarquillés, un cadeau qui saute de sa boîte · 10 amoureux : cœurs dans les yeux, tient un cadeau noué d'un ruban rose · 11 cool : lunettes de soleil rouges, appuyé sur une canne en sucre d'orge · 12 champion : lève un trophée doré en forme d'étoile de sapin sur un socle doré.
+Style sticker : contour noir épais autour du personnage, y compris sur le bonnet vert foncé et la ceinture, couleurs vives et flat, GROSSE BORDURE BLANCHE épaisse autour de chaque buste, y compris sur le col blanc et les flocons. Fond noir uni #000000, sans dégradé ni ombre. Pas de texte.
+```
+
+### Portrait
+```
+Illustration portrait du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), en lutin de Noël : grand bonnet pointu vert à bout rouge avec un grelot doré, oreilles pointues, col blanc en zigzag, tunique rouge et verte, ceinture noire à boucle dorée, chaussons à bout recourbé. Pose : debout sur la pointe des pieds, un énorme cadeau rouge à ruban doré dans les bras, un grand sourire espiègle, un clin d'œil. Décor : atelier du Père Noël, sapin décoré, pile de cadeaux, guirlande lumineuse, flocons et petites étoiles dorées. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, y compris sur le col blanc et les cadeaux blancs, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
+```

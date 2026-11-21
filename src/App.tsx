@@ -10,9 +10,12 @@ import { SoireePage } from '@/pages/SoireePage'
 import { MatchPage } from '@/pages/MatchPage'
 import { TvPage } from '@/pages/TvPage'
 import { HistoryDetailPage, HistoryPage } from '@/features/stats/HistoryPages'
+import { HeadToHeadPage } from '@/features/stats/HeadToHeadPage'
 import { ProfilePage } from '@/features/stats/ProfilePage'
 import { DailyPage } from '@/features/daily/DailyPage'
+import { AdventPage } from '@/features/advent/AdventPage'
 import { SoloRoute } from '@/features/solo/SoloRoute'
+import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
 import { RouteError } from '@/pages/RouteError'
 import { onPushOpen } from '@/features/push/push'
 
@@ -35,6 +38,7 @@ const router = createBrowserRouter([
               { path: '/historique', element: <HistoryPage /> },
               { path: '/historique/:id', element: <HistoryDetailPage /> },
               { path: '/profil/:id', element: <ProfilePage /> },
+              { path: '/face-a-face/:id', element: <HeadToHeadPage /> },
               { path: '/parametres', element: <SettingsPage /> },
             ],
           },
@@ -44,7 +48,9 @@ const router = createBrowserRouter([
               { path: '/soiree/:id', element: <SoireePage /> },
               { path: '/partie/:matchId', element: <MatchPage /> },
               { path: '/defi', element: <DailyPage /> },
+              { path: '/avent', element: <AdventPage /> },
               { path: '/solo/:gameId', element: <SoloRoute /> },
+              { path: '/entrainement/:gameId', element: <TrainingRoute /> },
             ],
           },
           // Mode télé : plein écran, hors gabarit mobile.

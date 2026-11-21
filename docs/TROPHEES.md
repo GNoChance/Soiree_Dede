@@ -554,6 +554,8 @@ Transverses, sans sticker de planche : récompense proposée = badge sur le prof
 | `gen_pipelette` | Pipelette | Envoyer 50 stickers dans le chat | PHASE 2 (`player_stats.stickers_sent` : les messages sont purgés en fin de soirée) ✅ |
 | `gen_garde_robe` | Garde-robe | Débloquer 5 tenues | OK (`tenue_unlocks`) ✅ |
 | `gen_collectionneur` | Collectionneur | Compléter une planche de tenue (les 11 trophées) | OK (`trophy_unlocks`) ✅ |
+| `gen_madame_irma` | Madame Irma | 3 bons pronostics d'affilée (tenue secrète `irma`) | OK (`_prono_resolved`) ✅ |
+| `gen_esprit_noel` | Esprit de Noël | Ouvrir 12 cases du calendrier de l'Avent (tenue secrète `lutin`, dossier d'art `elf`) | OK (`advent_opens`, règle `special` `advent`) ✅ |
 
 ---
 

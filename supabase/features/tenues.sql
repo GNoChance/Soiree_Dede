@@ -70,7 +70,9 @@ on conflict (id) do update
 -- Tenue secrète « Madame Irma » : planche de 12 stickers « voyante », débloquée par le trophée gen_madame_irma
 -- (3 bons pronostics d'affilée). evaluate_tenues l'ignore (condition 'trophy' = jamais remplie aux victoires).
 insert into public.tenues (id, label, emoji, game_id, condition_type, threshold, sort_order, trophy_id) values
-  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma')
+  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma'),
+  -- Tenue de Noël secrète « Lutin » : trophée gen_esprit_noel (12 cases du calendrier de l'Avent ouvertes).
+  ('lutin', 'Lutin', '🧝', null, 'trophy', 0, 901, 'gen_esprit_noel')
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,

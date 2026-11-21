@@ -70,6 +70,11 @@
   0%, 100% { transform: translateY(0) rotate(-2deg); }
   50% { transform: translateY(-10px) rotate(2deg); }
 }
+@keyframes noel-bulb {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.noel-bulb { animation: noel-bulb 1.4s ease-in-out infinite; }
 @keyframes wiggle {
   0%, 100% { transform: rotate(-4deg); }
   50% { transform: rotate(4deg); }

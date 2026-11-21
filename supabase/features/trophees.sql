@@ -181,6 +181,8 @@ begin
         select coalesce(max(c), 0) into v from (
           select count(*) as c from public.trophy_unlocks u join public.trophies t on t.id = u.trophy_id
            where u.profile_id = p_profile and t.tenue_id is not null group by t.tenue_id) x;
+      when 'advent' then
+        select count(*) into v from public.advent_opens where profile_id = p_profile;
       when 'prono_streak' then
         select coalesce(max(len), 0) into v from (
           select count(*) as len from (
@@ -620,7 +622,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_pipelette', null, null, 'Pipelette', 'Envoyer 50 stickers dans le chat', null, '{"agg":"special","name":"stickers","threshold":50}'::jsonb, true, 228),
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
   ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230),
-  ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231)
+  ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231),
+  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232)
 on conflict (id) do update
   set tenue_id = excluded.tenue_id, slot = excluded.slot, name = excluded.name, description = excluded.description,
       game_id = excluded.game_id, rule = excluded.rule, active = excluded.active, sort_order = excluded.sort_order;

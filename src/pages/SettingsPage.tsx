@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
 import { CHARACTERS } from '@/data/characters'
 import { AdminSoirees } from '@/features/admin/AdminSoirees'
+import { PushInviteCard } from '@/features/push/PushInviteCard'
 import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -18,12 +19,13 @@ import { supabase } from '@/lib/supabase'
 import { toast } from '@/store/toast'
 import { useSession } from '@/store/session'
 import { useSettings, type Theme } from '@/store/settings'
+import { isNoelSeason } from '@/features/noel/season'
 
 const inputCls =
   'sticker-sm min-w-0 flex-1 rounded-card border-[3px] border-ink bg-surface px-3 py-2 font-display text-lg font-extrabold text-text outline-none'
 
 export function SettingsPage() {
-  const { theme, sound, haptics, setTheme, setSound, setHaptics } = useSettings()
+  const { theme, sound, haptics, noelDecor, setTheme, setSound, setHaptics, setNoelDecor } = useSettings()
   const profile = useSession((s) => s.profile)
   const patchProfile = useSession((s) => s.patchProfile)
   const navigate = useNavigate()
@@ -127,10 +129,19 @@ export function SettingsPage() {
             <span className="font-display text-lg font-extrabold">📳 Vibrations</span>
             <Toggle checked={haptics} onChange={setHaptics} label="Vibrations" />
           </div>
+          {isNoelSeason() && (
+            <div className="flex items-center justify-between">
+              <span className="font-display text-lg font-extrabold">🎄 Décor de Noël</span>
+              <Toggle checked={noelDecor} onChange={setNoelDecor} label="Décor de Noël" />
+            </div>
+          )}
         </Card>
       </StaggerItem>
       <StaggerItem>
         <PushReminderCard />
+      </StaggerItem>
+      <StaggerItem>
+        <PushInviteCard />
       </StaggerItem>
       {profile?.is_admin && (
         <StaggerItem>

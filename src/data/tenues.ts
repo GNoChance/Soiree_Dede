@@ -4,7 +4,7 @@
  * Pour ajouter une tenue : une ligne ici + une ligne dans tenues.sql (+ la planche, cf. tools/slice-chibis/README.md).
  */
 
-export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host' | 'irma'
+export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host' | 'irma' | 'lutin'
 
 export interface TenueDef {
   id: TenueId
@@ -91,6 +91,8 @@ export const TENUES: TenueDef[] = [
 export const SECRET_TENUES: TenueDef[] = [
   // 12 stickers « voyante » (public/chibis/<slug>/irma/), trophée « Madame Irma » = 3 bons pronostics d'affilée.
   { id: 'irma', label: 'Madame Irma', emoji: '🔮', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'irma', secretTrophy: 'gen_madame_irma' },
+  // Tenue de Noël (dossier d'art `elf`, planches à venir : en attendant, planche de base), trophée « Esprit de Noël » = 12 cases de l'Avent.
+  { id: 'lutin', label: 'Lutin', emoji: '🧝', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'elf', secretTrophy: 'gen_esprit_noel' },
 ]
 
 export const TENUES_BY_ID = Object.fromEntries([...TENUES, ...SECRET_TENUES].map((t) => [t.id, t])) as Record<TenueId, TenueDef>

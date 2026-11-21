@@ -2486,6 +2486,82 @@ grant execute on function public.finish_daily() to authenticated;
 grant execute on function public.daily_board(date) to authenticated;
 grant execute on function public.daily_week_board() to authenticated;
 
+-- =============================================================================
+-- CALENDRIER DE L'AVENT (Noel) : du 1er au 24 decembre, terminer le defi du jour (daily_runs.finished_at)
+-- rend la case du jour OUVRABLE ; l'ouvrir (advent_open) donne +25 XP, une seule fois. Une case dont le defi
+-- n'a pas ete termine reste fermee (pas de rattrapage). Les textes surprise vivent dans le front.
+-- advent_opens : une ligne = une case ouverte. Trophee « Esprit de Noel » (gen_esprit_noel) = 12 cases ouvertes.
+-- =============================================================================
+create table if not exists public.advent_opens (
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  day        date not null,
+  opened_at  timestamptz not null default now(),
+  primary key (profile_id, day)
+);
+alter table public.advent_opens enable row level security;
+drop policy if exists advent_opens_select on public.advent_opens;
+create policy advent_opens_select on public.advent_opens for select to authenticated using (true);
+-- Aucune policy d'ecriture : tout passe par advent_open.
+
+-- Etat du calendrier : {today, year, opened:[dates], done:[dates de defis termines du 1er au 24 dec]}
+create or replace function public.advent_state()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_today date := public._daily_day();
+  v_year integer := extract(year from v_today)::int - case when extract(month from v_today) = 12 then 0 else 1 end;
+  v_from date := make_date(v_year, 12, 1);
+begin
+  perform public._daily_close_expired();
+  return jsonb_build_object(
+    'today', v_today, 'year', v_year,
+    'opened', coalesce((select jsonb_agg(a.day order by a.day) from public.advent_opens a
+                         where a.profile_id = v_me and a.day >= v_from and a.day <= v_from + 23), '[]'::jsonb),
+    'done', coalesce((select jsonb_agg(r.day order by r.day) from public.daily_runs r
+                       where r.profile_id = v_me and r.finished_at is not null
+                         and r.day >= v_from and r.day <= v_from + 23), '[]'::jsonb));
+end $$;
+
+-- Ouvre la case p_day. Renvoie {day, xp, new, count, trophy} (xp = 0 si deja ouverte).
+-- Erreurs : advent_invalid_day (hors 1-24 dec), advent_not_yet (jour futur), advent_closed (apres le 6 janvier),
+-- advent_missed (defi de ce jour non termine).
+create or replace function public.advent_open(p_day date)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_today date := public._daily_day();
+  v_new boolean := false; v_n integer; v_trophy boolean := false;
+begin
+  if p_day is null or extract(month from p_day) <> 12 or extract(day from p_day) > 24 then
+    raise exception 'advent_invalid_day';
+  end if;
+  if p_day > v_today then raise exception 'advent_not_yet'; end if;
+  if v_today > make_date(extract(year from p_day)::int, 12, 31) + 6 then raise exception 'advent_closed'; end if;
+  perform public._daily_close_expired();
+  if not exists (select 1 from public.daily_runs where profile_id = v_me and day = p_day and finished_at is not null)
+     and not exists (select 1 from public.advent_opens where profile_id = v_me and day = p_day) then
+    raise exception 'advent_missed';
+  end if;
+  insert into public.advent_opens(profile_id, day) values (v_me, p_day) on conflict do nothing;
+  v_new := found;
+  if v_new then
+    update public.profiles set xp = xp + 25 where id = v_me;
+    v_trophy := public.evaluate_trophy(v_me, 'gen_esprit_noel');
+  end if;
+  select count(*)::int into v_n from public.advent_opens where profile_id = v_me;
+  return jsonb_build_object('day', p_day, 'xp', case when v_new then 25 else 0 end, 'new', v_new,
+                            'count', v_n, 'trophy', v_trophy);
+end $$;
+
+revoke all on function public.advent_state() from public, anon;
+revoke all on function public.advent_open(date) from public, anon;
+grant execute on function public.advent_state() to authenticated;
+grant execute on function public.advent_open(date) to authenticated;
+
 
 -- ===== features\duel.sql =====
 -- =============================================================================
@@ -3510,6 +3586,69 @@ revoke all on function public._duel_start(text, uuid[], jsonb) from public, anon
 revoke all on function public._duel_action(text, jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 
 
+-- ===== features\face-a-face.sql =====
+-- =============================================================================
+-- FACE-A-FACE : bilan entre le joueur connecte et un autre joueur — idempotent.
+-- Parties jouees ensemble (match_players), victoires de chacun, duels directs
+-- (parties a exactement 2 joueurs : eux deux), jeu ou chacun domine l'autre.
+-- =============================================================================
+
+create or replace function public.head_to_head(p_other uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_res jsonb;
+begin
+  if p_other is null or p_other = v_me
+     or not exists (select 1 from public.profiles where id = p_other) then
+    raise exception 'unknown_profile';
+  end if;
+  with common as (
+    select a.match_id, a.game_id, a.won as me_won, b.won as other_won,
+           a.placement as me_pl, b.placement as other_pl, m.finished_at,
+           (select count(*) from public.match_players x where x.match_id = a.match_id) as n
+      from public.match_players a
+      join public.match_players b on b.match_id = a.match_id and b.profile_id = p_other
+      join public.matches m on m.id = a.match_id and m.status = 'finished'
+     where a.profile_id = v_me
+  ),
+  per_game as (
+    select game_id, count(*)::int as played,
+           count(*) filter (where me_pl < other_pl)::int as me_ahead,
+           count(*) filter (where other_pl < me_pl)::int as other_ahead
+      from common group by game_id
+  )
+  select jsonb_build_object(
+    'played',          (select count(*)::int from common),
+    'me_wins',         (select count(*)::int from common where me_won),
+    'other_wins',      (select count(*)::int from common where other_won),
+    'duels',           (select count(*)::int from common where n = 2),
+    'me_duel_wins',    (select count(*)::int from common where n = 2 and me_won),
+    'other_duel_wins', (select count(*)::int from common where n = 2 and other_won),
+    -- jeu ou chacun domine l'autre : meilleur ecart de classement (min. 2 parties communes)
+    'me_best_game', (select jsonb_build_object('game_id', game_id, 'ahead', me_ahead, 'played', played)
+                       from per_game where played >= 2 and me_ahead > other_ahead
+                      order by me_ahead - other_ahead desc, played desc, game_id limit 1),
+    'other_best_game', (select jsonb_build_object('game_id', game_id, 'ahead', other_ahead, 'played', played)
+                          from per_game where played >= 2 and other_ahead > me_ahead
+                         order by other_ahead - me_ahead desc, played desc, game_id limit 1),
+    'last', (select jsonb_build_object('game_id', game_id, 'finished_at', finished_at,
+                                       'winner', case when me_won and not other_won then 'me'
+                                                      when other_won and not me_won then 'other' else null end)
+               from common order by finished_at desc nulls last limit 1),
+    'other', (select jsonb_build_object('id', p.id, 'slug', p.slug, 'nickname', p.nickname,
+                                        'equipped_tenue', p.equipped_tenue)
+                from public.profiles p where p.id = p_other)
+  ) into v_res;
+  return v_res;
+end $$;
+
+revoke all on function public.head_to_head(uuid) from public, anon;
+grant execute on function public.head_to_head(uuid) to authenticated;
+
+
 -- ===== features\pronos.sql =====
 -- =============================================================================
 -- PRONOSTICS ENTRE POTES — idempotent, exécuté APRÈS schema.sql (features/*).
@@ -3767,6 +3906,7 @@ grant execute on function public.soiree_prono_board(uuid) to authenticated;
 --   on conflict (id) do update set reminder_url = excluded.reminder_url, secret = excluded.secret, updated_at = now();
 -- Test immediat (ignore l'heure, envoie a tous ceux qui n'ont pas joue aujourd'hui) :
 --   select public._push_daily_tick(true);
+-- Invitations « X t'invite a sa soiree » : voir supabase/features/push_invites.sql (URL deduite de reminder_url).
 -- =============================================================================
 
 create table if not exists public.push_subscriptions (
@@ -3961,6 +4101,143 @@ begin
     raise notice 'planification pg_cron impossible (%) : rappel push non planifie', sqlerrm;
   end;
 end $$;
+
+
+-- ===== features\push_invites.sql =====
+-- =============================================================================
+-- NOTIFICATION « <hote> t'invite a sa soiree ! » — idempotent, execute APRES push.sql
+-- (ordre alphabetique de features/).
+--
+-- Circuit : trigger sur soiree_players (joueur ajoute par l'hote) -> ligne dans
+-- push_invites (une seule par joueur et par soiree = anti-spam, meme si l'hote le
+-- retire puis le reinvite) -> pg_net POST <invite_url> (Bearer <secret>) -> fonction
+-- Vercel api/soiree-invite.ts -> push_invite_claim() (cle service role) -> web-push
+-- -> push_report(). Jamais bloquant : toute erreur (pg_net absent...) = simple NOTICE.
+--
+-- Configuration : RIEN de plus si push_config.reminder_url est deja rempli (l'URL
+-- d'invitation en est deduite en remplacant « daily-reminder » par « soiree-invite »).
+-- URL personnalisee : update public.push_config set invite_url = 'https://TON-APP.vercel.app/api/soiree-invite';
+-- Cote Vercel : redeployer (la route api/soiree-invite.ts utilise les memes variables
+-- d'environnement que le rappel du defi). Verifier : select * from public.push_invites;
+-- =============================================================================
+
+alter table public.push_config add column if not exists invite_url text;
+
+-- Preferences push par joueur (defaut : on me previent quand on m'invite).
+create table if not exists public.push_prefs (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  invites    boolean not null default true
+);
+alter table public.push_prefs enable row level security;
+revoke all on table public.push_prefs from anon, authenticated;
+
+-- File d'attente + memoire anti-doublon des invitations.
+create table if not exists public.push_invites (
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  host_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  sent_at    timestamptz,
+  primary key (soiree_id, profile_id)
+);
+alter table public.push_invites enable row level security;
+revoke all on table public.push_invites from anon, authenticated;
+
+create or replace function public.get_push_prefs()
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  return jsonb_build_object('invites',
+    coalesce((select invites from public.push_prefs where profile_id = v_me), true));
+end $$;
+
+create or replace function public.set_push_invites(p_enabled boolean)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  insert into public.push_prefs(profile_id, invites) values (v_me, coalesce(p_enabled, true))
+  on conflict (profile_id) do update set invites = excluded.invites;
+end $$;
+
+-- Trigger : un joueur (autre que l'hote) rejoint une soiree.
+create or replace function public._push_invite_trg()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_host   uuid;
+  v_status text;
+  c        public.push_config%rowtype;
+  v_url    text;
+  v_rows   integer;
+begin
+  begin
+    select host_id, status into v_host, v_status from public.soirees where id = new.soiree_id;
+    if v_host is null or v_host = new.profile_id or v_status = 'ended' then return new; end if;
+    insert into public.push_invites(soiree_id, profile_id, host_id) values (new.soiree_id, new.profile_id, v_host)
+      on conflict do nothing;
+    get diagnostics v_rows = row_count;
+    if v_rows = 0 then return new; end if;
+    select * into c from public.push_config where id;
+    v_url := coalesce(nullif(c.invite_url, ''), replace(nullif(c.reminder_url, ''), 'daily-reminder', 'soiree-invite'));
+    if not found or v_url is null or coalesce(c.secret, '') = '' then
+      raise notice 'push_config incomplete : invitation non notifiee';
+      return new;
+    end if;
+    perform net.http_post(
+      url := v_url,
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.secret),
+      timeout_milliseconds := 30000);
+  exception when others then
+    raise notice 'invitation push non envoyee (%)', sqlerrm;
+  end;
+  return new;
+end $$;
+
+drop trigger if exists push_invite_trg on public.soiree_players;
+create trigger push_invite_trg after insert on public.soiree_players
+  for each row execute function public._push_invite_trg();
+
+-- Fonction Vercel : reclame (atomiquement) les invitations en attente et renvoie les
+-- appareils a notifier (preference activee, soiree ouverte, invitation de moins de 10 min).
+-- -> [{endpoint, p256dh, auth, profile_id, host_nick, soiree_id}]
+create or replace function public.push_invite_claim()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_rows jsonb;
+begin
+  delete from public.push_invites where created_at < now() - interval '60 days';
+  with claimed as (
+    update public.push_invites i set sent_at = now()
+     where i.sent_at is null
+    returning i.soiree_id, i.profile_id, i.host_id, i.created_at
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', c.profile_id,
+           'host_nick', h.nickname, 'soiree_id', c.soiree_id)), '[]'::jsonb)
+    into v_rows
+    from claimed c
+    join public.soirees so on so.id = c.soiree_id and so.status <> 'ended'
+    join public.profiles h on h.id = c.host_id
+    join public.push_subscriptions s on s.profile_id = c.profile_id
+   where c.created_at > now() - interval '10 minutes'
+     and coalesce((select p.invites from public.push_prefs p where p.profile_id = c.profile_id), true);
+  return v_rows;
+end $$;
+
+revoke all on function public.get_push_prefs() from public, anon;
+revoke all on function public.set_push_invites(boolean) from public, anon;
+revoke all on function public._push_invite_trg() from public, anon, authenticated;
+revoke all on function public.push_invite_claim() from public, anon, authenticated;
+grant execute on function public.get_push_prefs() to authenticated;
+grant execute on function public.set_push_invites(boolean) to authenticated;
+grant execute on function public.push_invite_claim() to service_role;
 
 
 -- ===== features\recap.sql =====
@@ -4718,7 +4995,9 @@ on conflict (id) do update
 -- Tenue secrète « Madame Irma » : planche de 12 stickers « voyante », débloquée par le trophée gen_madame_irma
 -- (3 bons pronostics d'affilée). evaluate_tenues l'ignore (condition 'trophy' = jamais remplie aux victoires).
 insert into public.tenues (id, label, emoji, game_id, condition_type, threshold, sort_order, trophy_id) values
-  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma')
+  ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma'),
+  -- Tenue de Noël secrète « Lutin » : trophée gen_esprit_noel (12 cases du calendrier de l'Avent ouvertes).
+  ('lutin', 'Lutin', '🧝', null, 'trophy', 0, 901, 'gen_esprit_noel')
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -5096,6 +5375,8 @@ begin
         select coalesce(max(c), 0) into v from (
           select count(*) as c from public.trophy_unlocks u join public.trophies t on t.id = u.trophy_id
            where u.profile_id = p_profile and t.tenue_id is not null group by t.tenue_id) x;
+      when 'advent' then
+        select count(*) into v from public.advent_opens where profile_id = p_profile;
       when 'prono_streak' then
         select coalesce(max(len), 0) into v from (
           select count(*) as len from (
@@ -5535,7 +5816,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_pipelette', null, null, 'Pipelette', 'Envoyer 50 stickers dans le chat', null, '{"agg":"special","name":"stickers","threshold":50}'::jsonb, true, 228),
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
   ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230),
-  ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231)
+  ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231),
+  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232)
 on conflict (id) do update
   set tenue_id = excluded.tenue_id, slot = excluded.slot, name = excluded.name, description = excluded.description,
       game_id = excluded.game_id, rule = excluded.rule, active = excluded.active, sort_order = excluded.sort_order;
@@ -5676,6 +5958,186 @@ revoke all on function public.leaderboard_week(text) from public, anon;
 revoke all on function public.weekly_champions(uuid) from public, anon;
 grant execute on function public.leaderboard_week(text) to authenticated;
 grant execute on function public.weekly_champions(uuid) to authenticated;
+
+
+-- ===== features\wrapped.sql =====
+-- =============================================================================
+-- MON ANNEE (Wrapped annuel) - idempotent, execute en features/* (apres stats, trophees, tenues, daily).
+-- year_wrapped(p_year) : stats du joueur CONNECTE pour l'annee civile (heure de Paris).
+-- jsonb : { year, profile:{id,slug,nickname,equipped_tenue}, games_played, wins, win_rate, soirees,
+--   distinct_games,
+--   favorite_game:{game_id,played}|null, best_game:{game_id,played,wins,win_rate}|null,
+--   longest_soiree:{soiree_id,minutes,started_at,games}|null,
+--   latest_match:{at:'HH:MI', hour, game_id, day}|null  (parties jouees entre 18h et 5h59, la plus tardive),
+--   night_games (parties finies entre 0h et 5h59),
+--   rival:{profile_id,slug,nickname,equipped_tenue,losses}|null  (>= 2 defaites contre lui),
+--   buddy:{profile_id,slug,nickname,equipped_tenue,together}|null, distinct_mates,
+--   trophies:{count, recent:[{id,name}]}, tenues:{count, recent:[{id,label,emoji}]},
+--   daily:{days, best_streak},
+--   personality:{id} }
+-- ids de personnalite : noctambule, champion, assidu, collectionneur, sociable, touche_a_tout, fidele,
+--   bon_joueur, curieux
+-- Volatile (table temporaire locale a la transaction) : appelee en POST par rpc().
+-- =============================================================================
+
+create or replace function public.year_wrapped(p_year integer)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me     uuid := public._require_profile();
+  p        public.profiles%rowtype;
+  v_from   timestamp;
+  v_to     timestamp;
+  v_pg     jsonb;
+  v_played int;
+  v_wins   int;
+  v_soir   int;
+  v_long   jsonb;
+  v_late   jsonb;
+  v_night  int;
+  v_rival  jsonb;
+  v_buddy  jsonb;
+  v_mates  int;
+  v_trc    int;
+  v_trl    jsonb;
+  v_tnc    int;
+  v_tnl    jsonb;
+  v_dd     int;
+  v_ds     int;
+  v_dg     int;
+  v_rate   int;
+  v_pers   text;
+begin
+  if p_year is null or p_year < 2000 or p_year > 2200 then raise exception 'invalid_year'; end if;
+  select * into p from public.profiles where id = v_me;
+  v_from := make_timestamp(p_year, 1, 1, 0, 0, 0);
+  v_to   := make_timestamp(p_year + 1, 1, 1, 0, 0, 0);
+
+  create temp table if not exists _ywm (mid uuid, sid uuid, game_id text, at_p timestamp, won boolean) on commit drop;
+  truncate _ywm;
+  insert into _ywm
+    select m.id, m.soiree_id, m.game_id, (m.finished_at at time zone 'Europe/Paris'), x.won
+      from public.match_players x join public.matches m on m.id = x.match_id
+     where x.profile_id = v_me and m.status = 'finished' and m.finished_at is not null
+       and (m.finished_at at time zone 'Europe/Paris') >= v_from and (m.finished_at at time zone 'Europe/Paris') < v_to;
+
+  select count(*)::int, count(*) filter (where won)::int into v_played, v_wins from _ywm;
+  v_rate := case when v_played > 0 then round(v_wins * 100.0 / v_played)::int else 0 end;
+
+  select coalesce(jsonb_agg(jsonb_build_object('game_id', g.game_id, 'played', g.played, 'wins', g.wins)
+                            order by g.played desc, g.wins desc, g.game_id), '[]'::jsonb)
+    into v_pg
+    from (select game_id, count(*)::int as played, count(*) filter (where won)::int as wins from _ywm group by game_id) g;
+  v_dg := jsonb_array_length(v_pg);
+
+  select count(distinct sid)::int into v_soir from _ywm;
+
+  select jsonb_build_object('soiree_id', s.id, 'minutes', round(extract(epoch from (s.ended_at - s.started_at)) / 60)::int,
+                            'started_at', s.started_at,
+                            'games', (select count(*)::int from _ywm y where y.sid = s.id))
+    into v_long
+    from public.soirees s
+   where s.id in (select sid from _ywm) and s.started_at is not null and s.ended_at is not null
+   order by (s.ended_at - s.started_at) desc, s.id
+   limit 1;
+
+  -- « le plus tard » : de 18h a 5h59, on mesure en heures decalees (0h = 24h, 5h = 29h)
+  select jsonb_build_object('at', to_char(y.at_p, 'HH24:MI'), 'hour', extract(hour from y.at_p)::int,
+                            'game_id', y.game_id, 'day', to_char(y.at_p, 'YYYY-MM-DD'))
+    into v_late
+    from _ywm y
+   where extract(hour from y.at_p) >= 18 or extract(hour from y.at_p) < 6
+   order by (extract(epoch from y.at_p::time) / 3600.0 + case when extract(hour from y.at_p) < 18 then 24 else 0 end) desc
+   limit 1;
+  select count(*)::int into v_night from _ywm y where extract(hour from y.at_p) < 6;
+
+  select jsonb_build_object('profile_id', r.pid, 'slug', pr.slug, 'nickname', pr.nickname,
+                            'equipped_tenue', pr.equipped_tenue, 'losses', r.n)
+    into v_rival
+    from (select w.profile_id as pid, count(*)::int as n
+            from _ywm me
+            join public.match_players w on w.match_id = me.mid and w.won and w.profile_id <> v_me
+           where not me.won
+           group by w.profile_id
+          having count(*) >= 2
+           order by count(*) desc, w.profile_id limit 1) r
+    join public.profiles pr on pr.id = r.pid;
+
+  select count(*)::int into v_mates
+    from (select distinct o.profile_id from _ywm me join public.match_players o on o.match_id = me.mid and o.profile_id <> v_me) d;
+  select jsonb_build_object('profile_id', r.pid, 'slug', pr.slug, 'nickname', pr.nickname,
+                            'equipped_tenue', pr.equipped_tenue, 'together', r.n)
+    into v_buddy
+    from (select o.profile_id as pid, count(*)::int as n
+            from _ywm me join public.match_players o on o.match_id = me.mid and o.profile_id <> v_me
+           group by o.profile_id order by count(*) desc, o.profile_id limit 1) r
+    join public.profiles pr on pr.id = r.pid;
+
+  select count(*)::int into v_trc from public.trophy_unlocks u
+   where u.profile_id = v_me and (u.unlocked_at at time zone 'Europe/Paris') >= v_from and (u.unlocked_at at time zone 'Europe/Paris') < v_to;
+  select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name) order by t.at desc), '[]'::jsonb) into v_trl
+    from (select tr.id, tr.name, u.unlocked_at as at from public.trophy_unlocks u join public.trophies tr on tr.id = u.trophy_id
+           where u.profile_id = v_me and (u.unlocked_at at time zone 'Europe/Paris') >= v_from and (u.unlocked_at at time zone 'Europe/Paris') < v_to
+           order by u.unlocked_at desc limit 3) t;
+
+  select count(*)::int into v_tnc from public.tenue_unlocks u
+   where u.profile_id = v_me and (u.unlocked_at at time zone 'Europe/Paris') >= v_from and (u.unlocked_at at time zone 'Europe/Paris') < v_to;
+  select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'label', t.label, 'emoji', t.emoji) order by t.at desc), '[]'::jsonb) into v_tnl
+    from (select te.id, te.label, te.emoji, u.unlocked_at as at from public.tenue_unlocks u join public.tenues te on te.id = u.tenue_id
+           where u.profile_id = v_me and (u.unlocked_at at time zone 'Europe/Paris') >= v_from and (u.unlocked_at at time zone 'Europe/Paris') < v_to
+           order by u.unlocked_at desc limit 3) t;
+
+  -- defi du jour : jours termines et plus longue serie de jours consecutifs dans l'annee
+  select coalesce(max(c), 0)::int into v_ds
+    from (select count(*) over (partition by grp) as c
+            from (select day, day - (row_number() over (order by day))::int as grp
+                    from public.daily_runs
+                   where profile_id = v_me and finished_at is not null and day >= v_from::date and day < v_to::date) a) b;
+  select count(*)::int into v_dd from public.daily_runs
+   where profile_id = v_me and finished_at is not null and day >= v_from::date and day < v_to::date;
+
+  v_pers := case
+    when v_played = 0 then 'curieux'
+    when v_night >= 3 and v_night * 100 >= v_played * 15 then 'noctambule'
+    when v_played >= 10 and v_rate >= 55 then 'champion'
+    when v_ds >= 7 then 'assidu'
+    when v_trc >= 8 then 'collectionneur'
+    when v_mates >= 6 then 'sociable'
+    when v_dg >= 8 then 'touche_a_tout'
+    when v_soir >= 8 then 'fidele'
+    else 'bon_joueur' end;
+
+  return jsonb_build_object(
+    'year', p_year,
+    'profile', jsonb_build_object('id', p.id, 'slug', p.slug, 'nickname', p.nickname, 'equipped_tenue', p.equipped_tenue),
+    'games_played', v_played, 'wins', v_wins, 'win_rate', v_rate, 'soirees', v_soir,
+    'distinct_games', v_dg,
+    'favorite_game', (select jsonb_build_object('game_id', e->>'game_id', 'played', (e->>'played')::int)
+                        from jsonb_array_elements(v_pg) e limit 1),
+    'best_game', (
+      select jsonb_build_object('game_id', e->>'game_id', 'played', (e->>'played')::int, 'wins', (e->>'wins')::int,
+                                'win_rate', round((e->>'wins')::numeric * 100 / (e->>'played')::numeric)::int)
+        from jsonb_array_elements(v_pg) e
+       where (e->>'wins')::int > 0
+       order by ((e->>'played')::int >= 3) desc,
+                case when (e->>'played')::int >= 3 then (e->>'wins')::numeric / (e->>'played')::numeric else 0 end desc,
+                (e->>'wins')::int desc, (e->>'played')::int desc
+       limit 1),
+    'longest_soiree', v_long,
+    'latest_match', v_late,
+    'night_games', v_night,
+    'rival', v_rival,
+    'buddy', v_buddy,
+    'distinct_mates', v_mates,
+    'trophies', jsonb_build_object('count', v_trc, 'recent', v_trl),
+    'tenues', jsonb_build_object('count', v_tnc, 'recent', v_tnl),
+    'daily', jsonb_build_object('days', v_dd, 'best_streak', v_ds),
+    'personality', jsonb_build_object('id', v_pers));
+end $$;
+
+revoke all on function public.year_wrapped(integer) from public, anon;
+grant execute on function public.year_wrapped(integer) to authenticated;
 
 
 -- ===== games\action-ou-verite.sql =====

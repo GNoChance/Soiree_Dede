@@ -14,6 +14,7 @@ const MESSAGES: Record<string, string> = {
   soiree_not_ended: 'Le récap sera disponible quand la soirée sera terminée.',
   profile_not_found: 'Ce joueur est introuvable.',
   not_in_soiree:'Tu n’es plus dans cette soirée.',
+  invalid_year: 'Cette année n’est pas valide.',
   invalid_message: 'Message vide ou trop long (200 caractères max).',
   chat_too_fast: 'Doucement ! Attends quelques secondes avant d’écrire encore.',
   not_host: 'Seul l’hôte peut faire ça.',
@@ -161,6 +162,10 @@ const MESSAGES: Record<string, string> = {
   // Défi du jour
   daily_already_started: 'Tu as déjà tenté le défi d’aujourd’hui. À demain !',
   daily_not_started: 'Le défi n’a pas été démarré.',
+  advent_invalid_day: 'Cette case n’existe pas.',
+  advent_not_yet: 'Pas touche ! Cette case s’ouvrira le jour J.',
+  advent_closed: 'Le calendrier de l’Avent est fermé pour cette année.',
+  advent_missed: 'Trop tard : il fallait finir le défi ce jour-là. Pas de rattrapage !',
   daily_already_done: 'Défi déjà terminé aujourd’hui.',
   invalid_answers: 'Réponses invalides.',
   // Rappels push (src/features/push)

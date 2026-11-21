@@ -302,3 +302,79 @@ grant execute on function public.save_daily_round(integer, integer, integer) to 
 grant execute on function public.finish_daily() to authenticated;
 grant execute on function public.daily_board(date) to authenticated;
 grant execute on function public.daily_week_board() to authenticated;
+
+-- =============================================================================
+-- CALENDRIER DE L'AVENT (Noel) : du 1er au 24 decembre, terminer le defi du jour (daily_runs.finished_at)
+-- rend la case du jour OUVRABLE ; l'ouvrir (advent_open) donne +25 XP, une seule fois. Une case dont le defi
+-- n'a pas ete termine reste fermee (pas de rattrapage). Les textes surprise vivent dans le front.
+-- advent_opens : une ligne = une case ouverte. Trophee « Esprit de Noel » (gen_esprit_noel) = 12 cases ouvertes.
+-- =============================================================================
+create table if not exists public.advent_opens (
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  day        date not null,
+  opened_at  timestamptz not null default now(),
+  primary key (profile_id, day)
+);
+alter table public.advent_opens enable row level security;
+drop policy if exists advent_opens_select on public.advent_opens;
+create policy advent_opens_select on public.advent_opens for select to authenticated using (true);
+-- Aucune policy d'ecriture : tout passe par advent_open.
+
+-- Etat du calendrier : {today, year, opened:[dates], done:[dates de defis termines du 1er au 24 dec]}
+create or replace function public.advent_state()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_today date := public._daily_day();
+  v_year integer := extract(year from v_today)::int - case when extract(month from v_today) = 12 then 0 else 1 end;
+  v_from date := make_date(v_year, 12, 1);
+begin
+  perform public._daily_close_expired();
+  return jsonb_build_object(
+    'today', v_today, 'year', v_year,
+    'opened', coalesce((select jsonb_agg(a.day order by a.day) from public.advent_opens a
+                         where a.profile_id = v_me and a.day >= v_from and a.day <= v_from + 23), '[]'::jsonb),
+    'done', coalesce((select jsonb_agg(r.day order by r.day) from public.daily_runs r
+                       where r.profile_id = v_me and r.finished_at is not null
+                         and r.day >= v_from and r.day <= v_from + 23), '[]'::jsonb));
+end $$;
+
+-- Ouvre la case p_day. Renvoie {day, xp, new, count, trophy} (xp = 0 si deja ouverte).
+-- Erreurs : advent_invalid_day (hors 1-24 dec), advent_not_yet (jour futur), advent_closed (apres le 6 janvier),
+-- advent_missed (defi de ce jour non termine).
+create or replace function public.advent_open(p_day date)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_today date := public._daily_day();
+  v_new boolean := false; v_n integer; v_trophy boolean := false;
+begin
+  if p_day is null or extract(month from p_day) <> 12 or extract(day from p_day) > 24 then
+    raise exception 'advent_invalid_day';
+  end if;
+  if p_day > v_today then raise exception 'advent_not_yet'; end if;
+  if v_today > make_date(extract(year from p_day)::int, 12, 31) + 6 then raise exception 'advent_closed'; end if;
+  perform public._daily_close_expired();
+  if not exists (select 1 from public.daily_runs where profile_id = v_me and day = p_day and finished_at is not null)
+     and not exists (select 1 from public.advent_opens where profile_id = v_me and day = p_day) then
+    raise exception 'advent_missed';
+  end if;
+  insert into public.advent_opens(profile_id, day) values (v_me, p_day) on conflict do nothing;
+  v_new := found;
+  if v_new then
+    update public.profiles set xp = xp + 25 where id = v_me;
+    v_trophy := public.evaluate_trophy(v_me, 'gen_esprit_noel');
+  end if;
+  select count(*)::int into v_n from public.advent_opens where profile_id = v_me;
+  return jsonb_build_object('day', p_day, 'xp', case when v_new then 25 else 0 end, 'new', v_new,
+                            'count', v_n, 'trophy', v_trophy);
+end $$;
+
+revoke all on function public.advent_state() from public, anon;
+revoke all on function public.advent_open(date) from public, anon;
+grant execute on function public.advent_state() to authenticated;
+grant execute on function public.advent_open(date) to authenticated;

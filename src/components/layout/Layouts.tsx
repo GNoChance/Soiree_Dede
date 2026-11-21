@@ -13,6 +13,7 @@ import { WheelWatcher } from '@/features/soiree/WheelWatcher'
 import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
+import { NoelDecor } from '@/features/noel/NoelDecor'
 
 /**
  * Haut de page : zone sûre + hauteur du bandeau global « une partie commence »
@@ -35,6 +36,7 @@ export function Root() {
         </div>
       )}
       <Outlet />
+      <NoelDecor />
       <LiveSoireeBanner />
       <SoireeChat />
       <WheelWatcher />
