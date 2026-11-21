@@ -7,10 +7,10 @@ const MAP = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise ch
 // golfer : découpé par closed-sheet.mjs (stickers soudés), hors de sheets.
 // cinema, croupier, student : stickers serrés / décors détachés -> découpe en grille.
 const GRID = ['cinema', 'croupier', 'student'];
-const S = (name, dir = name) => ({ name, file: `carole-${name}.png`, n: 12, dir, map: MAP, white: name === 'racer', split: ['tycoon', 'admiral'].includes(name) ? true : GRID.includes(name) ? 'grid' : false, pockets: GRID.includes(name) });
+const S = (name, dir = name) => ({ name, file: `carole-${name}.png`, n: 12, dir, map: MAP, white: name === 'racer', ...(name === 'elf' ? { tol: 8 } : {}), split: ['tycoon', 'admiral'].includes(name) ? true : GRID.includes(name) ? 'grid' : false, pockets: GRID.includes(name) });
 export default {
   slug: 'carole',
   src: 'assets-source/costumes/carole-v3',
-  sheets: 'tycoon admiral tictactoe strategist coach actor cinema bowler philosopher archer pyro painter student werewolf teacher croupier star spy racer pirate hacker chess host cowboy'.split(' ').map((n) => S(n)),
-  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer hacker chess golfer host cowboy'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'tycoon admiral tictactoe strategist coach actor cinema bowler philosopher archer pyro painter student werewolf teacher croupier star spy racer pirate hacker chess host cowboy elf'.split(' ').map((n) => S(n)),
+  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
 };
