@@ -89,7 +89,7 @@ export function AdventPage() {
         <p className="font-extrabold">Termine le défi du jour pour ouvrir la case du jour : +25 XP et une surprise !</p>
         <p className="text-sm font-bold">
           {openedCount} case{openedCount > 1 ? 's' : ''} ouverte{openedCount > 1 ? 's' : ''} sur 24
-          {readyCount > 0 && ` · ${readyCount} à ouvrir !`} · 12 cases = une tenue secrète 🧝
+          {readyCount > 0 && ` · ${readyCount} à ouvrir !`}
         </p>
       </Card>
       {loading && !data ? (
