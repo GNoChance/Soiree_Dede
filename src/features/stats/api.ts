@@ -145,3 +145,29 @@ export interface HeadToHead {
   other: { id: string; slug: string; nickname: string; equipped_tenue: string }
 }
 export const useHeadToHead = (otherId: string | undefined) => useRpc<HeadToHead>('head_to_head', otherId ? { p_other: otherId } : null)
+
+/** Miroir de la RPC fun_stats (supabase/features/stats-fun.sql). */
+export interface FunMate extends MiniProfile {
+  together: number
+  wins: number
+}
+export interface FunDuel extends MiniProfile {
+  my_wins: number
+  their_wins: number
+}
+export type FunStats =
+  | { enough: false; games: number; needed: number }
+  | {
+      enough: true
+      games: number
+      wins: number
+      soirees: number
+      slots: Array<{ slot: 'matin' | 'aprem' | 'soir' | 'nuit'; played: number; wins: number }>
+      days: Array<{ dow: number; played: number; wins: number }>
+      per_game: Array<{ game_id: string; played: number; wins: number }>
+      streak: { win: number; loss: number }
+      mates: FunMate[]
+      duels: FunDuel[]
+      longest_soiree: { soiree_id: string; minutes: number; games: number; day: string } | null
+    }
+export const useFunStats = (id: string | undefined) => useRpc<FunStats>('fun_stats', id ? { p_profile: id } : null)
