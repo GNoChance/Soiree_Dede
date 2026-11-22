@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   profile_not_found: 'Ce joueur est introuvable.',
   not_in_soiree:'Tu n’es plus dans cette soirée.',
   invalid_year: 'Cette année n’est pas valide.',
+  album_invalid_year: 'Cette année n’est pas valide pour l’album.',
   invalid_message: 'Message vide ou trop long (200 caractères max).',
   chat_too_fast: 'Doucement ! Attends quelques secondes avant d’écrire encore.',
   not_host: 'Seul l’hôte peut faire ça.',

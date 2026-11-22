@@ -31,6 +31,9 @@ export function HistoryPage() {
   return (
     <div className="flex flex-col gap-4">
       <Header title="Mes soirées" back="/" />
+      <Button fullWidth onClick={() => navigate('/album')}>
+        📖 Album souvenir
+      </Button>
       {loading && (
         <>
           <Skeleton className="h-28 w-full" />

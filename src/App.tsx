@@ -13,6 +13,8 @@ import { HistoryDetailPage, HistoryPage } from '@/features/stats/HistoryPages'
 import { HeadToHeadPage } from '@/features/stats/HeadToHeadPage'
 import { ProfilePage } from '@/features/stats/ProfilePage'
 import { DailyPage } from '@/features/daily/DailyPage'
+import { AlbumPage } from '@/features/album/AlbumPage'
+import { AlbumPrintPage } from '@/features/album/AlbumPrintPage'
 import { AdventPage } from '@/features/advent/AdventPage'
 import { SoloRoute } from '@/features/solo/SoloRoute'
 import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
@@ -36,6 +38,7 @@ const router = createBrowserRouter([
               { path: '/classement', element: <LeaderboardPage /> },
               { path: '/amis', element: <FriendsPage /> },
               { path: '/historique', element: <HistoryPage /> },
+              { path: '/album', element: <AlbumPage /> },
               { path: '/historique/:id', element: <HistoryDetailPage /> },
               { path: '/profil/:id', element: <ProfilePage /> },
               { path: '/face-a-face/:id', element: <HeadToHeadPage /> },
@@ -53,6 +56,8 @@ const router = createBrowserRouter([
               { path: '/entrainement/:gameId', element: <TrainingRoute /> },
             ],
           },
+          // Livre à imprimer : pleine page, sans gabarit mobile.
+          { path: '/album/imprimer', element: <AlbumPrintPage /> },
           // Mode télé : plein écran, hors gabarit mobile.
           { path: '/soiree/:id/tele', element: <TvPage /> },
         ],
