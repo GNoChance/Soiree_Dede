@@ -15,7 +15,7 @@ export interface AwardView {
   sticker?: { expression: string; tenue: string; total: number }
 }
 
-export type RecapCard = { kind: 'numbers' } | { kind: 'topgame' } | { kind: 'award'; view: AwardView } | { kind: 'standings' } | { kind: 'final' }
+export type RecapCard = { kind: 'numbers' } | { kind: 'reveillon' } | { kind: 'topgame' } | { kind: 'award'; view: AwardView } | { kind: 'standings' } | { kind: 'final' }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n > 1 ? many : one}`
 
@@ -100,6 +100,7 @@ export function buildAwards(r: SoireeRecap): AwardView[] {
 
 export function buildCards(r: SoireeRecap): RecapCard[] {
   const cards: RecapCard[] = [{ kind: 'numbers' }]
+  if (r.reveillon) cards.push({ kind: 'reveillon' })
   if (r.top_game) cards.push({ kind: 'topgame' })
   for (const view of buildAwards(r)) cards.push({ kind: 'award', view })
   cards.push({ kind: 'standings' }, { kind: 'final' })
