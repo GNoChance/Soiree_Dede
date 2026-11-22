@@ -215,6 +215,12 @@ const MESSAGES: Record<string, string> = {
   push_failed: 'Impossible d’activer les rappels sur cet appareil. Réessaie plus tard.',
   // Mode invité (supabase/features/guest.sql)
   guest_forbidden: 'En mode invité, on joue seulement dans la soirée rejointe.',
+  // Boîte à idées (supabase/features/idees.sql)
+  forbidden: 'Seul l’admin peut faire ça.',
+  invalid_idea: 'Écris ton idée (500 caractères au maximum).',
+  too_many_ideas: 'Déjà beaucoup d’idées aujourd’hui : reviens demain !',
+  unknown_idea: 'Cette idée n’existe plus.',
+  invalid_status: 'Statut invalide.',
   guests_closed: 'L’hôte n’a pas ouvert les invitations : demande-lui d’afficher le QR code.',
   already_member: 'Ce téléphone a déjà un profil de la bande : rejoins la soirée avec ton profil.',
   too_many_guests: 'Il y a déjà 8 personnes de passage dans cette soirée.',

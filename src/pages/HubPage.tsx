@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { History, PenLine, Trophy } from 'lucide-react'
+import { History, Lightbulb, PenLine, Trophy } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { useState } from 'react'
 import { GAMES } from '@/games/registry'
@@ -15,12 +15,14 @@ import { Avatar } from '@/components/ui/Avatar'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { XpBar } from '@/components/ui/XpBar'
 import { StaggerItem, StaggerList } from '@/components/ui/Stagger'
+import { useIsGuest } from '@/features/guest/api'
 import { useSession } from '@/store/session'
 import { xpProgress } from '@/lib/xp'
 
 export function HubPage() {
   const navigate = useNavigate()
   const profile = useSession((s) => s.profile)
+  const isGuest = useIsGuest()
   const stats = useSession((s) => s.stats)
   const level = profile ? xpProgress(profile.xp).level : 1
   const [infoGame, setInfoGame] = useState<GameDefinition | null>(null)
@@ -76,6 +78,15 @@ export function HubPage() {
           <span className="text-sm font-bold text-muted">Écrire</span>
         </Card>
       </StaggerItem>
+      {!isGuest && (
+        <StaggerItem>
+          <Card onClick={() => navigate('/idees')} className="flex items-center gap-3">
+            <Lightbulb className="size-7 text-sun" />
+            <span className="flex-1 text-xl font-extrabold">💡 Boîte à idées</span>
+            <span className="text-sm font-bold text-muted">Proposer</span>
+          </Card>
+        </StaggerItem>
+      )}
       <StaggerItem>
         <h2 className="text-2xl">Les jeux</h2>
       </StaggerItem>
