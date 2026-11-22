@@ -33,6 +33,7 @@ import { TutoButton } from '@/features/tutos/TutoButton'
 import { readScenario } from '@/features/reveillon/api'
 import { ReveillonLauncher } from '@/features/reveillon/ReveillonLauncher'
 import { ReveillonStage } from '@/features/reveillon/ReveillonStage'
+import { ChallengeLaunchCard } from '@/features/mises/ChallengeLaunchCard'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -192,6 +193,10 @@ export function SoireePage() {
           </Button>
           {!isHost && !match.player_ids.includes(meId) && <p className="text-center text-sm font-bold text-muted">Tu joueras à la suivante</p>}
         </div>
+      )}
+
+      {!scenario && (
+        <ChallengeLaunchCard soireeId={soiree.id} isHost={isHost} meId={meId} byId={byId} busy={Boolean(match) || Boolean(launching)} onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })} />
       )}
 
       {scenario ? (

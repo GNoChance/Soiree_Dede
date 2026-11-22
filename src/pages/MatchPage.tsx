@@ -15,6 +15,7 @@ import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players
 import { ConfirmModal, LaunchCountdown } from '@/features/soiree/components'
 import { ResultsScreen } from '@/features/soiree/ResultsScreen'
 import { SpectatorBanner } from '@/features/spectate/SpectatorBanner'
+import { WagerCard } from '@/features/mises/WagerCard'
 import { readOnlyAct, useSpectator } from '@/features/spectate/useSpectator'
 
 function PlaySkeleton() {
@@ -125,6 +126,9 @@ export function MatchPage() {
           </button>
         )}
       </div>
+
+      {/* Paris en pièces des membres de la soirée qui ne jouent pas (rien pour un joueur / un ami extérieur) */}
+      {!outsider && soireeData && <WagerCard matchId={match.id} state={state} meId={meId} byId={byId} finished={finished} />}
 
       {/* Corps */}
       {finished && aborted ? (

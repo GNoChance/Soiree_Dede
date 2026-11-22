@@ -1,5 +1,596 @@
 -- MORCEAU 2 / 5 — -- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent. À exécuter dans l'ordre (1, puis 2…) dans Supabase > SQL Editor > Run.
 
+-- ===== features\pronos.sql =====
+-- =============================================================================
+-- PRONOSTICS ENTRE POTES — idempotent, exécuté APRÈS schema.sql (features/*).
+-- Avant de lancer un jeu, l'hôte ouvre une « manche de pronostics » (open_pronos) ; chaque joueur
+-- de la soirée parie sur le gagnant (set_prono). Au lancement (start_match) le trigger
+-- _pronos_attach rattache les paris à la partie. Le résultat n'est JAMAIS stocké : il se calcule
+-- à la lecture en joignant match_players.won (aucun jeu ni finish_match n'est touché).
+--
+-- Règles : un pari par (soirée, joueur), le dernier gagne ; on peut parier sur soi ; égalité ou
+-- équipe gagnante = parier sur n'importe quel gagnant est bon ; partie annulée / sans gagnant =
+-- pronostics annulés (void) ; une manche non lancée expire au bout de 10 minutes.
+--
+-- RPC (toutes security definer, grant authenticated) — erreurs entre parenthèses :
+--   open_pronos(p_soiree_id, p_game_id, p_player_ids) -> manche        (not_host, soiree_ended,
+--       match_in_progress, soiree_not_found, invalid_pronos) ; remet les paris à zéro
+--   close_pronos(p_soiree_id)                                          (not_host, soiree_not_found)
+--   set_prono(p_soiree_id, p_pick)                                     (not_in_soiree, pronos_closed, invalid_pick)
+--   get_pronos(p_soiree_id) -> {round|null, my_pick|null}              (not_in_soiree) ; jamais les paris des autres
+--   match_pronos(p_match_id) -> null | {void, picks[{profile_id,pick,ok}]}   (match_not_found, not_in_soiree)
+--   soiree_prono_board(p_soiree_id) -> [{profile_id, hits, bets}]      (not_in_soiree)
+-- =============================================================================
+
+create table if not exists public.soiree_prono_rounds (
+  soiree_id  uuid primary key references public.soirees(id) on delete cascade,
+  game_id    text not null,
+  player_ids uuid[] not null,
+  bets       integer not null default 0,
+  opened_at  timestamptz not null default now()
+);
+
+create table if not exists public.soiree_pronos (
+  id              bigint generated always as identity primary key,
+  soiree_id       uuid not null references public.soirees(id) on delete cascade,
+  profile_id      uuid not null references public.profiles(id) on delete cascade,
+  pick_profile_id uuid not null references public.profiles(id) on delete cascade,
+  match_id        uuid references public.matches(id) on delete cascade,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create unique index if not exists soiree_pronos_open_idx on public.soiree_pronos(soiree_id, profile_id) where match_id is null;
+create unique index if not exists soiree_pronos_match_idx on public.soiree_pronos(match_id, profile_id) where match_id is not null;
+create index if not exists soiree_pronos_profile_idx on public.soiree_pronos(profile_id);
+
+alter table public.soiree_prono_rounds enable row level security;
+alter table public.soiree_pronos enable row level security;
+drop policy if exists soiree_prono_rounds_select on public.soiree_prono_rounds;
+create policy soiree_prono_rounds_select on public.soiree_prono_rounds for select to authenticated
+  using (public.is_soiree_member(soiree_id));
+revoke all on table public.soiree_prono_rounds, public.soiree_pronos from anon, authenticated;
+grant select on table public.soiree_prono_rounds to authenticated;
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                  where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'soiree_prono_rounds') then
+    alter publication supabase_realtime add table public.soiree_prono_rounds;
+  end if;
+end $$;
+
+-- Paris rattachés à une partie TERMINÉE qui a au moins un gagnant et dont le joueur choisi a joué : ok = il a gagné.
+create or replace function public._prono_resolved()
+returns table(soiree_id uuid, match_id uuid, profile_id uuid, pick uuid, ok boolean, at timestamptz)
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select p.soiree_id, p.match_id, p.profile_id, p.pick_profile_id,
+         exists (select 1 from public.match_players w
+                  where w.match_id = p.match_id and w.profile_id = p.pick_profile_id and w.won),
+         coalesce(m.finished_at, m.created_at)
+    from public.soiree_pronos p
+    join public.matches m on m.id = p.match_id
+   where m.status = 'finished'
+     and exists (select 1 from public.match_players w where w.match_id = m.id and w.won)
+     -- un pari sur un joueur qui n'a pas joué la partie est annulé (ni raté, ni compté)
+     and exists (select 1 from public.match_players w where w.match_id = m.id and w.profile_id = p.pick_profile_id)
+$$;
+
+create or replace function public.open_pronos(p_soiree_id uuid, p_game_id text, p_player_ids uuid[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_s   public.soirees%rowtype;
+  v_ids uuid[];
+  v_r   public.soiree_prono_rounds%rowtype;
+begin
+  select * into v_s from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if exists (select 1 from public.matches m where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
+    raise exception 'match_in_progress';
+  end if;
+  v_ids := array(select distinct x from unnest(coalesce(p_player_ids, '{}')) x);
+  if coalesce(p_game_id, '') !~ '^[a-z0-9_-]{1,40}$' or coalesce(array_length(v_ids, 1), 0) < 2
+     or exists (select 1 from unnest(v_ids) x
+                 where not exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = x)) then
+    raise exception 'invalid_pronos';
+  end if;
+  delete from public.soiree_pronos where soiree_id = p_soiree_id and match_id is null;
+  insert into public.soiree_prono_rounds(soiree_id, game_id, player_ids, bets, opened_at)
+  values (p_soiree_id, p_game_id, v_ids, 0, now())
+  on conflict (soiree_id) do update
+    set game_id = excluded.game_id, player_ids = excluded.player_ids, bets = 0, opened_at = now()
+  returning * into v_r;
+  return to_jsonb(v_r);
+end $$;
+
+create or replace function public.close_pronos(p_soiree_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_h  uuid;
+begin
+  select host_id into v_h from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_h <> v_me then raise exception 'not_host'; end if;
+  delete from public.soiree_pronos where soiree_id = p_soiree_id and match_id is null;
+  delete from public.soiree_prono_rounds where soiree_id = p_soiree_id;
+end $$;
+
+create or replace function public.set_prono(p_soiree_id uuid, p_pick uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_r  public.soiree_prono_rounds%rowtype;
+begin
+  if not public.is_soiree_member(p_soiree_id) then raise exception 'not_in_soiree'; end if;
+  select * into v_r from public.soiree_prono_rounds where soiree_id = p_soiree_id for update;
+  if not found or v_r.opened_at < now() - interval '10 minutes' then raise exception 'pronos_closed'; end if;
+  if not (p_pick = any (v_r.player_ids)) then raise exception 'invalid_pick'; end if;
+  insert into public.soiree_pronos(soiree_id, profile_id, pick_profile_id)
+  values (p_soiree_id, v_me, p_pick)
+  on conflict (soiree_id, profile_id) where match_id is null
+  do update set pick_profile_id = excluded.pick_profile_id, updated_at = now();
+  update public.soiree_prono_rounds
+     set bets = (select count(*) from public.soiree_pronos where soiree_id = p_soiree_id and match_id is null)
+   where soiree_id = p_soiree_id;
+end $$;
+
+create or replace function public.get_pronos(p_soiree_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_r  public.soiree_prono_rounds%rowtype;
+begin
+  if not public.is_soiree_member(p_soiree_id) then raise exception 'not_in_soiree'; end if;
+  select * into v_r from public.soiree_prono_rounds where soiree_id = p_soiree_id;
+  if not found or v_r.opened_at < now() - interval '10 minutes' then
+    return jsonb_build_object('round', null, 'my_pick', null);
+  end if;
+  return jsonb_build_object(
+    'round', to_jsonb(v_r),
+    'my_pick', (select pick_profile_id from public.soiree_pronos
+                 where soiree_id = p_soiree_id and profile_id = v_me and match_id is null));
+end $$;
+
+-- Résultat d'une partie : void = pas terminée / annulée / sans gagnant (picks vide : rien n'est révélé).
+create or replace function public.match_pronos(p_match_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_m    public.matches%rowtype;
+  v_void boolean;
+begin
+  select * into v_m from public.matches where id = p_match_id;
+  if not found then raise exception 'match_not_found'; end if;
+  if v_m.soiree_id is null or not public.is_soiree_member(v_m.soiree_id) then raise exception 'not_in_soiree'; end if;
+  if not exists (select 1 from public.soiree_pronos where match_id = p_match_id) then return null; end if;
+  v_void := not (v_m.status = 'finished'
+                 and exists (select 1 from public.match_players w where w.match_id = p_match_id and w.won));
+  if v_void then return jsonb_build_object('void', true, 'picks', '[]'::jsonb); end if;
+  return jsonb_build_object('void', false, 'picks', (
+    select coalesce(jsonb_agg(jsonb_build_object('profile_id', r.profile_id, 'pick', r.pick, 'ok', r.ok)
+                              order by pr.sort_order), '[]'::jsonb)
+      from public._prono_resolved() r join public.profiles pr on pr.id = r.profile_id
+     where r.match_id = p_match_id));
+end $$;
+
+create or replace function public.soiree_prono_board(p_soiree_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.is_soiree_member(p_soiree_id) then raise exception 'not_in_soiree'; end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('profile_id', b.profile_id, 'hits', b.hits, 'bets', b.bets)
+                     order by b.hits desc, b.bets, b.sort_order)
+      from (select r.profile_id, count(*) filter (where r.ok)::int as hits, count(*)::int as bets, pr.sort_order
+              from public._prono_resolved() r join public.profiles pr on pr.id = r.profile_id
+             where r.soiree_id = p_soiree_id
+             group by r.profile_id, pr.sort_order) b), '[]'::jsonb);
+end $$;
+
+-- Une partie est créée : les paris ouverts de la soirée lui sont rattachés si le jeu est celui de la
+-- manche ; sinon ils sont jetés. Dans tous les cas la manche est refermée.
+create or replace function public._pronos_attach()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_game text;
+begin
+  if new.soiree_id is null then return new; end if;
+  select game_id into v_game from public.soiree_prono_rounds where soiree_id = new.soiree_id;
+  if found and v_game = new.game_id then
+    update public.soiree_pronos set match_id = new.id, updated_at = now()
+     where soiree_id = new.soiree_id and match_id is null;
+  end if;
+  delete from public.soiree_pronos where soiree_id = new.soiree_id and match_id is null;
+  delete from public.soiree_prono_rounds where soiree_id = new.soiree_id;
+  return new;
+end $$;
+drop trigger if exists matches_pronos_attach on public.matches;
+create trigger matches_pronos_attach after insert on public.matches
+  for each row execute function public._pronos_attach();
+
+revoke all on function public._prono_resolved() from public, anon, authenticated;
+revoke all on function public._pronos_attach() from public, anon, authenticated;
+revoke all on function public.open_pronos(uuid, text, uuid[]) from public, anon;
+revoke all on function public.close_pronos(uuid) from public, anon;
+revoke all on function public.set_prono(uuid, uuid) from public, anon;
+revoke all on function public.get_pronos(uuid) from public, anon;
+revoke all on function public.match_pronos(uuid) from public, anon;
+revoke all on function public.soiree_prono_board(uuid) from public, anon;
+grant execute on function public.open_pronos(uuid, text, uuid[]) to authenticated;
+grant execute on function public.close_pronos(uuid) to authenticated;
+grant execute on function public.set_prono(uuid, uuid) to authenticated;
+grant execute on function public.get_pronos(uuid) to authenticated;
+grant execute on function public.match_pronos(uuid) to authenticated;
+grant execute on function public.soiree_prono_board(uuid) to authenticated;
+
+
+-- ===== features\push.sql =====
+-- =============================================================================
+-- NOTIFICATIONS PUSH : rappel du defi du jour a 18 h (Europe/Paris) — idempotent,
+-- execute APRES daily.sql (ordre alphabetique de features/).
+--
+-- Circuit : pg_cron (toutes les heures a :00) -> _push_daily_tick() -> si heure de
+-- Paris = 18 : pg_net POST https://<app>/api/daily-reminder (Bearer <secret>) ->
+-- fonction Vercel -> push_daily_reminder_targets() (cle service role) -> web-push ->
+-- push_report() (purge des abonnements morts 404/410).
+--
+-- Configuration (UNE FOIS, dans le SQL Editor, avec TES valeurs ; jamais dans le depot) :
+--   insert into public.push_config (id, reminder_url, secret)
+--   values (true, 'https://TON-APP.vercel.app/api/daily-reminder', 'LE_MEME_SECRET_QUE_PUSH_CRON_SECRET')
+--   on conflict (id) do update set reminder_url = excluded.reminder_url, secret = excluded.secret, updated_at = now();
+-- Test immediat (ignore l'heure, envoie a tous ceux qui n'ont pas joue aujourd'hui) :
+--   select public._push_daily_tick(true);
+-- Invitations « X t'invite a sa soiree » : voir supabase/features/push_invites.sql (URL deduite de reminder_url).
+-- =============================================================================
+
+create table if not exists public.push_subscriptions (
+  id                bigint generated always as identity primary key,
+  profile_id        uuid not null references public.profiles(id) on delete cascade,
+  endpoint          text not null unique,
+  p256dh            text not null,
+  auth              text not null,
+  user_agent        text,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  last_ok_at        timestamptz,
+  -- Jour (Paris) du dernier rappel envoye : evite les doublons si l'URL est rappelee.
+  last_reminded_day date
+);
+create index if not exists push_subscriptions_profile_idx on public.push_subscriptions(profile_id);
+alter table public.push_subscriptions enable row level security;
+-- Aucune policy : acces uniquement via les RPC security definer.
+revoke all on table public.push_subscriptions from anon, authenticated;
+
+-- Config privee du declencheur (une seule ligne). Lue par _push_daily_tick().
+create table if not exists public.push_config (
+  id           boolean primary key default true check (id),
+  reminder_url text,
+  secret       text,
+  updated_at   timestamptz not null default now()
+);
+alter table public.push_config enable row level security;
+revoke all on table public.push_config from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- RPC joueurs
+-- ---------------------------------------------------------------------------
+
+-- Enregistre (ou rattache au joueur courant) l'abonnement push de CET appareil.
+-- Plusieurs appareils par joueur (10 max : les plus anciens sont oublies).
+-- Erreur : invalid_subscription.
+create or replace function public.save_push_subscription(
+  p_endpoint text, p_p256dh text, p_auth text, p_user_agent text default null)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  if p_endpoint is null or p_endpoint !~ '^https://' or char_length(p_endpoint) > 1024
+     or coalesce(char_length(p_p256dh), 0) not between 20 and 200
+     or coalesce(char_length(p_auth), 0) not between 8 and 100 then
+    raise exception 'invalid_subscription';
+  end if;
+  insert into public.push_subscriptions as s (profile_id, endpoint, p256dh, auth, user_agent)
+  values (v_me, p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))
+  on conflict (endpoint) do update
+    set p256dh = excluded.p256dh, auth = excluded.auth, user_agent = excluded.user_agent,
+        updated_at = now(),
+        last_reminded_day = case when s.profile_id = excluded.profile_id then s.last_reminded_day end,
+        profile_id = excluded.profile_id;
+  delete from public.push_subscriptions
+   where profile_id = v_me
+     and id not in (select id from public.push_subscriptions where profile_id = v_me
+                     order by updated_at desc limit 10);
+end $$;
+
+-- Desabonne CET appareil (sans erreur s'il n'etait pas enregistre).
+create or replace function public.delete_push_subscription(p_endpoint text)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  delete from public.push_subscriptions where endpoint = p_endpoint and profile_id = v_me;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- RPC service role (fonction Vercel api/daily-reminder.ts)
+-- ---------------------------------------------------------------------------
+
+-- Abonnements des joueurs SANS tentative aujourd'hui (une tentative commencee mais
+-- non terminee ne peut plus etre rejouee : inutile de rappeler) et pas encore rappeles
+-- aujourd'hui. p_claim = true : marque last_reminded_day (anti-doublon, atomique).
+-- -> [{endpoint, p256dh, auth, profile_id, nickname, streak}]
+create or replace function public.push_daily_reminder_targets(p_claim boolean default true)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_day date := public._daily_day();
+  v_ids bigint[];
+begin
+  select coalesce(array_agg(s.id), '{}') into v_ids
+    from public.push_subscriptions s
+   where s.last_reminded_day is distinct from v_day
+     and not exists (select 1 from public.daily_runs r where r.profile_id = s.profile_id and r.day = v_day);
+  if p_claim then
+    update public.push_subscriptions set last_reminded_day = v_day where id = any(v_ids);
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
+             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id)))
+      from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
+     where s.id = any(v_ids)), '[]'::jsonb);
+end $$;
+
+-- Abonnements d'un joueur (par slug), pour tester l'envoi sans condition.
+create or replace function public.push_test_targets(p_slug text)
+returns jsonb language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
+           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id))), '[]'::jsonb)
+    from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
+   where p.slug = lower(btrim(p_slug))
+$$;
+
+-- Compte rendu d'envoi : p_ok -> last_ok_at ; p_dead (404/410) -> supprimes.
+create or replace function public.push_report(p_ok text[], p_dead text[])
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  update public.push_subscriptions set last_ok_at = now() where endpoint = any(coalesce(p_ok, '{}'));
+  delete from public.push_subscriptions where endpoint = any(coalesce(p_dead, '{}'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Declencheur horaire (pg_cron + pg_net)
+-- ---------------------------------------------------------------------------
+
+-- Appele toutes les heures a :00 ; n'agit qu'a 18 h heure de Paris (ete comme hiver).
+-- p_force = true : ignore l'heure (test manuel depuis le SQL Editor).
+create or replace function public._push_daily_tick(p_force boolean default false)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare c public.push_config%rowtype;
+begin
+  if not p_force and extract(hour from (now() at time zone 'Europe/Paris')) <> 18 then return; end if;
+  select * into c from public.push_config where id;
+  if not found or coalesce(c.reminder_url, '') = '' or coalesce(c.secret, '') = '' then
+    raise notice 'push_config incomplete : rappel du defi non envoye';
+    return;
+  end if;
+  begin
+    perform net.http_post(
+      url := c.reminder_url,
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.secret),
+      timeout_milliseconds := 60000);
+  exception when others then
+    raise notice 'pg_net indisponible (%) : rappel du defi non envoye', sqlerrm;
+  end;
+end $$;
+
+revoke all on function public.save_push_subscription(text, text, text, text) from public, anon;
+revoke all on function public.delete_push_subscription(text) from public, anon;
+revoke all on function public.push_daily_reminder_targets(boolean) from public, anon, authenticated;
+revoke all on function public.push_test_targets(text) from public, anon, authenticated;
+revoke all on function public.push_report(text[], text[]) from public, anon, authenticated;
+revoke all on function public._push_daily_tick(boolean) from public, anon, authenticated;
+grant execute on function public.save_push_subscription(text, text, text, text) to authenticated;
+grant execute on function public.delete_push_subscription(text) to authenticated;
+grant execute on function public.push_daily_reminder_targets(boolean) to service_role;
+grant execute on function public.push_test_targets(text) to service_role;
+grant execute on function public.push_report(text[], text[]) to service_role;
+
+-- Jobs « push-daily-reminder » (toutes les heures a :00) et sa purge d'historique.
+-- Tolerant : sans pg_net / pg_cron, simple NOTICE (le rappel peut alors etre declenche
+-- par n'importe quel planificateur externe appelant l'URL avec le secret).
+do $$
+begin
+  begin
+    create extension if not exists pg_net;
+  exception when others then
+    raise notice 'pg_net indisponible (%) : rappel push a declencher depuis l''exterieur', sqlerrm;
+  end;
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron indisponible (%) : rappel push a declencher depuis l''exterieur', sqlerrm;
+    return;
+  end;
+  begin
+    perform cron.unschedule(j.jobid) from cron.job j
+      where j.jobname in ('push-daily-reminder', 'push-daily-reminder-purge');
+    perform cron.schedule('push-daily-reminder', '0 * * * *', 'select public._push_daily_tick()');
+    perform cron.schedule('push-daily-reminder-purge', '23 4 * * *',
+      $job$delete from cron.job_run_details
+            where end_time < now() - interval '7 days'
+              and jobid in (select jobid from cron.job where jobname = 'push-daily-reminder')$job$);
+  exception when others then
+    raise notice 'planification pg_cron impossible (%) : rappel push non planifie', sqlerrm;
+  end;
+end $$;
+
+
+-- ===== features\push_invites.sql =====
+-- =============================================================================
+-- NOTIFICATION « <hote> t'invite a sa soiree ! » — idempotent, execute APRES push.sql
+-- (ordre alphabetique de features/).
+--
+-- Circuit : trigger sur soiree_players (joueur ajoute par l'hote) -> ligne dans
+-- push_invites (une seule par joueur et par soiree = anti-spam, meme si l'hote le
+-- retire puis le reinvite) -> pg_net POST <invite_url> (Bearer <secret>) -> fonction
+-- Vercel api/soiree-invite.ts -> push_invite_claim() (cle service role) -> web-push
+-- -> push_report(). Jamais bloquant : toute erreur (pg_net absent...) = simple NOTICE.
+--
+-- Configuration : RIEN de plus si push_config.reminder_url est deja rempli (l'URL
+-- d'invitation en est deduite en remplacant « daily-reminder » par « soiree-invite »).
+-- URL personnalisee : update public.push_config set invite_url = 'https://TON-APP.vercel.app/api/soiree-invite';
+-- Cote Vercel : redeployer (la route api/soiree-invite.ts utilise les memes variables
+-- d'environnement que le rappel du defi). Verifier : select * from public.push_invites;
+-- =============================================================================
+
+alter table public.push_config add column if not exists invite_url text;
+
+-- Preferences push par joueur (defaut : on me previent quand on m'invite).
+create table if not exists public.push_prefs (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  invites    boolean not null default true
+);
+alter table public.push_prefs enable row level security;
+revoke all on table public.push_prefs from anon, authenticated;
+
+-- File d'attente + memoire anti-doublon des invitations.
+create table if not exists public.push_invites (
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  host_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  sent_at    timestamptz,
+  primary key (soiree_id, profile_id)
+);
+alter table public.push_invites enable row level security;
+revoke all on table public.push_invites from anon, authenticated;
+
+create or replace function public.get_push_prefs()
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  return jsonb_build_object('invites',
+    coalesce((select invites from public.push_prefs where profile_id = v_me), true));
+end $$;
+
+create or replace function public.set_push_invites(p_enabled boolean)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  insert into public.push_prefs(profile_id, invites) values (v_me, coalesce(p_enabled, true))
+  on conflict (profile_id) do update set invites = excluded.invites;
+end $$;
+
+-- Trigger : un joueur (autre que l'hote) rejoint une soiree.
+create or replace function public._push_invite_trg()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_host   uuid;
+  v_status text;
+  c        public.push_config%rowtype;
+  v_url    text;
+  v_rows   integer;
+begin
+  begin
+    select host_id, status into v_host, v_status from public.soirees where id = new.soiree_id;
+    if v_host is null or v_host = new.profile_id or v_status = 'ended' then return new; end if;
+    insert into public.push_invites(soiree_id, profile_id, host_id) values (new.soiree_id, new.profile_id, v_host)
+      on conflict do nothing;
+    get diagnostics v_rows = row_count;
+    if v_rows = 0 then return new; end if;
+    select * into c from public.push_config where id;
+    v_url := coalesce(nullif(c.invite_url, ''), replace(nullif(c.reminder_url, ''), 'daily-reminder', 'soiree-invite'));
+    if not found or v_url is null or coalesce(c.secret, '') = '' then
+      raise notice 'push_config incomplete : invitation non notifiee';
+      return new;
+    end if;
+    perform net.http_post(
+      url := v_url,
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.secret),
+      timeout_milliseconds := 30000);
+  exception when others then
+    raise notice 'invitation push non envoyee (%)', sqlerrm;
+  end;
+  return new;
+end $$;
+
+drop trigger if exists push_invite_trg on public.soiree_players;
+create trigger push_invite_trg after insert on public.soiree_players
+  for each row execute function public._push_invite_trg();
+
+-- Fonction Vercel : reclame (atomiquement) les invitations en attente et renvoie les
+-- appareils a notifier (preference activee, soiree ouverte, invitation de moins de 10 min).
+-- -> [{endpoint, p256dh, auth, profile_id, host_nick, soiree_id}]
+create or replace function public.push_invite_claim()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_rows jsonb;
+begin
+  delete from public.push_invites where created_at < now() - interval '60 days';
+  with claimed as (
+    update public.push_invites i set sent_at = now()
+     where i.sent_at is null
+    returning i.soiree_id, i.profile_id, i.host_id, i.created_at
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', c.profile_id,
+           'host_nick', h.nickname, 'soiree_id', c.soiree_id)), '[]'::jsonb)
+    into v_rows
+    from claimed c
+    join public.soirees so on so.id = c.soiree_id and so.status <> 'ended'
+    join public.profiles h on h.id = c.host_id
+    join public.push_subscriptions s on s.profile_id = c.profile_id
+   where c.created_at > now() - interval '10 minutes'
+     and coalesce((select p.invites from public.push_prefs p where p.profile_id = c.profile_id), true);
+  return v_rows;
+end $$;
+
+revoke all on function public.get_push_prefs() from public, anon;
+revoke all on function public.set_push_invites(boolean) from public, anon;
+revoke all on function public._push_invite_trg() from public, anon, authenticated;
+revoke all on function public.push_invite_claim() from public, anon, authenticated;
+grant execute on function public.get_push_prefs() to authenticated;
+grant execute on function public.set_push_invites(boolean) to authenticated;
+grant execute on function public.push_invite_claim() to service_role;
+
+
 -- ===== features\recap.sql =====
 -- =============================================================================
 -- RÉCAP DE SOIRÉE (lot C, « façon Wrapped ») — idempotent, exécuté en features/*
@@ -3391,413 +3982,3 @@ revoke all on function public.game_bataille_navale_board_move(jsonb, jsonb, text
 revoke all on function public.game_bataille_navale_board_auto(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_bataille_navale_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_bataille_navale_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
-
-
--- ===== games\bombe-a-mots.sql =====
--- =============================================================================
--- JEU « Bombe à mots » (id bombe-a-mots) : syllabe imposée + bombe qui tourne
--- Idempotent (create or replace). Dispatché par start_match / game_action.
--- Contrat complet (state public, actions, options) : src/games/bombe-a-mots/types.ts.
---
--- p_options : {"lives": 3, "start_level": 1,
---              "syllables": [{"s":"ou","level":1}, ...]}   -- tirées par l'hôte (front),
---              triées par difficulté croissante, mélangées à niveau égal (10..400 entrées).
---
--- MÈCHE GLOBALE (variante retenue) : une mèche de 5 à 12 s (tirée au hasard par le
--- serveur, JAMAIS publiée : server.explode_at) brûle en continu pendant que la bombe
--- passe de joueur en joueur ; elle n'est retirée qu'après une explosion. Pour éviter
--- une explosion « injuste » juste après une passe, le joueur qui reçoit la bombe a
--- toujours au moins BAM_GRACE_MS (1,5 s) devant lui (explode_at repoussé si besoin).
--- Après une explosion (et au lancement) : pause de BAM_PAUSE_S (3 s, state.resume_at),
--- puis nouvelle mèche à partir de resume_at (state.fuse_started_at).
---
--- Échéance cachée => le front ne sait pas quand envoyer le tick. Il « sonde » :
--- {"type":"tick","quiet":true} à partir de fuse_started_at + 5 s ; si la bombe n'a pas
--- encore explosé, le serveur LÈVE 'bomb_not_ready' (transaction annulée : aucune
--- écriture, aucun évènement Realtime, aucun seq consommé). {"type":"tick"} sans quiet
--- respecte la convention commune (state renvoyé inchangé, sans erreur).
---
--- Dictionnaire : vérifié CÔTÉ CLIENT uniquement (~300 000 formes, impossible à charger
--- dans une fonction SQL à chaque coup). Le serveur vérifie tout le reste.
--- =============================================================================
-
--- Normalisation d'un mot joué : minuscules, sans accents ni ligatures. Le tiret est
--- conservé (mots composés). Le résultat doit ensuite matcher ^[a-z]+(-[a-z]+)*$.
-create or replace function public._bam_norm(p text)
-returns text language sql immutable
-set search_path = public, extensions
-as $$
-  select lower(translate(
-    replace(replace(replace(replace(btrim(left(coalesce(p, ''), 60)), 'œ', 'oe'), 'Œ', 'OE'), 'æ', 'ae'), 'Æ', 'AE'),
-    'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ',
-    'aaaaaaceeeeiiiinooooouuuuyyAAAAAACEEEEIIIINOOOOOUUUUYY'))
-$$;
-
--- Nouvelle mèche aléatoire (5 000 à 12 000 ms) à partir de p_from.
-create or replace function public._bam_fuse(p_from timestamptz)
-returns timestamptz language sql volatile
-set search_path = public, extensions
-as $$ select p_from + make_interval(secs => (5000 + floor(random() * 7001)) / 1000.0) $$;
-
--- Joueur vivant suivant p_from dans l'ordre de table (p_from peut être éliminé).
-create or replace function public._bam_next(p_state jsonb, p_from text)
-returns text language plpgsql immutable
-set search_path = public, extensions
-as $$
-declare
-  v_order text[] := array(select jsonb_array_elements_text(p_state->'players'));
-  v_n     integer := cardinality(v_order);
-  v_i     integer := coalesce(array_position(v_order, p_from), 0);
-  k       integer;
-  v_c     text;
-begin
-  for k in 1 .. v_n loop
-    v_c := v_order[((v_i - 1 + k) % v_n) + 1];
-    if (p_state->'alive') ? v_c then return v_c; end if;
-  end loop;
-  return null;
-end $$;
-
--- Tire la syllabe suivante (niveau visé = start_level + mots validés / level_every, plafonné à 5).
--- Préfère une syllabe inutilisée du niveau visé (dans l'ordre fourni), sinon le niveau le
--- plus proche (plus facile d'abord) ; liste épuisée => on recycle (sauf la syllabe courante).
-create or replace function public._bam_pick(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql volatile
-set search_path = public, extensions
-as $$
-declare
-  v_target integer := least(5, (p_state->>'start_level')::integer
-                              + (p_state->>'words_count')::integer / greatest(1, (p_state->>'level_every')::integer));
-  v_cur    text := p_state->>'syllable';
-  v_used   jsonb := coalesce(p_server->'used', '[]'::jsonb);
-  v_idx    integer;
-  v_s      text;
-  v_lvl    integer;
-begin
-  for k in 1 .. 2 loop
-    select (o - 1)::integer, e->>'s', (e->>'level')::integer into v_idx, v_s, v_lvl
-      from jsonb_array_elements(p_server->'syllables') with ordinality t(e, o)
-     where not (v_used @> to_jsonb((o - 1)::integer))
-       and (v_cur is null or e->>'s' <> v_cur)
-     order by abs((e->>'level')::integer - v_target), (e->>'level')::integer, o
-     limit 1;
-    exit when v_idx is not null;
-    v_used := '[]'::jsonb;  -- tout a servi : on recycle
-  end loop;
-  if v_idx is null then  -- liste d'une seule syllabe (impossible via start) : on garde la courante
-    v_s := v_cur; v_lvl := coalesce((p_state->>'level')::integer, 1);
-  else
-    v_used := v_used || to_jsonb(v_idx);
-  end if;
-  p_state := p_state || jsonb_build_object('syllable', v_s, 'level', v_lvl, 'target_level', v_target);
-  p_server := p_server || jsonb_build_object('used', v_used);
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Stats de fin de partie pour les trophées (features/trophees.sql), lues dans explosions / words / bonuses.
-create or replace function public._bam_tstats(p_state jsonb, p_pl text, p_winner text)
-returns jsonb language sql immutable
-set search_path = public, extensions
-as $$
-  with ev as (   -- événements de MES tours, dans l'ordre : x = explosion, w = mot validé
-    select (x->>'n')::integer as n, 'x' as k from jsonb_array_elements(coalesce(p_state->'explosions', '[]'::jsonb)) x where x->>'p' = p_pl
-    union all
-    select (w->>'n')::integer, 'w' from jsonb_array_elements(coalesce(p_state->'words', '[]'::jsonb)) w where w->>'p' = p_pl
-  ), r as (
-    select n, k, row_number() over (order by n) - row_number() over (partition by k order by n) as grp from ev
-  ), me as (
-    select (select count(*) from ev where k = 'x') as booms
-  )
-  select jsonb_build_object(
-    'explosions', (select booms from me),
-    'double_boom', (select count(*) from (select count(*) as c from r where k = 'x' group by grp) z where c >= 2),
-    'first_out', case when p_state->'eliminated'->>0 = p_pl then 1 else 0 end,
-    'words', coalesce((p_state->'word_counts'->>p_pl)::integer, 0),
-    'longest_word', coalesce((select max(char_length(replace(w->>'w', '-', '')))
-                                from jsonb_array_elements(coalesce(p_state->'words', '[]'::jsonb)) w where w->>'p' = p_pl), 0),
-    'alphabets', (select count(*) from jsonb_array_elements(coalesce(p_state->'bonuses', '[]'::jsonb)) b where b->>'p' = p_pl),
-    'last_life_win', case when p_winner = p_pl and (p_state->'lives'->>p_pl)::integer = 1 then 1 else 0 end,
-    'untouched', case when p_winner = p_pl and (select booms from me) = 0
-                       and jsonb_array_length(p_state->'players') >= 3 then 1 else 0 end)
-$$;
-
--- Fin de partie : survivant 1er, puis ordre d'élimination inverse.
--- points = mots validés (plafonnés à 25 => XP max 250 + 50 de victoire).
-create or replace function public._bam_finish(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_winner  text := p_state->'alive'->>0;
-  v_ranked  jsonb;
-  v_results jsonb;
-begin
-  -- Ordre de classement : vivant(s) puis éliminés du dernier au premier.
-  select jsonb_agg(x order by r) into v_ranked from (
-    select value as x, 0 as r from jsonb_array_elements_text(p_state->'alive')
-    union all
-    select value, (100000 - o)::integer from jsonb_array_elements_text(p_state->'eliminated') with ordinality t(value, o)
-  ) z;
-
-  select jsonb_agg(jsonb_build_object(
-           'profile_id', pid,
-           'points', least(25, coalesce((p_state->'word_counts'->>pid)::integer, 0)),
-           'won', pid = v_winner,
-           'placement', o::integer,
-           -- fast_words / close_calls : comptés dans server (l'heure d'explosion est secrète)
-           'stats', public._bam_tstats(p_state, pid, v_winner) || jsonb_build_object(
-             'fast_words', coalesce((p_server->'fast_words'->>pid)::integer, 0),
-             'close_calls', coalesce((p_server->'close_calls'->>pid)::integer, 0))) order by o)
-    into v_results
-    from jsonb_array_elements_text(v_ranked) with ordinality t(pid, o);
-
-  p_state := p_state || jsonb_build_object('phase', 'finished', 'winner', v_winner, 'turn', null,
-                                           'resume_at', null, 'results', v_results,
-                                           'ranking', v_ranked);
-  return jsonb_build_object('state', p_state, 'server', p_server - 'explode_at', 'results', v_results);
-end $$;
-
--- Démarre une nouvelle mèche après une pause de 3 s (lancement / après explosion).
-create or replace function public._bam_rearm(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql volatile
-set search_path = public, extensions
-as $$
-declare
-  v_resume timestamptz := now() + interval '3 seconds';
-begin
-  p_state := p_state || jsonb_build_object('resume_at', to_jsonb(v_resume), 'fuse_started_at', to_jsonb(v_resume));
-  p_server := p_server || jsonb_build_object('explode_at', to_jsonb(public._bam_fuse(v_resume)));
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- BOUM : le joueur actif perd une vie (éliminé à 0), la bombe passe au suivant.
-create or replace function public._bam_explode(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_victim text := p_state->>'turn';
-  v_lives  integer := greatest(0, coalesce((p_state->'lives'->>v_victim)::integer, 1) - 1);
-  v_out    boolean := v_lives = 0;
-  v_n      integer := (p_state->>'turn_n')::integer + 1;
-  v_r      jsonb;
-begin
-  p_state := jsonb_set(p_state, array['lives', v_victim], to_jsonb(v_lives));
-  if v_out then
-    p_state := p_state || jsonb_build_object(
-      'alive', (p_state->'alive') - v_victim,
-      'eliminated', coalesce(p_state->'eliminated', '[]'::jsonb) || to_jsonb(v_victim));
-  end if;
-  p_state := p_state || jsonb_build_object(
-    'explosions', coalesce(p_state->'explosions', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-      'p', v_victim, 's', p_state->>'syllable', 'n', p_state->'turn_n', 'eliminated', v_out)),
-    'last_event', jsonb_build_object('kind', 'explosion', 'n', p_state->'turn_n', 'p', v_victim,
-                                     's', p_state->>'syllable', 'lives', v_lives, 'eliminated', v_out,
-                                     'at', to_jsonb(now())));
-
-  if jsonb_array_length(p_state->'alive') <= 1 then
-    return public._bam_finish(p_state, p_server);
-  end if;
-
-  p_state := p_state || jsonb_build_object('turn', public._bam_next(p_state, v_victim), 'turn_n', v_n,
-                                           'turn_started_at', to_jsonb(now() + interval '3 seconds'));
-  v_r := public._bam_pick(p_state, p_server);
-  return public._bam_rearm(v_r->'state', v_r->'server');
-end $$;
-
-create or replace function public.game_bombe_a_mots_start(p_players uuid[], p_options jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_in     jsonb := p_options->'syllables';
-  v_syl    jsonb;
-  v_lives  integer;
-  v_level  integer;
-  v_order  jsonb;
-  v_st     jsonb;
-  v_r      jsonb;
-begin
-  if cardinality(p_players) < 2 then raise exception 'not_enough_players'; end if;
-  if cardinality(p_players) > 9 then raise exception 'too_many_players'; end if;
-  if v_in is null or jsonb_typeof(v_in) <> 'array' or jsonb_array_length(v_in) < 10
-     or jsonb_array_length(v_in) > 400 then
-    raise exception 'invalid_syllables';
-  end if;
-  if exists (select 1 from jsonb_array_elements(v_in) e
-              where jsonb_typeof(e) <> 'object' or coalesce(e->>'s', '') !~ '^[a-z]{2,3}$'
-                 or coalesce(e->>'level', '') !~ '^[1-5]$') then
-    raise exception 'invalid_syllables';
-  end if;
-  select jsonb_agg(jsonb_build_object('s', e->>'s', 'level', (e->>'level')::integer) order by o)
-    into v_syl from jsonb_array_elements(v_in) with ordinality t(e, o);
-
-  begin
-    v_lives := coalesce(nullif(p_options->>'lives', '')::integer, 3);
-    v_level := coalesce(nullif(p_options->>'start_level', '')::integer, 1);
-  exception when others then
-    v_lives := 3; v_level := 1;
-  end;
-  v_lives := least(greatest(v_lives, 1), 5);
-  v_level := least(greatest(v_level, 1), 5);
-
-  -- Ordre de table aléatoire.
-  select jsonb_agg(p::text order by random()) into v_order from unnest(p_players) p;
-
-  v_st := jsonb_build_object(
-    'game', 'bombe-a-mots',
-    'phase', 'playing',
-    'players', v_order,
-    'alive', v_order,
-    'eliminated', '[]'::jsonb,
-    'turn', v_order->>0,
-    'turn_n', 1,
-    'turn_started_at', to_jsonb(now() + interval '3 seconds'),
-    'syllable', null,
-    'level', v_level,
-    'target_level', v_level,
-    'start_level', v_level,
-    'level_every', 8,
-    'max_lives', v_lives,
-    'lives', (select jsonb_object_agg(value, v_lives) from jsonb_array_elements_text(v_order)),
-    'letters', (select jsonb_object_agg(value, '') from jsonb_array_elements_text(v_order)),
-    'bonus_alphabet', 'abcdefghijlmnopqrstuv',
-    'word_counts', (select jsonb_object_agg(value, 0) from jsonb_array_elements_text(v_order)),
-    'words_count', 0,
-    'words', '[]'::jsonb,
-    'explosions', '[]'::jsonb,
-    'bonuses', '[]'::jsonb,
-    'last_event', null,
-    'min_fuse_ms', 5000,
-    'max_fuse_ms', 12000,
-    'grace_ms', 1500,
-    'winner', null,
-    'results', null);
-  v_r := public._bam_pick(v_st, jsonb_build_object('syllables', v_syl, 'used', '[]'::jsonb));
-  v_r := public._bam_rearm(v_r->'state', v_r->'server');
-  return v_r || jsonb_build_object('secrets', '{}'::jsonb);
-end $$;
-
-create or replace function public.game_bombe_a_mots_action(
-  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_type    text := p_action->>'type';
-  v_me      text := p_actor::text;
-  v_same    jsonb := jsonb_build_object('state', p_state, 'server', p_server);
-  v_explode timestamptz := (p_server->>'explode_at')::timestamptz;
-  v_resume  timestamptz := (p_state->>'resume_at')::timestamptz;
-  v_syl     text := p_state->>'syllable';
-  v_w       text;
-  v_letters text;
-  v_alpha   text := p_state->>'bonus_alphabet';
-  v_lives   integer;
-  v_bonus   boolean := false;
-  v_full    boolean := false;
-  v_next    text;
-  v_n       integer := (p_state->>'turn_n')::integer;
-  v_r       jsonb;
-begin
-  if v_type not in ('word', 'tick') then raise exception 'unknown_action'; end if;
-
-  if v_type = 'tick' then
-    -- Tick d'un tour passé ou partie finie : ignoré.
-    if p_state->>'phase' <> 'playing'
-       or (p_action ? 'n' and (p_action->>'n') is distinct from (p_state->>'turn_n')) then
-      if coalesce((p_action->>'quiet')::boolean, false) then raise exception 'bomb_not_ready'; end if;
-      return v_same;
-    end if;
-    if v_explode is null or now() < v_explode then
-      if coalesce((p_action->>'quiet')::boolean, false) then raise exception 'bomb_not_ready'; end if;
-      return v_same;
-    end if;
-    return public._bam_explode(p_state, p_server);
-  end if;
-
-  -- word
-  if p_state->>'phase' <> 'playing' then raise exception 'wrong_phase'; end if;
-  if not (p_state->'players' ? v_me) then raise exception 'not_a_player'; end if;
-  if not (p_state->'alive' ? v_me) then raise exception 'not_alive'; end if;
-  if p_state->>'turn' <> v_me then raise exception 'not_your_turn'; end if;
-  if p_action ? 'n' and (p_action->>'n') is distinct from (p_state->>'turn_n') then
-    raise exception 'too_late';
-  end if;
-  if v_resume is not null and now() < v_resume then raise exception 'bomb_paused'; end if;
-  -- Trop tard : la bombe a explosé avant le mot (même si personne n'a encore « tické »).
-  if v_explode is not null and now() >= v_explode then
-    return public._bam_explode(p_state, p_server);
-  end if;
-
-  v_w := public._bam_norm(p_action->>'word');
-  if v_w !~ '^[a-z]+(-[a-z]+)*$' or char_length(v_w) > 40 then raise exception 'invalid_word'; end if;
-  if strpos(v_w, v_syl) = 0 then raise exception 'word_missing_syllable'; end if;
-  if char_length(replace(v_w, '-', '')) <= char_length(v_syl) then raise exception 'word_too_short'; end if;
-  if exists (select 1 from jsonb_array_elements(p_state->'words') x where x->>'w' = v_w) then
-    raise exception 'word_already_played';
-  end if;
-
-  -- Alphabet bonus : lettres (hors k w x y z) déjà utilisées dans les mots validés du joueur.
-  select string_agg(c, '' order by c) into v_letters
-    from (select distinct c from regexp_split_to_table(coalesce(p_state->'letters'->>v_me, '') || v_w, '') c
-           where strpos(v_alpha, c) > 0) z;
-  v_letters := coalesce(v_letters, '');
-  v_lives := (p_state->'lives'->>v_me)::integer;
-  if char_length(v_letters) >= char_length(v_alpha) then
-    v_full := true;
-    v_letters := '';
-    if v_lives < (p_state->>'max_lives')::integer then
-      v_lives := v_lives + 1;
-      v_bonus := true;
-    end if;
-    p_state := p_state || jsonb_build_object('bonuses', coalesce(p_state->'bonuses', '[]'::jsonb)
-      || jsonb_build_array(jsonb_build_object('p', v_me, 'n', v_n, 'life', v_bonus)));
-  end if;
-
-  -- Trophées : mot validé en moins de 2 s (Patate chaude) / à moins d'1 s de l'explosion (Sueurs froides).
-  if p_state->>'turn_started_at' is not null
-     and now() - (p_state->>'turn_started_at')::timestamptz < interval '2 seconds' then
-    p_server := p_server || jsonb_build_object('fast_words', coalesce(p_server->'fast_words', '{}'::jsonb)
-      || jsonb_build_object(v_me, coalesce((p_server->'fast_words'->>v_me)::integer, 0) + 1));
-  end if;
-  if v_explode is not null and v_explode - now() < interval '1 second' then
-    p_server := p_server || jsonb_build_object('close_calls', coalesce(p_server->'close_calls', '{}'::jsonb)
-      || jsonb_build_object(v_me, coalesce((p_server->'close_calls'->>v_me)::integer, 0) + 1));
-  end if;
-
-  v_next := public._bam_next(p_state, v_me);
-  p_state := jsonb_set(p_state, array['letters', v_me], to_jsonb(v_letters));
-  p_state := jsonb_set(p_state, array['lives', v_me], to_jsonb(v_lives));
-  p_state := jsonb_set(p_state, array['word_counts', v_me],
-                       to_jsonb(coalesce((p_state->'word_counts'->>v_me)::integer, 0) + 1));
-  p_state := p_state || jsonb_build_object(
-    'words', (p_state->'words') || jsonb_build_array(jsonb_build_object('p', v_me, 'w', v_w, 's', v_syl, 'n', v_n)),
-    'words_count', (p_state->>'words_count')::integer + 1,
-    'last_event', jsonb_build_object('kind', 'word', 'n', v_n, 'p', v_me, 'w', v_w, 's', v_syl,
-                                     'to', v_next, 'alphabet_full', v_full, 'bonus_life', v_bonus,
-                                     'at', to_jsonb(now())),
-    'turn', v_next,
-    'turn_n', v_n + 1,
-    'turn_started_at', to_jsonb(now()));
-
-  -- Mèche globale : elle continue ; délai minimal de grâce pour le receveur.
-  if v_explode < now() + make_interval(secs => coalesce((p_state->>'grace_ms')::integer, 1500) / 1000.0) then
-    p_server := p_server || jsonb_build_object('explode_at',
-      to_jsonb(now() + make_interval(secs => coalesce((p_state->>'grace_ms')::integer, 1500) / 1000.0)));
-  end if;
-
-  v_r := public._bam_pick(p_state, p_server);
-  return v_r;
-end $$;
-
-revoke all on function public._bam_norm(text) from public, anon, authenticated;
-revoke all on function public._bam_fuse(timestamptz) from public, anon, authenticated;
-revoke all on function public._bam_next(jsonb, text) from public, anon, authenticated;
-revoke all on function public._bam_pick(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._bam_finish(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._bam_tstats(jsonb, text, text) from public, anon, authenticated;
-revoke all on function public._bam_rearm(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._bam_explode(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public.game_bombe_a_mots_start(uuid[], jsonb) from public, anon, authenticated;
-revoke all on function public.game_bombe_a_mots_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
