@@ -41,6 +41,11 @@ ok('complice = B', w?.buddy?.profile_id === B && w.buddy.together === 4)
 ok('soirée la plus longue = 240 min', w?.longest_soiree?.minutes === 240)
 ok('partie la plus tardive 00:40', w?.latest_match?.at === '00:40', JSON.stringify(w?.latest_match))
 ok('personnalité renseignée', typeof w?.personality?.id === 'string', JSON.stringify(w?.personality))
+// Un invité qui bat A 3 fois et joue souvent avec lui : ni rival, ni complice, ni compté dans les potes.
+const G = (await sys(`insert into public.profiles(slug, first_name, nickname, is_guest, guest_expires_at) values ('g-renard-zz9999','Invité','Invité',true, now() + interval '1 day') returning id`))[0].id
+for (const h of ['21:00', '21:10', '21:20', '21:30', '21:40']) await mk(s2, 'morpion', `2026-05-02 ${h}+02`, G, A)
+const wg = (await call(0, `select public.year_wrapped(2026) r`)).r
+ok('invité exclu du rival / complice / potes', wg?.rival?.profile_id === B && wg?.buddy?.profile_id === B && wg.distinct_mates === w.distinct_mates, JSON.stringify({ r: wg?.rival, b: wg?.buddy, m: wg?.distinct_mates }))
 ok('année invalide', (await call(0, `select public.year_wrapped(5) r`)).err?.includes('invalid_year'))
 const e = (await call(0, `select public.year_wrapped(2020) r`)).r
 ok('année vide → curieux', e?.games_played === 0 && e.personality.id === 'curieux' && e.favorite_game === null)

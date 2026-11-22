@@ -95,21 +95,24 @@ begin
     from (select w.profile_id as pid, count(*)::int as n
             from _ywm me
             join public.match_players w on w.match_id = me.mid and w.won and w.profile_id <> v_me
+            join public.profiles gw on gw.id = w.profile_id and not gw.is_guest  -- invites exclus
            where not me.won
            group by w.profile_id
           having count(*) >= 2
            order by count(*) desc, w.profile_id limit 1) r
-    join public.profiles pr on pr.id = r.pid;
+    join public.profiles pr on pr.id = r.pid and not pr.is_guest;
 
   select count(*)::int into v_mates
-    from (select distinct o.profile_id from _ywm me join public.match_players o on o.match_id = me.mid and o.profile_id <> v_me) d;
+    from (select distinct o.profile_id from _ywm me join public.match_players o on o.match_id = me.mid and o.profile_id <> v_me
+            join public.profiles go on go.id = o.profile_id and not go.is_guest) d;
   select jsonb_build_object('profile_id', r.pid, 'slug', pr.slug, 'nickname', pr.nickname,
                             'equipped_tenue', pr.equipped_tenue, 'together', r.n)
     into v_buddy
     from (select o.profile_id as pid, count(*)::int as n
             from _ywm me join public.match_players o on o.match_id = me.mid and o.profile_id <> v_me
+            join public.profiles go on go.id = o.profile_id and not go.is_guest
            group by o.profile_id order by count(*) desc, o.profile_id limit 1) r
-    join public.profiles pr on pr.id = r.pid;
+    join public.profiles pr on pr.id = r.pid and not pr.is_guest;
 
   select count(*)::int into v_trc from public.trophy_unlocks u
    where u.profile_id = v_me and (u.unlocked_at at time zone 'Europe/Paris') >= v_from and (u.unlocked_at at time zone 'Europe/Paris') < v_to;

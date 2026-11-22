@@ -5,7 +5,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
-  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) }, dedupe: ['react', 'react-dom'] },
+  // Dev (npm run dev) : sans cette liste, le pré-bundle de Vite 8 produisait DEUX copies de React
+  // (framer-motion / zustand / lucide sur l'une, l'appli sur l'autre) → « Invalid hook call », page blanche.
+  optimizeDeps: {
+    include: [
+      'react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime',
+      'framer-motion', 'lucide-react', 'zustand', 'react-router',
+    ],
+  },
   plugins: [
     react(),
     tailwindcss(),

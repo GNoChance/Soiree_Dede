@@ -264,4 +264,194 @@ export const WORD_PAIRS: UndercoverPair[] = [
   { id: 'w221', civil: 'robe', undercover: 'jupe', theme: 'vêtements' },
   { id: 'w222', civil: 'gants', undercover: 'moufles', theme: 'vêtements' },
   { id: 'w223', civil: 'sweat', undercover: 'pull', theme: 'vêtements' },
+
+  // animaux (suite)
+  { id: 'w224', civil: 'mouton', undercover: 'chèvre', theme: 'animaux' },
+  { id: 'w225', civil: 'âne', undercover: 'poney', theme: 'animaux' },
+  { id: 'w226', civil: 'cochon', undercover: 'sanglier', theme: 'animaux' },
+  { id: 'w227', civil: 'baleine', undercover: 'orque', theme: 'animaux' },
+  { id: 'w228', civil: 'aigle', undercover: 'faucon', theme: 'animaux' },
+  { id: 'w229', civil: 'cygne', undercover: 'flamant rose', theme: 'animaux' },
+  { id: 'w230', civil: 'mouche', undercover: 'moustique', theme: 'animaux' },
+  { id: 'w231', civil: 'crabe', undercover: 'homard', theme: 'animaux' },
+  { id: 'w232', civil: 'pieuvre', undercover: 'méduse', theme: 'animaux' },
+  { id: 'w233', civil: 'chameau', undercover: 'dromadaire', theme: 'animaux' },
+  { id: 'w234', civil: 'kangourou', undercover: 'koala', theme: 'animaux' },
+  { id: 'w235', civil: 'éléphant', undercover: 'rhinocéros', theme: 'animaux' },
+  { id: 'w236', civil: 'cerf', undercover: 'chevreuil', theme: 'animaux' },
+  { id: 'w237', civil: 'corbeau', undercover: 'pie', theme: 'animaux' },
+  { id: 'w238', civil: 'coq', undercover: 'paon', theme: 'animaux' },
+
+  // nourriture (suite)
+  { id: 'w239', civil: 'frites', undercover: 'purée', theme: 'nourriture' },
+  { id: 'w240', civil: 'saucisse', undercover: 'merguez', theme: 'nourriture' },
+  { id: 'w241', civil: 'jambon', undercover: 'saucisson', theme: 'nourriture' },
+  { id: 'w242', civil: 'omelette', undercover: 'œuf au plat', theme: 'nourriture' },
+  { id: 'w243', civil: 'raclette', undercover: 'fondue', theme: 'nourriture' },
+  { id: 'w244', civil: 'gaufre', undercover: 'pancake', theme: 'nourriture' },
+  { id: 'w245', civil: 'beurre', undercover: 'margarine', theme: 'nourriture' },
+  { id: 'w246', civil: 'ketchup', undercover: 'mayonnaise', theme: 'nourriture' },
+  { id: 'w247', civil: 'sel', undercover: 'poivre', theme: 'nourriture' },
+  { id: 'w248', civil: 'tomate', undercover: 'poivron', theme: 'nourriture' },
+  { id: 'w249', civil: 'carotte', undercover: 'radis', theme: 'nourriture' },
+  { id: 'w250', civil: 'courgette', undercover: 'concombre', theme: 'nourriture' },
+  { id: 'w251', civil: 'citron', undercover: 'pamplemousse', theme: 'nourriture' },
+  { id: 'w252', civil: 'cerise', undercover: 'raisin', theme: 'nourriture' },
+  { id: 'w253', civil: 'pêche', undercover: 'abricot', theme: 'nourriture' },
+  { id: 'w254', civil: 'melon', undercover: 'pastèque', theme: 'nourriture' },
+  { id: 'w255', civil: 'couscous', undercover: 'paella', theme: 'nourriture' },
+  { id: 'w256', civil: 'flan', undercover: 'crème brûlée', theme: 'nourriture' },
+  { id: 'w257', civil: 'noix', undercover: 'noisette', theme: 'nourriture' },
+  { id: 'w258', civil: 'oignon', undercover: 'ail', theme: 'nourriture' },
+
+  // boissons (suite)
+  { id: 'w259', civil: 'lait', undercover: 'milkshake', theme: 'boissons' },
+  { id: 'w260', civil: 'soda', undercover: 'eau pétillante', theme: 'boissons' },
+  { id: 'w261', civil: 'jus d’orange', undercover: 'jus de pomme', theme: 'boissons' },
+  { id: 'w262', civil: 'grenadine', undercover: 'menthe à l’eau', theme: 'boissons' },
+  { id: 'w263', civil: 'thé glacé', undercover: 'citronnade', theme: 'boissons' },
+
+  // lieux (suite)
+  { id: 'w264', civil: 'hôpital', undercover: 'pharmacie', theme: 'lieux' },
+  { id: 'w265', civil: 'église', undercover: 'cathédrale', theme: 'lieux' },
+  { id: 'w266', civil: 'zoo', undercover: 'aquarium', theme: 'lieux' },
+  { id: 'w267', civil: 'cirque', undercover: 'fête foraine', theme: 'lieux' },
+  { id: 'w268', civil: 'hôtel', undercover: 'auberge', theme: 'lieux' },
+  { id: 'w269', civil: 'ferme', undercover: 'écurie', theme: 'lieux' },
+  { id: 'w270', civil: 'phare', undercover: 'moulin', theme: 'lieux' },
+  { id: 'w271', civil: 'pont', undercover: 'tunnel', theme: 'lieux' },
+  { id: 'w272', civil: 'prison', undercover: 'commissariat', theme: 'lieux' },
+  { id: 'w273', civil: 'patinoire', undercover: 'bowling', theme: 'lieux' },
+  { id: 'w274', civil: 'igloo', undercover: 'tipi', theme: 'lieux' },
+
+  // nature (suite)
+  { id: 'w275', civil: 'mer', undercover: 'océan', theme: 'nature' },
+  { id: 'w276', civil: 'cascade', undercover: 'fontaine', theme: 'nature' },
+  { id: 'w277', civil: 'arbre', undercover: 'buisson', theme: 'nature' },
+  { id: 'w278', civil: 'rose', undercover: 'tulipe', theme: 'nature' },
+  { id: 'w279', civil: 'marguerite', undercover: 'tournesol', theme: 'nature' },
+  { id: 'w280', civil: 'herbe', undercover: 'mousse', theme: 'nature' },
+  { id: 'w281', civil: 'lune', undercover: 'étoile', theme: 'nature' },
+  { id: 'w282', civil: 'planète', undercover: 'comète', theme: 'nature' },
+  { id: 'w283', civil: 'caillou', undercover: 'rocher', theme: 'nature' },
+  { id: 'w284', civil: 'feuille', undercover: 'branche', theme: 'nature' },
+
+  // objets (suite)
+  { id: 'w285', civil: 'ciseaux', undercover: 'cutter', theme: 'objets' },
+  { id: 'w286', civil: 'marteau', undercover: 'tournevis', theme: 'objets' },
+  { id: 'w287', civil: 'cartable', undercover: 'trousse', theme: 'objets' },
+  { id: 'w288', civil: 'ordinateur', undercover: 'console', theme: 'objets' },
+  { id: 'w289', civil: 'télécommande', undercover: 'manette', theme: 'objets' },
+  { id: 'w290', civil: 'appareil photo', undercover: 'caméra', theme: 'objets' },
+  { id: 'w291', civil: 'écouteurs', undercover: 'casque', theme: 'objets' },
+  { id: 'w292', civil: 'bague', undercover: 'bracelet', theme: 'objets' },
+  { id: 'w293', civil: 'échelle', undercover: 'escabeau', theme: 'objets' },
+  { id: 'w294', civil: 'pelle', undercover: 'râteau', theme: 'objets' },
+  { id: 'w295', civil: 'bouteille', undercover: 'gourde', theme: 'objets' },
+  { id: 'w296', civil: 'assiette', undercover: 'bol', theme: 'objets' },
+  { id: 'w297', civil: 'cuillère', undercover: 'louche', theme: 'objets' },
+  { id: 'w298', civil: 'allumette', undercover: 'briquet', theme: 'objets' },
+  { id: 'w299', civil: 'scotch', undercover: 'colle', theme: 'objets' },
+
+  // métiers (suite)
+  { id: 'w300', civil: 'médecin', undercover: 'infirmier', theme: 'métiers' },
+  { id: 'w301', civil: 'dentiste', undercover: 'vétérinaire', theme: 'métiers' },
+  { id: 'w302', civil: 'avocat', undercover: 'juge', theme: 'métiers' },
+  { id: 'w303', civil: 'boucher', undercover: 'poissonnier', theme: 'métiers' },
+  { id: 'w304', civil: 'fermier', undercover: 'berger', theme: 'métiers' },
+  { id: 'w305', civil: 'astronaute', undercover: 'astronome', theme: 'métiers' },
+  { id: 'w306', civil: 'roi', undercover: 'prince', theme: 'métiers' },
+  { id: 'w307', civil: 'pirate', undercover: 'viking', theme: 'métiers' },
+  { id: 'w308', civil: 'chevalier', undercover: 'mousquetaire', theme: 'métiers' },
+  { id: 'w309', civil: 'arbitre', undercover: 'entraîneur', theme: 'métiers' },
+
+  // sports (suite)
+  { id: 'w310', civil: 'marathon', undercover: 'triathlon', theme: 'sports' },
+  { id: 'w311', civil: 'gymnastique', undercover: 'danse', theme: 'sports' },
+  { id: 'w312', civil: 'kayak', undercover: 'aviron', theme: 'sports' },
+  { id: 'w313', civil: 'tir à l’arc', undercover: 'fléchettes', theme: 'sports' },
+  { id: 'w314', civil: 'parachute', undercover: 'parapente', theme: 'sports' },
+  { id: 'w315', civil: 'trampoline', undercover: 'corde à sauter', theme: 'sports' },
+
+  // films (suite)
+  { id: 'w316', civil: 'Indiana Jones', undercover: 'James Bond', theme: 'films' },
+  { id: 'w317', civil: 'King Kong', undercover: 'Godzilla', theme: 'films' },
+  { id: 'w318', civil: 'Dracula', undercover: 'Frankenstein', theme: 'films' },
+  { id: 'w319', civil: 'Lucky Luke', undercover: 'Zorro', theme: 'films' },
+
+  // dessins animés (suite)
+  { id: 'w320', civil: 'Le Roi Lion', undercover: 'Le Livre de la jungle', theme: 'dessins animés' },
+  { id: 'w321', civil: 'La Reine des neiges', undercover: 'Cendrillon', theme: 'dessins animés' },
+  { id: 'w322', civil: 'Toy Story', undercover: 'Cars', theme: 'dessins animés' },
+  { id: 'w323', civil: 'Nemo', undercover: 'La Petite Sirène', theme: 'dessins animés' },
+  { id: 'w324', civil: 'Les Schtroumpfs', undercover: 'Les Minions', theme: 'dessins animés' },
+  { id: 'w325', civil: 'Tom et Jerry', undercover: 'Titi et Grosminet', theme: 'dessins animés' },
+
+  // jeux vidéo (suite)
+  { id: 'w326', civil: 'Tetris', undercover: 'Pac-Man', theme: 'jeux vidéo' },
+  { id: 'w327', civil: 'Minecraft', undercover: 'Fortnite', theme: 'jeux vidéo' },
+
+  // musique (suite)
+  { id: 'w328', civil: 'harpe', undercover: 'contrebasse', theme: 'musique' },
+  { id: 'w329', civil: 'rap', undercover: 'reggae', theme: 'musique' },
+  { id: 'w330', civil: 'karaoké', undercover: 'blind test', theme: 'musique' },
+  { id: 'w331', civil: 'berceuse', undercover: 'comptine', theme: 'musique' },
+  { id: 'w332', civil: 'valse', undercover: 'tango', theme: 'musique' },
+
+  // vacances (suite)
+  { id: 'w333', civil: 'tente', undercover: 'bungalow', theme: 'vacances' },
+  { id: 'w334', civil: 'crème solaire', undercover: 'lunettes de soleil', theme: 'vacances' },
+  { id: 'w335', civil: 'château de sable', undercover: 'bonhomme de neige', theme: 'vacances' },
+  { id: 'w336', civil: 'bouée', undercover: 'matelas gonflable', theme: 'vacances' },
+  { id: 'w337', civil: 'pique-nique', undercover: 'barbecue', theme: 'vacances' },
+
+  // maison (suite)
+  { id: 'w338', civil: 'baignoire', undercover: 'douche', theme: 'maison' },
+  { id: 'w339', civil: 'lavabo', undercover: 'évier', theme: 'maison' },
+  { id: 'w340', civil: 'lave-linge', undercover: 'lave-vaisselle', theme: 'maison' },
+  { id: 'w341', civil: 'frigo', undercover: 'congélateur', theme: 'maison' },
+  { id: 'w342', civil: 'table', undercover: 'bureau', theme: 'maison' },
+  { id: 'w343', civil: 'armoire', undercover: 'commode', theme: 'maison' },
+  { id: 'w344', civil: 'fenêtre', undercover: 'volet', theme: 'maison' },
+  { id: 'w345', civil: 'bouilloire', undercover: 'cafetière', theme: 'maison' },
+
+  // transport (suite)
+  { id: 'w346', civil: 'voiture', undercover: 'camping-car', theme: 'transport' },
+  { id: 'w347', civil: 'tramway', undercover: 'téléphérique', theme: 'transport' },
+  { id: 'w348', civil: 'traîneau', undercover: 'calèche', theme: 'transport' },
+  { id: 'w349', civil: 'rond-point', undercover: 'carrefour', theme: 'transport' },
+
+  // météo (suite)
+  { id: 'w350', civil: 'ouragan', undercover: 'tornade', theme: 'météo' },
+  { id: 'w351', civil: 'flocon', undercover: 'glaçon', theme: 'météo' },
+  { id: 'w352', civil: 'printemps', undercover: 'automne', theme: 'météo' },
+
+  // fêtes (suite)
+  { id: 'w353', civil: 'Pâques', undercover: 'Chandeleur', theme: 'fêtes' },
+  { id: 'w354', civil: 'Père Noël', undercover: 'Saint Nicolas', theme: 'fêtes' },
+  { id: 'w355', civil: 'Nouvel An', undercover: '14 Juillet', theme: 'fêtes' },
+  { id: 'w356', civil: 'baptême', undercover: 'communion', theme: 'fêtes' },
+
+  // arts (suite)
+  { id: 'w357', civil: 'ballet', undercover: 'comédie musicale', theme: 'arts' },
+  { id: 'w358', civil: 'aquarelle', undercover: 'pastel', theme: 'arts' },
+  { id: 'w359', civil: 'conte', undercover: 'fable', theme: 'arts' },
+
+  // jeux (suite)
+  { id: 'w360', civil: 'Monopoly', undercover: 'La Bonne Paye', theme: 'jeux' },
+  { id: 'w361', civil: 'Uno', undercover: 'Mille Bornes', theme: 'jeux' },
+  { id: 'w362', civil: 'cache-cache', undercover: 'chat perché', theme: 'jeux' },
+  { id: 'w363', civil: 'toboggan', undercover: 'balançoire', theme: 'jeux' },
+  { id: 'w364', civil: 'Lego', undercover: 'Playmobil', theme: 'jeux' },
+  { id: 'w365', civil: 'poupée', undercover: 'peluche', theme: 'jeux' },
+  { id: 'w366', civil: 'yo-yo', undercover: 'toupie', theme: 'jeux' },
+  { id: 'w367', civil: 'cerf-volant', undercover: 'boomerang', theme: 'jeux' },
+
+  // vêtements (suite)
+  { id: 'w368', civil: 'bottes', undercover: 'baskets', theme: 'vêtements' },
+  { id: 'w369', civil: 'cravate', undercover: 'nœud papillon', theme: 'vêtements' },
+  { id: 'w370', civil: 'pyjama', undercover: 'robe de chambre', theme: 'vêtements' },
+  { id: 'w371', civil: 'ceinture', undercover: 'bretelles', theme: 'vêtements' },
+  { id: 'w372', civil: 'bonnet', undercover: 'capuche', theme: 'vêtements' },
+  { id: 'w373', civil: 'collant', undercover: 'legging', theme: 'vêtements' },
 ];

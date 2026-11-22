@@ -69,14 +69,14 @@ begin
            'equipped_tenue', pr.equipped_tenue, 'together', t.c, 'wins', t.w) order by t.c desc, pr.sort_order), '[]'::jsonb) into v_mates
     from (select y.profile_id, count(*) as c, count(*) filter (where me.won) as w
             from public._fun_rows(p_profile) me join public.match_players y on y.match_id = me.match_id and y.profile_id <> p_profile
-           group by 1) t join public.profiles pr on pr.id = t.profile_id;
+           group by 1) t join public.profiles pr on pr.id = t.profile_id and not pr.is_guest;
 
   -- duels (parties à 2) : qui me bat le plus / qui je bats le plus
   select coalesce(jsonb_agg(jsonb_build_object('profile_id', pr.id, 'slug', pr.slug, 'nickname', pr.nickname,
            'equipped_tenue', pr.equipped_tenue, 'my_wins', t.w, 'their_wins', t.l) order by pr.sort_order), '[]'::jsonb) into v_duel
     from (select y.profile_id, count(*) filter (where me.won and not y.won) as w, count(*) filter (where y.won and not me.won) as l
             from public._fun_rows(p_profile) me join public.match_players y on y.match_id = me.match_id and y.profile_id <> p_profile
-           where me.n = 2 group by 1) t join public.profiles pr on pr.id = t.profile_id;
+           where me.n = 2 group by 1) t join public.profiles pr on pr.id = t.profile_id and not pr.is_guest;
 
   -- soirée la plus longue (durée réelle de la soirée) et soirée la plus chargée en parties
   select jsonb_build_object('soiree_id', s.id, 'minutes', greatest(0, round(extract(epoch from (s.ended_at - coalesce(s.started_at, s.created_at))) / 60))::int,

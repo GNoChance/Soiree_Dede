@@ -237,11 +237,12 @@ begin
                 from public.match_players me
                 join public.matches m on m.id = me.match_id and m.status = 'finished'
                 join public.match_players w on w.match_id = me.match_id and w.won and w.profile_id <> me.profile_id
+                join public.profiles gw on gw.id = w.profile_id and not gw.is_guest  -- invites exclus
                where me.profile_id = p_profile_id and not me.won
                group by w.profile_id
               having count(*) >= 2
                order by count(*) desc, w.profile_id limit 1) r
-        join public.profiles pr on pr.id = r.pid),
+        join public.profiles pr on pr.id = r.pid and not pr.is_guest),
     'per_game', v_pg);
 end $$;
 

@@ -54,6 +54,33 @@ export const CATEGORIES: BacCategory[] = [
   { id: 'titre-chanson', label: 'Titre de chanson', emoji: '🎵' },
   { id: 'sous-le-lit', label: "Chose qu'on trouve sous le lit", emoji: '🛏️' },
   { id: 'super-pouvoir', label: 'Super-pouvoir', emoji: '⚡' },
+  // Classiques (suite)
+  { id: 'capitale', label: 'Capitale', emoji: '🏛️' },
+  { id: 'region-departement', label: 'Région ou département français', emoji: '🗺️' },
+  { id: 'personnage-historique', label: 'Personnage historique', emoji: '👑' },
+  { id: 'sportif', label: 'Sportif·ve', emoji: '🏅' },
+  { id: 'personnage-film-serie', label: 'Personnage de film ou de série', emoji: '🎭' },
+  { id: 'livre-bd', label: 'Livre ou BD', emoji: '📚' },
+  { id: 'insecte-bestiole', label: 'Insecte ou petite bête', emoji: '🐛' },
+  { id: 'animal-marin', label: 'Animal marin', emoji: '🐟' },
+  { id: 'adjectif', label: 'Adjectif', emoji: '💬', easy: true },
+  { id: 'qualite-defaut', label: 'Qualité ou défaut', emoji: '⚖️', easy: true },
+  { id: 'outil', label: 'Outil ou objet de bricolage', emoji: '🔧' },
+  { id: 'jouet', label: 'Jouet', emoji: '🧸' },
+  { id: 'magasin', label: 'Magasin ou commerce', emoji: '🏪' },
+  { id: 'loisir', label: 'Loisir ou passe-temps', emoji: '🎯', easy: true },
+  { id: 'mot-anglais', label: 'Mot en anglais', emoji: '💂', easy: true },
+  // Fun (suite)
+  { id: 'ecole', label: 'Chose qu’on trouve à l’école', emoji: '🎒', easy: true },
+  { id: 'frigo', label: 'Chose qu’on trouve dans le frigo', emoji: '🧊', easy: true },
+  { id: 'plage', label: 'Chose qu’on trouve à la plage', emoji: '🏖️' },
+  { id: 'supermarche', label: 'Chose qu’on achète au supermarché', emoji: '🛒', easy: true },
+  { id: 'cadeau-rate', label: 'Cadeau raté', emoji: '🎁' },
+  { id: 'sent-mauvais', label: 'Chose qui sent mauvais', emoji: '🤢' },
+  { id: 'chose-ronde', label: 'Chose ronde', emoji: '⚪' },
+  { id: 'insulte-rigolote', label: 'Insulte rigolote (tout public)', emoji: '🤪' },
+  { id: 'bruit', label: 'Bruit ou onomatopée', emoji: '💥' },
+  { id: 'coute-cher', label: 'Chose qui coûte cher', emoji: '💸' },
 ]
 /** Lettres tirables (exclut les lettres trop dures par défaut). */
 export const LETTERS: string[] = [
