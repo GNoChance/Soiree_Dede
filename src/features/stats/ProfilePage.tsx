@@ -17,6 +17,7 @@ import { rpcErrorMessage } from '@/lib/rpcError'
 import { useSession } from '@/store/session'
 import { gameLabel, useProfileStats } from './api'
 import { WeeklyMedals } from './WeeklyMedals'
+import { FunStatsSection } from './FunStats'
 import { WrappedButton } from '@/features/wrapped/WrappedBanner'
 
 function Stat({ label, value, suffix, tone }: { label: string; value: number; suffix?: string; tone: string }) {
@@ -164,6 +165,9 @@ export function ProfilePage() {
               </StaggerItem>
             </>
           )}
+          <StaggerItem>
+            <FunStatsSection profileId={data.profile.id} nickname={data.profile.nickname} />
+          </StaggerItem>
           <StaggerItem>
             <TrophyBoard unlocked={trophies} />
           </StaggerItem>
