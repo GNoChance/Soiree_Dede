@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
@@ -7,9 +8,10 @@ import { playerOrPlaceholder } from '@/features/soiree/players'
 
 /**
  * Grille d'avatars « Qui va gagner ? » : 1 tap = pari, un autre tap = on change d'avis
- * (pas de bouton Valider). Purement présentationnel.
+ * (pas de bouton Valider). Purement présentationnel. `caption` : ligne optionnelle sous le pseudo
+ * (ex. cote et parieurs des mises de pièces, src/features/mises).
  */
-export function PronosPicker({ playerIds, byId, meId, myPick, onPick, disabled }: { playerIds: string[]; byId: Record<string, PlayerInfo>; meId: string; myPick: string | null; onPick: (id: string) => void; disabled?: boolean }) {
+export function PronosPicker({ playerIds, byId, meId, myPick, onPick, disabled, caption }: { playerIds: string[]; byId: Record<string, PlayerInfo>; meId: string; myPick: string | null; onPick: (id: string) => void; disabled?: boolean; caption?: (id: string) => ReactNode }) {
   const reduce = useReducedMotion()
   return (
     <div role="radiogroup" aria-label="Qui va gagner ?" className="grid grid-cols-3 gap-3">
@@ -33,6 +35,7 @@ export function PronosPicker({ playerIds, byId, meId, myPick, onPick, disabled }
           >
             <Avatar slug={p.slug} tenue={p.equippedTenue} expression={selected ? 'joie' : undefined} size={64} selected={selected} />
             <span className="max-w-full truncate text-base font-extrabold">{id === meId ? 'Moi' : p.nickname}</span>
+            {caption?.(id)}
             {selected && (
               <motion.span
                 initial={reduce ? false : { scale: 0, rotate: -30 }}

@@ -1,5 +1,777 @@
 -- MORCEAU 2 / 5 — -- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent. À exécuter dans l'ordre (1, puis 2…) dans Supabase > SQL Editor > Run.
 
+-- ===== features\push.sql =====
+-- =============================================================================
+-- NOTIFICATIONS PUSH : rappel du defi du jour a 18 h (Europe/Paris) — idempotent,
+-- execute APRES daily.sql (ordre alphabetique de features/).
+--
+-- Circuit : pg_cron (toutes les heures a :00) -> _push_daily_tick() -> si heure de
+-- Paris = 18 : pg_net POST https://<app>/api/daily-reminder (Bearer <secret>) ->
+-- fonction Vercel -> push_daily_reminder_targets() (cle service role) -> web-push ->
+-- push_report() (purge des abonnements morts 404/410).
+--
+-- Configuration (UNE FOIS, dans le SQL Editor, avec TES valeurs ; jamais dans le depot) :
+--   insert into public.push_config (id, reminder_url, secret)
+--   values (true, 'https://TON-APP.vercel.app/api/daily-reminder', 'LE_MEME_SECRET_QUE_PUSH_CRON_SECRET')
+--   on conflict (id) do update set reminder_url = excluded.reminder_url, secret = excluded.secret, updated_at = now();
+-- Test immediat (ignore l'heure, envoie a tous ceux qui n'ont pas joue aujourd'hui) :
+--   select public._push_daily_tick(true);
+-- Invitations « X t'invite a sa soiree » : voir supabase/features/push_invites.sql (URL deduite de reminder_url).
+-- =============================================================================
+
+create table if not exists public.push_subscriptions (
+  id                bigint generated always as identity primary key,
+  profile_id        uuid not null references public.profiles(id) on delete cascade,
+  endpoint          text not null unique,
+  p256dh            text not null,
+  auth              text not null,
+  user_agent        text,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  last_ok_at        timestamptz,
+  -- Jour (Paris) du dernier rappel envoye : evite les doublons si l'URL est rappelee.
+  last_reminded_day date
+);
+create index if not exists push_subscriptions_profile_idx on public.push_subscriptions(profile_id);
+alter table public.push_subscriptions enable row level security;
+-- Aucune policy : acces uniquement via les RPC security definer.
+revoke all on table public.push_subscriptions from anon, authenticated;
+
+-- Config privee du declencheur (une seule ligne). Lue par _push_daily_tick().
+create table if not exists public.push_config (
+  id           boolean primary key default true check (id),
+  reminder_url text,
+  secret       text,
+  updated_at   timestamptz not null default now()
+);
+alter table public.push_config enable row level security;
+revoke all on table public.push_config from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- RPC joueurs
+-- ---------------------------------------------------------------------------
+
+-- Enregistre (ou rattache au joueur courant) l'abonnement push de CET appareil.
+-- Plusieurs appareils par joueur (10 max : les plus anciens sont oublies).
+-- Erreur : invalid_subscription.
+create or replace function public.save_push_subscription(
+  p_endpoint text, p_p256dh text, p_auth text, p_user_agent text default null)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  if p_endpoint is null or p_endpoint !~ '^https://' or char_length(p_endpoint) > 1024
+     or coalesce(char_length(p_p256dh), 0) not between 20 and 200
+     or coalesce(char_length(p_auth), 0) not between 8 and 100 then
+    raise exception 'invalid_subscription';
+  end if;
+  insert into public.push_subscriptions as s (profile_id, endpoint, p256dh, auth, user_agent)
+  values (v_me, p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))
+  on conflict (endpoint) do update
+    set p256dh = excluded.p256dh, auth = excluded.auth, user_agent = excluded.user_agent,
+        updated_at = now(),
+        last_reminded_day = case when s.profile_id = excluded.profile_id then s.last_reminded_day end,
+        profile_id = excluded.profile_id;
+  delete from public.push_subscriptions
+   where profile_id = v_me
+     and id not in (select id from public.push_subscriptions where profile_id = v_me
+                     order by updated_at desc limit 10);
+end $$;
+
+-- Desabonne CET appareil (sans erreur s'il n'etait pas enregistre).
+create or replace function public.delete_push_subscription(p_endpoint text)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  delete from public.push_subscriptions where endpoint = p_endpoint and profile_id = v_me;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- RPC service role (fonction Vercel api/daily-reminder.ts)
+-- ---------------------------------------------------------------------------
+
+-- Abonnements des joueurs SANS tentative aujourd'hui (une tentative commencee mais
+-- non terminee ne peut plus etre rejouee : inutile de rappeler) et pas encore rappeles
+-- aujourd'hui. p_claim = true : marque last_reminded_day (anti-doublon, atomique).
+-- -> [{endpoint, p256dh, auth, profile_id, nickname, streak}]
+create or replace function public.push_daily_reminder_targets(p_claim boolean default true)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_day date := public._daily_day();
+  v_ids bigint[];
+begin
+  select coalesce(array_agg(s.id), '{}') into v_ids
+    from public.push_subscriptions s
+   where s.last_reminded_day is distinct from v_day
+     and not exists (select 1 from public.daily_runs r where r.profile_id = s.profile_id and r.day = v_day);
+  if p_claim then
+    update public.push_subscriptions set last_reminded_day = v_day where id = any(v_ids);
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
+             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id)))
+      from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
+     where s.id = any(v_ids)), '[]'::jsonb);
+end $$;
+
+-- Abonnements d'un joueur (par slug), pour tester l'envoi sans condition.
+create or replace function public.push_test_targets(p_slug text)
+returns jsonb language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
+           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id))), '[]'::jsonb)
+    from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
+   where p.slug = lower(btrim(p_slug))
+$$;
+
+-- Compte rendu d'envoi : p_ok -> last_ok_at ; p_dead (404/410) -> supprimes.
+create or replace function public.push_report(p_ok text[], p_dead text[])
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  update public.push_subscriptions set last_ok_at = now() where endpoint = any(coalesce(p_ok, '{}'));
+  delete from public.push_subscriptions where endpoint = any(coalesce(p_dead, '{}'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Declencheur horaire (pg_cron + pg_net)
+-- ---------------------------------------------------------------------------
+
+-- Appele toutes les heures a :00 ; n'agit qu'a 18 h heure de Paris (ete comme hiver).
+-- p_force = true : ignore l'heure (test manuel depuis le SQL Editor).
+create or replace function public._push_daily_tick(p_force boolean default false)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare c public.push_config%rowtype;
+begin
+  if not p_force and extract(hour from (now() at time zone 'Europe/Paris')) <> 18 then return; end if;
+  select * into c from public.push_config where id;
+  if not found or coalesce(c.reminder_url, '') = '' or coalesce(c.secret, '') = '' then
+    raise notice 'push_config incomplete : rappel du defi non envoye';
+    return;
+  end if;
+  begin
+    perform net.http_post(
+      url := c.reminder_url,
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.secret),
+      timeout_milliseconds := 60000);
+  exception when others then
+    raise notice 'pg_net indisponible (%) : rappel du defi non envoye', sqlerrm;
+  end;
+end $$;
+
+revoke all on function public.save_push_subscription(text, text, text, text) from public, anon;
+revoke all on function public.delete_push_subscription(text) from public, anon;
+revoke all on function public.push_daily_reminder_targets(boolean) from public, anon, authenticated;
+revoke all on function public.push_test_targets(text) from public, anon, authenticated;
+revoke all on function public.push_report(text[], text[]) from public, anon, authenticated;
+revoke all on function public._push_daily_tick(boolean) from public, anon, authenticated;
+grant execute on function public.save_push_subscription(text, text, text, text) to authenticated;
+grant execute on function public.delete_push_subscription(text) to authenticated;
+grant execute on function public.push_daily_reminder_targets(boolean) to service_role;
+grant execute on function public.push_test_targets(text) to service_role;
+grant execute on function public.push_report(text[], text[]) to service_role;
+
+-- Jobs « push-daily-reminder » (toutes les heures a :00) et sa purge d'historique.
+-- Tolerant : sans pg_net / pg_cron, simple NOTICE (le rappel peut alors etre declenche
+-- par n'importe quel planificateur externe appelant l'URL avec le secret).
+do $$
+begin
+  begin
+    create extension if not exists pg_net;
+  exception when others then
+    raise notice 'pg_net indisponible (%) : rappel push a declencher depuis l''exterieur', sqlerrm;
+  end;
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron indisponible (%) : rappel push a declencher depuis l''exterieur', sqlerrm;
+    return;
+  end;
+  begin
+    perform cron.unschedule(j.jobid) from cron.job j
+      where j.jobname in ('push-daily-reminder', 'push-daily-reminder-purge');
+    perform cron.schedule('push-daily-reminder', '0 * * * *', 'select public._push_daily_tick()');
+    perform cron.schedule('push-daily-reminder-purge', '23 4 * * *',
+      $job$delete from cron.job_run_details
+            where end_time < now() - interval '7 days'
+              and jobid in (select jobid from cron.job where jobname = 'push-daily-reminder')$job$);
+  exception when others then
+    raise notice 'planification pg_cron impossible (%) : rappel push non planifie', sqlerrm;
+  end;
+end $$;
+
+
+-- ===== features\push_invites.sql =====
+-- =============================================================================
+-- NOTIFICATION « <hote> t'invite a sa soiree ! » — idempotent, execute APRES push.sql
+-- (ordre alphabetique de features/).
+--
+-- Circuit : trigger sur soiree_players (joueur ajoute par l'hote) -> ligne dans
+-- push_invites (une seule par joueur et par soiree = anti-spam, meme si l'hote le
+-- retire puis le reinvite) -> pg_net POST <invite_url> (Bearer <secret>) -> fonction
+-- Vercel api/soiree-invite.ts -> push_invite_claim() (cle service role) -> web-push
+-- -> push_report(). Jamais bloquant : toute erreur (pg_net absent...) = simple NOTICE.
+--
+-- Configuration : RIEN de plus si push_config.reminder_url est deja rempli (l'URL
+-- d'invitation en est deduite en remplacant « daily-reminder » par « soiree-invite »).
+-- URL personnalisee : update public.push_config set invite_url = 'https://TON-APP.vercel.app/api/soiree-invite';
+-- Cote Vercel : redeployer (la route api/soiree-invite.ts utilise les memes variables
+-- d'environnement que le rappel du defi). Verifier : select * from public.push_invites;
+-- =============================================================================
+
+alter table public.push_config add column if not exists invite_url text;
+
+-- Preferences push par joueur (defaut : on me previent quand on m'invite).
+create table if not exists public.push_prefs (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  invites    boolean not null default true
+);
+alter table public.push_prefs enable row level security;
+revoke all on table public.push_prefs from anon, authenticated;
+
+-- File d'attente + memoire anti-doublon des invitations.
+create table if not exists public.push_invites (
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  host_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  sent_at    timestamptz,
+  primary key (soiree_id, profile_id)
+);
+alter table public.push_invites enable row level security;
+revoke all on table public.push_invites from anon, authenticated;
+
+create or replace function public.get_push_prefs()
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  return jsonb_build_object('invites',
+    coalesce((select invites from public.push_prefs where profile_id = v_me), true));
+end $$;
+
+create or replace function public.set_push_invites(p_enabled boolean)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  insert into public.push_prefs(profile_id, invites) values (v_me, coalesce(p_enabled, true))
+  on conflict (profile_id) do update set invites = excluded.invites;
+end $$;
+
+-- Trigger : un joueur (autre que l'hote) rejoint une soiree.
+create or replace function public._push_invite_trg()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_host   uuid;
+  v_status text;
+  c        public.push_config%rowtype;
+  v_url    text;
+  v_rows   integer;
+begin
+  begin
+    select host_id, status into v_host, v_status from public.soirees where id = new.soiree_id;
+    if v_host is null or v_host = new.profile_id or v_status = 'ended' then return new; end if;
+    insert into public.push_invites(soiree_id, profile_id, host_id) values (new.soiree_id, new.profile_id, v_host)
+      on conflict do nothing;
+    get diagnostics v_rows = row_count;
+    if v_rows = 0 then return new; end if;
+    select * into c from public.push_config where id;
+    v_url := coalesce(nullif(c.invite_url, ''), replace(nullif(c.reminder_url, ''), 'daily-reminder', 'soiree-invite'));
+    if not found or v_url is null or coalesce(c.secret, '') = '' then
+      raise notice 'push_config incomplete : invitation non notifiee';
+      return new;
+    end if;
+    perform net.http_post(
+      url := v_url,
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.secret),
+      timeout_milliseconds := 30000);
+  exception when others then
+    raise notice 'invitation push non envoyee (%)', sqlerrm;
+  end;
+  return new;
+end $$;
+
+drop trigger if exists push_invite_trg on public.soiree_players;
+create trigger push_invite_trg after insert on public.soiree_players
+  for each row execute function public._push_invite_trg();
+
+-- Fonction Vercel : reclame (atomiquement) les invitations en attente et renvoie les
+-- appareils a notifier (preference activee, soiree ouverte, invitation de moins de 10 min).
+-- -> [{endpoint, p256dh, auth, profile_id, host_nick, soiree_id}]
+create or replace function public.push_invite_claim()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_rows jsonb;
+begin
+  delete from public.push_invites where created_at < now() - interval '60 days';
+  with claimed as (
+    update public.push_invites i set sent_at = now()
+     where i.sent_at is null
+    returning i.soiree_id, i.profile_id, i.host_id, i.created_at
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', c.profile_id,
+           'host_nick', h.nickname, 'soiree_id', c.soiree_id)), '[]'::jsonb)
+    into v_rows
+    from claimed c
+    join public.soirees so on so.id = c.soiree_id and so.status <> 'ended'
+    join public.profiles h on h.id = c.host_id
+    join public.push_subscriptions s on s.profile_id = c.profile_id
+   where c.created_at > now() - interval '10 minutes'
+     and coalesce((select p.invites from public.push_prefs p where p.profile_id = c.profile_id), true);
+  return v_rows;
+end $$;
+
+revoke all on function public.get_push_prefs() from public, anon;
+revoke all on function public.set_push_invites(boolean) from public, anon;
+revoke all on function public._push_invite_trg() from public, anon, authenticated;
+revoke all on function public.push_invite_claim() from public, anon, authenticated;
+grant execute on function public.get_push_prefs() to authenticated;
+grant execute on function public.set_push_invites(boolean) to authenticated;
+grant execute on function public.push_invite_claim() to service_role;
+
+
+-- ===== features\recap.sql =====
+-- =============================================================================
+-- RÉCAP DE SOIRÉE (lot C, « façon Wrapped ») — idempotent, exécuté en features/*
+-- (après chat.sql : soiree_messages ; _soiree_standings de stats.sql est résolu à l'exécution).
+--
+-- Le chat est PURGÉ quand la soirée passe à 'ended' (trigger soirees_chat_purge).
+-- Les stats de chat / stickers sont donc figées dans `soiree_recaps` par un trigger
+-- AFTER UPDATE OF status nommé `soirees_a_recap` : les triggers AFTER d'une même table
+-- s'exécutent par ordre alphabétique, « soirees_a_recap » passe avant « soirees_chat_purge ».
+--
+-- jsonb du récap (version 1) :
+--   { version, soiree_id, has_chat (bool : stats de chat disponibles),
+--     started_at, ended_at, duration_min, games_played, distinct_games, players_count,
+--     players:[{profile_id,slug,nickname,equipped_tenue}],
+--     games:[{game_id,played}]  (le plus joué d'abord, ex-aequo par id),
+--     top_game:{game_id,played}|null,
+--     awards:[{id, profile_id, value, extra}] }
+--   RPC soiree_recap ajoute à la volée : standings:[...], winner_ids:[...] (cf. stats.sql).
+-- Awards (au plus un lauréat par award, ex-aequo départagés par sort_order du profil) :
+--   serie    : plus longue série de victoires consécutives (ses propres parties), >= 2
+--   deuxieme : parties terminées 2e (non gagnant, >= 3 joueurs), >= 2
+--   bluff    : victoires « en tant qu'infiltré » à Undercover (stats.undercover_won_as_undercover)
+--              + victoires côté loup à Loup-garou (state.roles[pid] = 'loup' et won), >= 1
+--              extra {as_undercover, as_wolf}
+--   pasdebol : parties finies à la dernière place (>= 3 joueurs, >= 3 placements différents,
+--              pas gagnant), >= 2
+--   bavard   : messages texte envoyés, >= 5            (chat requis)
+--   sticker  : sticker le plus envoyé de la soirée (>= 2 envois) ; profile_id = qui l'a le plus
+--              envoyé, value = ses envois, extra {expression, total, tenue}   (chat requis)
+-- La « Star de la soirée » est le 1er du classement (standings), pas stockée ici.
+-- =============================================================================
+
+create table if not exists public.soiree_recaps (
+  soiree_id  uuid primary key references public.soirees(id) on delete cascade,
+  data       jsonb not null,
+  created_at timestamptz not null default now()
+);
+alter table public.soiree_recaps enable row level security;
+revoke all on table public.soiree_recaps from anon, authenticated;
+
+create or replace function public._soiree_recap_compute(p_soiree_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  s        public.soirees%rowtype;
+  v_chat   boolean;
+  v_games  jsonb;
+  v_pl     jsonb;
+  v_awards jsonb;
+  v_end    timestamptz;
+begin
+  select * into s from public.soirees where id = p_soiree_id;
+  if not found then return null; end if;
+  v_end := coalesce(s.ended_at, now());
+  v_chat := exists (select 1 from public.soiree_messages where soiree_id = p_soiree_id);
+
+  select coalesce(jsonb_agg(jsonb_build_object('game_id', g.game_id, 'played', g.n) order by g.n desc, g.game_id), '[]'::jsonb)
+    into v_games
+    from (select m.game_id, count(*)::int as n
+            from public.matches m
+           where m.soiree_id = p_soiree_id and m.status = 'finished'
+             and exists (select 1 from public.match_players x where x.match_id = m.id)
+           group by m.game_id) g;
+
+  select coalesce(jsonb_agg(jsonb_build_object('profile_id', p.id, 'slug', p.slug, 'nickname', p.nickname,
+                                               'equipped_tenue', p.equipped_tenue) order by p.sort_order), '[]'::jsonb)
+    into v_pl
+    from public.profiles p
+   where p.id in (select profile_id from public.soiree_players where soiree_id = p_soiree_id
+                  union select x.profile_id from public.match_players x join public.matches m on m.id = x.match_id
+                         where m.soiree_id = p_soiree_id
+                  union select profile_id from public.soiree_messages where soiree_id = p_soiree_id);
+
+  with mp as (
+    select x.profile_id, x.match_id, m.game_id, m.finished_at, x.won, x.placement, x.stats, m.state,
+           count(*) over (partition by x.match_id) as n,
+           max(x.placement) over (partition by x.match_id) as maxp,
+           (select count(distinct y.placement) from public.match_players y where y.match_id = x.match_id) as np
+      from public.match_players x join public.matches m on m.id = x.match_id
+     where m.soiree_id = p_soiree_id and m.status = 'finished'
+  ), t as (
+    select profile_id, won,
+           row_number() over (partition by profile_id order by finished_at, match_id) as rn,
+           row_number() over (partition by profile_id, won order by finished_at, match_id) as rw
+      from mp
+  ), streaks as (
+    select profile_id, count(*)::int as len from t where won group by profile_id, rn - rw
+  ), cand as (
+    select 'serie'::text as id, profile_id, max(len) as value, '{}'::jsonb as extra
+      from streaks group by profile_id having max(len) >= 2
+    union all
+    select 'deuxieme', profile_id, count(*)::int, '{}'::jsonb
+      from mp where placement = 2 and not won and n >= 3 group by profile_id having count(*) >= 2
+    union all
+    select 'pasdebol', profile_id, count(*)::int, '{}'::jsonb
+      from mp where placement = maxp and placement > 1 and not won and n >= 3 and np >= 3
+     group by profile_id having count(*) >= 2
+    union all
+    select 'bluff', b.profile_id, b.u + b.w, jsonb_build_object('as_undercover', b.u, 'as_wolf', b.w)
+      from (select profile_id,
+                   coalesce(sum(case when game_id = 'undercover' then coalesce((stats->>'undercover_won_as_undercover')::int, 0) else 0 end), 0)::int as u,
+                   count(*) filter (where game_id = 'loup-garou' and won and state->'roles'->>(profile_id::text) = 'loup')::int as w
+              from mp group by profile_id) b
+     where b.u + b.w >= 1
+    union all
+    select 'bavard', profile_id, count(*)::int, '{}'::jsonb
+      from public.soiree_messages where soiree_id = p_soiree_id and kind = 'text'
+     group by profile_id having count(*) >= 5
+    union all
+    select 'sticker', z.profile_id, z.c, jsonb_build_object('expression', top.body, 'total', top.total,
+             'tenue', (select q.tenue from public.soiree_messages q
+                        where q.soiree_id = p_soiree_id and q.kind = 'sticker' and q.body = top.body and q.profile_id = z.profile_id
+                        order by q.id desc limit 1))
+      from (select body, count(*)::int as total from public.soiree_messages
+             where soiree_id = p_soiree_id and kind = 'sticker'
+             group by body having count(*) >= 2 order by count(*) desc, body limit 1) top
+      cross join lateral (select q.profile_id, count(*)::int as c from public.soiree_messages q
+                           where q.soiree_id = p_soiree_id and q.kind = 'sticker' and q.body = top.body
+                           group by q.profile_id order by count(*) desc, q.profile_id limit 1) z
+    union all
+    select 'devin', r.profile_id, count(*) filter (where r.ok)::int, jsonb_build_object('bets', count(*)::int)
+      from public._prono_resolved() r where r.soiree_id = p_soiree_id
+     group by r.profile_id having count(*) filter (where r.ok) >= 1
+  ), best as (
+    select distinct on (c.id) c.id, c.profile_id, c.value, c.extra
+      from cand c join public.profiles p on p.id = c.profile_id
+     order by c.id, c.value desc, p.sort_order
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'profile_id', profile_id, 'value', value, 'extra', extra)
+                            order by array_position(array['serie','bluff','deuxieme','pasdebol','bavard','sticker','devin'], id)), '[]'::jsonb)
+    into v_awards from best;
+
+  return jsonb_build_object(
+    'version', 1, 'soiree_id', p_soiree_id, 'has_chat', v_chat,
+    'started_at', coalesce(s.started_at, s.created_at), 'ended_at', s.ended_at,
+    'duration_min', greatest(0, round(extract(epoch from (v_end - coalesce(s.started_at, s.created_at))) / 60))::int,
+    'games_played', (select coalesce(sum((e->>'played')::int), 0) from jsonb_array_elements(v_games) e),
+    'distinct_games', jsonb_array_length(v_games),
+    'players_count', jsonb_array_length(v_pl),
+    'players', v_pl,
+    'games', v_games,
+    'top_game', v_games->0,
+    'awards', v_awards);
+end $$;
+
+-- Trigger : fige le récap à la fin de la soirée (avant la purge du chat).
+-- Ne doit JAMAIS empêcher la fin de la soirée : toute erreur est avalée.
+create or replace function public._soiree_recap_store()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  begin
+    insert into public.soiree_recaps(soiree_id, data)
+    values (new.id, public._soiree_recap_compute(new.id))
+    on conflict (soiree_id) do nothing;
+  exception when others then
+    null;
+  end;
+  return new;
+end $$;
+
+drop trigger if exists soirees_a_recap on public.soirees;
+create trigger soirees_a_recap after update of status on public.soirees
+  for each row when (new.status = 'ended' and old.status is distinct from 'ended')
+  execute function public._soiree_recap_store();
+
+-- Récap d'une soirée TERMINÉE (mêmes règles d'accès que soiree_history_detail).
+-- Sans récap stocké (soirée terminée avant ce lot) : calcul à la volée, sans stats de chat (has_chat=false).
+-- → jsonb décrit ci-dessus + standings + winner_ids.
+-- Erreurs : soiree_not_found, not_in_soiree, soiree_not_ended.
+create or replace function public.soiree_recap(p_soiree_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  s    public.soirees%rowtype;
+  v_d  jsonb;
+  v_st jsonb;
+begin
+  select * into s from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if not (s.host_id = v_me
+          or exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_me)
+          or exists (select 1 from public.match_players x join public.matches m on m.id = x.match_id
+                      where m.soiree_id = s.id and x.profile_id = v_me)) then
+    raise exception 'not_in_soiree';
+  end if;
+  if s.status <> 'ended' then raise exception 'soiree_not_ended'; end if;
+
+  select data into v_d from public.soiree_recaps where soiree_id = s.id;
+  if v_d is null then v_d := public._soiree_recap_compute(s.id); end if;
+  v_st := public._soiree_standings(s.id);
+  return v_d || jsonb_build_object(
+    'standings', v_st,
+    'winner_ids', coalesce((select jsonb_agg(e->'profile_id') from jsonb_array_elements(v_st) e
+                             where (e->>'rank')::int = 1 and (e->>'points')::int > 0), '[]'::jsonb));
+end $$;
+
+revoke all on function public._soiree_recap_compute(uuid) from public, anon, authenticated;
+revoke all on function public._soiree_recap_store() from public, anon, authenticated;
+revoke all on function public.soiree_recap(uuid) from public, anon;
+grant execute on function public.soiree_recap(uuid) to authenticated;
+
+
+-- ===== features\soiree-hote.sql =====
+-- =============================================================================
+-- OUTILS DE L'HÔTE — idempotent, exécuté APRÈS schema.sql (features/*).
+--  1. Exclusion d'un joueur (kick_soiree_player) + ré-invitation (invite_to_soiree).
+--     Table soiree_bans (schema.sql) : un exclu ne peut pas revenir par le code
+--     (join_soiree_by_code -> soiree_banned) tant que l'hôte ne l'a pas ré-invité.
+--  2. Roue des jeux (spin_game_wheel) : le tirage est fait CÔTÉ SERVEUR et écrit
+--     dans soiree_wheel_spins ; tous les téléphones le reçoivent en Realtime
+--     (INSERT) et font tourner la roue sur le même jeu.
+-- =============================================================================
+
+-- Exclure un joueur. Erreurs : not_host, soiree_ended, cannot_kick_self,
+-- match_in_progress (partie lobby/playing), soiree_not_found, player_not_in_soiree.
+create or replace function public.kick_soiree_player(p_soiree_id uuid, p_profile_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_s  public.soirees%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if p_profile_id = v_me then raise exception 'cannot_kick_self'; end if;
+  if exists (select 1 from public.matches m
+              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
+    raise exception 'match_in_progress';
+  end if;
+  if not exists (select 1 from public.soiree_players
+                  where soiree_id = p_soiree_id and profile_id = p_profile_id) then
+    raise exception 'player_not_in_soiree';
+  end if;
+  insert into public.soiree_bans(soiree_id, profile_id) values (p_soiree_id, p_profile_id)
+    on conflict do nothing;
+  delete from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id;
+end $$;
+
+-- Ré-inviter un joueur (lève l'exclusion et l'ajoute au salon).
+-- Erreurs : not_host, soiree_ended, unknown_profile, player_busy (déjà dans 5 soirées).
+create or replace function public.invite_to_soiree(p_soiree_id uuid, p_profile_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_s  public.soirees%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if not exists (select 1 from public.profiles where id = p_profile_id) then
+    raise exception 'unknown_profile';
+  end if;
+  delete from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id;
+  if exists (select 1 from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id) then
+    return;
+  end if;
+  if public._open_soirees_count(p_profile_id) >= public._soiree_max_open() then
+    raise exception 'player_busy' using detail = (select nickname from public.profiles where id = p_profile_id);
+  end if;
+  insert into public.soiree_players(soiree_id, profile_id) values (p_soiree_id, p_profile_id);
+end $$;
+
+revoke all on function public.kick_soiree_player(uuid, uuid) from public, anon;
+revoke all on function public.invite_to_soiree(uuid, uuid) from public, anon;
+grant execute on function public.kick_soiree_player(uuid, uuid) to authenticated;
+grant execute on function public.invite_to_soiree(uuid, uuid) to authenticated;
+
+-- ------------------------------------------------------------------ Roue des jeux
+create table if not exists public.soiree_wheel_spins (
+  id         bigint generated always as identity primary key,
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  host_id    uuid not null references public.profiles(id) on delete cascade,
+  game_ids   text[] not null,      -- les parts de la roue, dans l'ordre d'affichage
+  result     text not null,        -- le jeu tiré (∈ game_ids)
+  created_at timestamptz not null default now()
+);
+create index if not exists soiree_wheel_spins_soiree_idx on public.soiree_wheel_spins(soiree_id, id);
+
+alter table public.soiree_wheel_spins enable row level security;
+drop policy if exists soiree_wheel_spins_select on public.soiree_wheel_spins;
+create policy soiree_wheel_spins_select on public.soiree_wheel_spins for select to authenticated
+  using (public.is_soiree_member(soiree_id));
+revoke all on table public.soiree_wheel_spins from anon, authenticated;
+grant select on table public.soiree_wheel_spins to authenticated;
+
+-- Tire au sort un jeu parmi p_game_ids (2 à 40 ids ; le front filtre selon le nombre de
+-- joueurs). Hôte seulement, pas pendant une partie. Renvoie {id, game_ids, result}.
+-- Erreurs : not_host, soiree_ended, match_in_progress, invalid_wheel, soiree_not_found.
+create or replace function public.spin_game_wheel(p_soiree_id uuid, p_game_ids text[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_s   public.soirees%rowtype;
+  v_ids text[];
+  v_res text;
+  v_id  bigint;
+begin
+  select * into v_s from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if exists (select 1 from public.matches m
+              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
+    raise exception 'match_in_progress';
+  end if;
+  v_ids := array(select distinct x from unnest(coalesce(p_game_ids, '{}')) x where x ~ '^[a-z0-9_-]{1,40}$');
+  if coalesce(array_length(v_ids, 1), 0) < 2 or array_length(v_ids, 1) > 40 then
+    raise exception 'invalid_wheel';
+  end if;
+  v_res := v_ids[1 + floor(random() * array_length(v_ids, 1))::int];
+  insert into public.soiree_wheel_spins(soiree_id, host_id, game_ids, result)
+    values (p_soiree_id, v_me, v_ids, v_res) returning id into v_id;
+  delete from public.soiree_wheel_spins where soiree_id = p_soiree_id and id < v_id - 4;
+  return jsonb_build_object('id', v_id, 'game_ids', to_jsonb(v_ids), 'result', v_res);
+end $$;
+revoke all on function public.spin_game_wheel(uuid, text[]) from public, anon;
+grant execute on function public.spin_game_wheel(uuid, text[]) to authenticated;
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                  where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'soiree_wheel_spins') then
+    alter publication supabase_realtime add table public.soiree_wheel_spins;
+  end if;
+end $$;
+
+
+-- ===== features\spectateur.sql =====
+-- =============================================================================
+-- MODE SPECTATEUR — idempotent, exécuté APRÈS schema.sql (features/*).
+-- Un spectateur regarde l'état PUBLIC d'une partie en cours, sans jouer.
+--
+-- Qui peut lire une partie (matches) :
+--   * un membre de la soirée (comme avant) ;
+--   * un AMI ACCEPTÉ (friendships.status = 'accepted', dans les deux sens) d'un joueur de la partie
+--     (state->'players') ou de l'hôte de la soirée, pour une partie EN COURS ou terminée depuis moins de
+--     30 min (écran de résultats) — jamais l'historique ancien — et s'il n'a pas été EXCLU de la soirée
+--     (soiree_bans). Pas d'interrupteur de confidentialité : tout ami accepté peut regarder (décision de conception).
+-- Rien d'autre n'est ouvert : soirees, soiree_players, soiree_messages, match_secrets (réservés au
+-- joueur concerné) et match_server_state (aucun accès client) restent comme avant.
+--
+-- RPC (security definer, grant authenticated) :
+--   can_watch_match(p_match_id) -> boolean
+--   friends_playing() -> [{profile_id, match_id, soiree_id, game_id}]
+--       un élément par ami accepté qui figure dans state->'players' d'une partie 'playing'
+--       (la plus récente s'il est dans plusieurs).
+-- Le serveur refuse déjà toute action d'un non-joueur non-hôte (game_action : not_in_match).
+-- =============================================================================
+
+create or replace function public.can_watch_match(p_match_id uuid)
+returns boolean language sql stable security definer
+set search_path = public, extensions
+as $$
+  select exists (
+    select 1 from public.matches m
+     where m.id = p_match_id
+       and (
+         public.is_soiree_member(m.soiree_id)
+         or (
+           (m.status = 'playing' or m.finished_at > now() - interval '30 minutes')
+           and not exists (select 1 from public.soiree_bans b
+                            where b.soiree_id = m.soiree_id and b.profile_id = public.current_profile_id())
+           and exists (
+           select 1 from public.friendships f
+            where f.status = 'accepted'
+              and (f.requester_id = public.current_profile_id() or f.addressee_id = public.current_profile_id())
+              and (case when f.requester_id = public.current_profile_id() then f.addressee_id else f.requester_id end)::text
+                  in (select jsonb_array_elements_text(case when jsonb_typeof(m.state->'players') = 'array'
+                                                            then m.state->'players' else '[]'::jsonb end)
+                      union select s.host_id::text from public.soirees s where s.id = m.soiree_id))))
+  )
+$$;
+
+-- La lecture de matches s'élargit aux amis (lecture seule, jamais de secrets).
+drop policy if exists matches_select on public.matches;
+create policy matches_select on public.matches for select to authenticated
+  using (public.is_soiree_member(soiree_id) or public.can_watch_match(id));
+
+-- Mes amis acceptés qui sont dans une partie en cours (une ligne par ami, la plus récente).
+create or replace function public.friends_playing()
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('profile_id', x.friend, 'match_id', x.mid, 'soiree_id', x.sid, 'game_id', x.gid)
+                     order by x.created_at desc)
+      from (
+        select distinct on (fr.friend) fr.friend, m.id as mid, m.soiree_id as sid, m.game_id as gid, m.created_at
+          from (select case when f.requester_id = v_me then f.addressee_id else f.requester_id end as friend
+                  from public.friendships f
+                 where f.status = 'accepted' and (f.requester_id = v_me or f.addressee_id = v_me)) fr
+          join public.matches m
+            on m.status = 'playing'
+           and jsonb_typeof(m.state->'players') = 'array'
+           and (m.state->'players') ? fr.friend::text
+         order by fr.friend, m.created_at desc) x), '[]'::jsonb);
+end $$;
+
+revoke all on function public.can_watch_match(uuid) from public, anon;
+revoke all on function public.friends_playing() from public, anon;
+grant execute on function public.can_watch_match(uuid) to authenticated;
+grant execute on function public.friends_playing() to authenticated;
+
+
 -- ===== features\stats.sql =====
 -- =============================================================================
 -- STATS (lot B) — idempotent, exécuté APRÈS schema.sql (features/*).
@@ -3396,445 +4168,3 @@ revoke all on function public._bw_finish(jsonb, jsonb, boolean) from public, ano
 revoke all on function public._bw_tstats(jsonb, integer, jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
-
-
--- ===== games\cerveau-en-fete.sql =====
--- =============================================================================
--- JEU « cerveau-en-fete » : quiz de culture générale multi-écrans
--- =============================================================================
--- Idempotent (create or replace). Contrat : src/games/cerveau-en-fete/types.ts.
---
--- p_options : {"duration": 20, "questions": [{id, theme, difficulty, prompt, image?,
---              answer, aliases?, distractors?, mode: "typed"|"mcq"}]}
--- Le serveur garde les réponses dans match_server_state ; le state public ne contient
--- jamais la réponse avant la phase "reveal".
---
--- Phases : question -> reveal -> question ... -> finished.
--- Échéances : state.deadline (fin du temps de réponse, puis fin de la révélation
--- automatique, CEF_REVEAL_SECONDS = 8 s). N'importe quel joueur envoie {"type":"tick"}.
--- Toute action portant un "round" différent de la manche courante est ignorée
--- sans erreur (state inchangé) : clics en retard, ticks concurrents.
-
--- Normalisation tolérante : casse, accents, ligatures, ponctuation/espaces,
--- article en tête (le, la, les, l', un, une, des).
-create or replace function public._cef_norm(p text)
-returns text language sql immutable
-set search_path = public, extensions
-as $$
-  select replace(
-    regexp_replace(
-      btrim(regexp_replace(
-        lower(translate(
-          replace(replace(replace(replace(left(coalesce(p, ''), 120), 'œ', 'oe'), 'Œ', 'OE'), 'æ', 'ae'), 'Æ', 'AE'),
-          'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ',
-          'aaaaaaceeeeiiiinooooouuuuyyAAAAAACEEEEIIIINOOOOOUUUUYY')),
-        '[^a-z0-9]+', ' ', 'g')),
-      '^(les|le|la|l|une|un|des) ', ''),
-    ' ', '')
-$$;
-
--- Distance de Levenshtein (implémentation maison : pas besoin de fuzzystrmatch).
-create or replace function public._cef_lev(a text, b text)
-returns integer language plpgsql immutable
-set search_path = public, extensions
-as $$
-declare
-  la   integer := char_length(a);
-  lb   integer := char_length(b);
-  prev integer[];
-  cur  integer[];
-  i    integer;
-  j    integer;
-begin
-  if la = 0 then return lb; end if;
-  if lb = 0 then return la; end if;
-  prev := array(select generate_series(0, lb));
-  for i in 1..la loop
-    cur := array[i];
-    for j in 1..lb loop
-      cur := cur || least(prev[j + 1] + 1, cur[j] + 1,
-                          prev[j] + case when substr(a, i, 1) = substr(b, j, 1) then 0 else 1 end);
-    end loop;
-    prev := cur;
-  end loop;
-  return prev[lb + 1];
-end $$;
-
--- La proposition correspond-elle à l'une des formes acceptées (déjà normalisées) ?
--- Fautes de frappe : distance <= 1 jusqu'à 6 caractères, <= 2 au-delà ;
--- exact obligatoire si la réponse contient un chiffre (dates !) ou fait <= 3 caractères.
-create or replace function public._cef_match(p_guess text, p_accept jsonb)
-returns boolean language plpgsql immutable
-set search_path = public, extensions
-as $$
-declare
-  v_g   text := public._cef_norm(p_guess);
-  v_a   text;
-  v_tol integer;
-begin
-  if v_g = '' then return false; end if;
-  for v_a in select value from jsonb_array_elements_text(coalesce(p_accept, '[]'::jsonb)) loop
-    if v_g = v_a then return true; end if;
-    if v_a ~ '[0-9]' or char_length(v_a) <= 3 then continue; end if;
-    v_tol := case when char_length(v_a) <= 6 then 1 else 2 end;
-    if abs(char_length(v_g) - char_length(v_a)) <= v_tol and public._cef_lev(v_g, v_a) <= v_tol then
-      return true;
-    end if;
-  end loop;
-  return false;
-end $$;
-
--- Ouvre la question d'index p_idx (0-based).
-create or replace function public._cef_open(p_state jsonb, p_server jsonb, p_idx integer)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_q   jsonb := p_server->'questions'->p_idx;
-  v_now timestamptz := now();
-begin
-  p_state := p_state || jsonb_build_object(
-    'phase', 'question',
-    'round', p_idx + 1,
-    'started_at', to_jsonb(v_now),
-    'deadline', to_jsonb(v_now + make_interval(secs => (p_state->>'duration')::integer)),
-    'question', v_q - 'answer' - 'accept' - 'correct',
-    'found', '[]'::jsonb, 'passed', '[]'::jsonb, 'missed', '[]'::jsonb);
-  p_server := p_server || jsonb_build_object('picks', '{}'::jsonb, 'tries', '{}'::jsonb);
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
-create or replace function public.game_cerveau_en_fete_start(p_players uuid[], p_options jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_in      jsonb := p_options->'questions';
-  v_dur     integer;
-  v_qs      jsonb := '[]'::jsonb;
-  e         jsonb;
-  v_mode    text;
-  v_acc     jsonb;
-  v_dis     jsonb;
-  v_choices jsonb;
-  v_correct integer;
-  v_img     jsonb;
-  v_zero    jsonb;
-  v_st      jsonb;
-begin
-  if cardinality(p_players) < 2 then raise exception 'not_enough_players'; end if;
-  if v_in is null or jsonb_typeof(v_in) <> 'array' or jsonb_array_length(v_in) = 0 then
-    raise exception 'missing_questions';
-  end if;
-  begin
-    v_dur := coalesce(nullif(p_options->>'duration', '')::integer, 20);
-  exception when others then v_dur := 20;
-  end;
-  v_dur := least(greatest(v_dur, 5), 120);
-
-  for e in select value from jsonb_array_elements(v_in) with ordinality t(value, o) order by o limit 50 loop
-    if jsonb_typeof(e) <> 'object' or jsonb_typeof(e->'prompt') <> 'string' or jsonb_typeof(e->'answer') <> 'string'
-       or char_length(btrim(e->>'prompt')) = 0 or char_length(e->>'prompt') > 500
-       or char_length(btrim(e->>'answer')) = 0 or char_length(e->>'answer') > 120 then
-      raise exception 'invalid_questions';
-    end if;
-
-    -- 3 premiers distracteurs valides, distincts de la réponse.
-    select coalesce(jsonb_agg(d order by o), '[]'::jsonb) into v_dis
-      from (select d, o from jsonb_array_elements_text(
-                     case when jsonb_typeof(e->'distractors') = 'array' then e->'distractors' else '[]'::jsonb end)
-                     with ordinality t(d, o)
-             where char_length(btrim(d)) between 1 and 120 and d <> e->>'answer'
-             order by o limit 3) z;
-
-    -- Formes acceptées (normalisées) : réponse + alias.
-    select coalesce(jsonb_agg(distinct x), '[]'::jsonb) into v_acc
-      from (select public._cef_norm(e->>'answer') as x
-            union
-            select public._cef_norm(a) from jsonb_array_elements_text(
-                     case when jsonb_typeof(e->'aliases') = 'array' then e->'aliases' else '[]'::jsonb end) a) t
-     where x <> '';
-
-    v_mode := case when e->>'mode' = 'mcq' then 'mcq' else 'typed' end;
-    if v_mode = 'mcq' and jsonb_array_length(v_dis) < 3 then v_mode := 'typed'; end if;
-    if v_mode = 'typed' and jsonb_array_length(v_acc) = 0 then
-      if jsonb_array_length(v_dis) >= 3 then v_mode := 'mcq'; else raise exception 'invalid_questions'; end if;
-    end if;
-
-    v_choices := null;
-    v_correct := null;
-    if v_mode = 'mcq' then
-      select jsonb_agg(c order by random()) into v_choices
-        from (select e->>'answer' as c union all select value from jsonb_array_elements_text(v_dis)) y;
-      select (o - 1)::integer into v_correct
-        from jsonb_array_elements_text(v_choices) with ordinality t(c, o) where c = e->>'answer' limit 1;
-    end if;
-
-    v_img := null;
-    if jsonb_typeof(e->'image') = 'object' and coalesce(e->'image'->>'url', '') ~ '^https://' then
-      v_img := jsonb_build_object('url', left(e->'image'->>'url', 500),
-                                  'credit', left(coalesce(e->'image'->>'credit', ''), 200),
-                                  'license', left(coalesce(e->'image'->>'license', ''), 60));
-    end if;
-
-    v_qs := v_qs || jsonb_build_array(jsonb_build_object(
-      'id', left(coalesce(e->>'id', ''), 40),
-      'theme', left(coalesce(e->>'theme', ''), 40),
-      'difficulty', case when e->>'difficulty' in ('1', '2', '3') then (e->>'difficulty')::integer end,
-      'prompt', e->>'prompt',
-      'image', v_img,
-      'mode', v_mode,
-      'choices', v_choices,
-      'answer', e->>'answer',
-      'accept', v_acc,
-      'correct', v_correct));
-  end loop;
-
-  select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
-
-  v_st := public._cef_open(
-    jsonb_build_object(
-      'game', 'cerveau-en-fete',
-      'round', 1,
-      'total_rounds', jsonb_array_length(v_qs),
-      'duration', v_dur,
-      'reveal_seconds', 8,
-      'players', to_jsonb(p_players),
-      'scores', v_zero,
-      'last_reveal', null,
-      'history', '[]'::jsonb,
-      'winners', null,
-      'results', null),
-    jsonb_build_object('questions', v_qs),
-    0);
-  return v_st || jsonb_build_object('secrets', '{}'::jsonb);
-end $$;
-
--- Passe en révélation : réponse publiée, points ajoutés aux scores.
-create or replace function public._cef_reveal(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_round  integer := (p_state->>'round')::integer;
-  v_q      jsonb := p_server->'questions'->(v_round - 1);
-  v_points jsonb;
-begin
-  select coalesce(jsonb_object_agg(f->>'profile_id', (f->>'points')::integer), '{}'::jsonb) into v_points
-    from jsonb_array_elements(p_state->'found') f;
-
-  p_state := p_state || jsonb_build_object(
-    'phase', 'reveal',
-    'deadline', to_jsonb(now() + make_interval(secs => coalesce((p_state->>'reveal_seconds')::integer, 8))),
-    'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
-                 from jsonb_each_text(p_state->'scores')),
-    'last_reveal', jsonb_build_object(
-      'round', v_round,
-      'question', p_state->'question',
-      'answer', v_q->'answer',
-      'mode', v_q->'mode',
-      'choices', v_q->'choices',
-      'correct', v_q->'correct',
-      'found', p_state->'found',
-      'passed', p_state->'passed',
-      'missed', p_state->'missed',
-      'picks', coalesce(p_server->'picks', '{}'::jsonb),
-      'tries', coalesce(p_server->'tries', '{}'::jsonb),
-      'points', v_points),
-    'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-      'round', v_round,
-      'id', v_q->'id',
-      'theme', v_q->'theme',
-      'prompt', v_q->'prompt',
-      'answer', v_q->'answer',
-      'mode', v_q->'mode',
-      'found', p_state->'found')));
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].found.
-create or replace function public._cef_tstats(p_state jsonb, p_pl text)
-returns jsonb language sql immutable
-set search_path = public, extensions
-as $$
-  with q as (
-    select e.o, e.v->>'mode' as mode,
-           (select f from jsonb_array_elements(e.v->'found') f where f->>'profile_id' = p_pl limit 1) as me,
-           jsonb_array_length(e.v->'found') as nfound
-      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
-  ), r as (
-    select q.*, (q.me is not null) as ok from q
-  ), g as (
-    select r.*, r.o - row_number() over (partition by r.ok order by r.o) as grp from r
-  )
-  select jsonb_build_object(
-    'correct', (select count(*) from g where ok),
-    'firsts', (select count(*) from g where ok and (me->>'rank')::integer = 1),
-    'last_finder', (select count(*) from g where ok and nfound >= 3 and (me->>'rank')::integer = nfound),
-    'close_finds', (select count(*) from g where ok
-                      and (me->>'ms')::integer >= (p_state->>'duration')::integer * 1000 - 3000),
-    'fast_typed', (select count(*) from g where ok and mode = 'typed' and (me->>'ms')::integer < 3000),
-    'best_streak', coalesce((select max(c) from (select count(*) as c from g where ok group by grp) x), 0),
-    'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not ok group by grp) x), 0),
-    'qcm_perfect', case when (select count(*) from g where mode = 'mcq') >= 5
-                         and not exists (select 1 from g where mode = 'mcq' and not ok) then 1 else 0 end,
-    'perfect', case when (select count(*) from g) >= 10 and not exists (select 1 from g where not ok) then 1 else 0 end)
-$$;
-
-create or replace function public._cef_finish(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_max     integer;
-  v_results jsonb;
-  v_winners jsonb;
-begin
-  select coalesce(max(value::integer), 0) into v_max from jsonb_each_text(p_state->'scores');
-
-  -- points (XP = points x 10) : score du quiz / 100 arrondi, pour rester à l'échelle des autres jeux.
-  select jsonb_agg(jsonb_build_object(
-           'profile_id', t.key,
-           'points', round(t.value::integer / 100.0)::integer,
-           'won', v_max > 0 and t.value::integer = v_max,
-           'placement', t.r,
-           'stats', public._cef_tstats(p_state, t.key))
-         order by t.r, t.key)
-    into v_results
-    from (select key, value, rank() over (order by value::integer desc) as r
-            from jsonb_each_text(p_state->'scores')) t;
-
-  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
-    from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
-
-  p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null,
-                                           'winners', v_winners, 'results', v_results);
-  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
-end $$;
-
--- Révélation si tous les joueurs ont trouvé, passé ou raté (QCM).
-create or replace function public._cef_check_done(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-begin
-  if not exists (
-    select 1 from jsonb_array_elements_text(p_state->'players') pl
-     where not (p_state->'passed' ? pl) and not (p_state->'missed' ? pl)
-       and not exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = pl))
-  then
-    return public._cef_reveal(p_state, p_server);
-  end if;
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
-create or replace function public.game_cerveau_en_fete_action(
-  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_type     text := p_action->>'type';
-  v_phase    text := p_state->>'phase';
-  v_round    integer := (p_state->>'round')::integer;
-  v_total    integer := (p_state->>'total_rounds')::integer;
-  v_deadline timestamptz := (p_state->>'deadline')::timestamptz;
-  v_me       text := p_actor::text;
-  v_q        jsonb;
-  v_same     jsonb := jsonb_build_object('state', p_state, 'server', p_server);
-  v_ok       boolean;
-  v_idx      integer;
-  v_frac     numeric;
-  v_rank     integer;
-  v_pts      integer;
-  v_ms       integer;
-begin
-  if v_type not in ('answer', 'choose', 'pass', 'skip', 'next', 'tick') then
-    raise exception 'unknown_action';
-  end if;
-  -- Action d'une manche passée (ou partie finie) : ignorée sans erreur.
-  if v_phase not in ('question', 'reveal') then return v_same; end if;
-  if p_action ? 'round' and (p_action->>'round') is distinct from (p_state->>'round') then
-    return v_same;
-  end if;
-
-  if v_type = 'tick' then
-    if v_deadline is null or now() < v_deadline then return v_same; end if;
-    if v_phase = 'question' then return public._cef_reveal(p_state, p_server); end if;
-    if v_round >= v_total then return public._cef_finish(p_state, p_server); end if;
-    return public._cef_open(p_state, p_server, v_round);
-
-  elsif v_type = 'skip' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase <> 'question' then return v_same; end if;
-    return public._cef_reveal(p_state, p_server);
-
-  elsif v_type = 'next' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase <> 'reveal' then return v_same; end if;
-    if v_round >= v_total then return public._cef_finish(p_state, p_server); end if;
-    return public._cef_open(p_state, p_server, v_round);
-  end if;
-
-  -- answer / choose / pass : joueurs uniquement, pendant la question.
-  if not (p_state->'players' ? v_me) then raise exception 'not_a_player'; end if;
-  if v_phase <> 'question' then return v_same; end if;
-  if now() >= v_deadline then return public._cef_reveal(p_state, p_server); end if;
-  if (p_state->'passed' ? v_me) or (p_state->'missed' ? v_me)
-     or exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = v_me) then
-    return v_same;   -- déjà fini pour cette question
-  end if;
-
-  if v_type = 'pass' then
-    p_state := jsonb_set(p_state, '{passed}', (p_state->'passed') || to_jsonb(v_me));
-    return public._cef_check_done(p_state, p_server);
-  end if;
-
-  v_q := p_server->'questions'->(v_round - 1);
-  if v_type = 'answer' then
-    if v_q->>'mode' <> 'typed' then raise exception 'wrong_mode'; end if;
-    if char_length(btrim(coalesce(p_action->>'text', ''))) = 0 then return v_same; end if;
-    p_server := jsonb_set(p_server, array['tries', v_me],
-                          to_jsonb(coalesce((p_server->'tries'->>v_me)::integer, 0) + 1), true);
-    v_ok := public._cef_match(p_action->>'text', v_q->'accept');
-    if not v_ok then
-      return jsonb_build_object('state', p_state, 'server', p_server);
-    end if;
-  else -- choose
-    if v_q->>'mode' <> 'mcq' then raise exception 'wrong_mode'; end if;
-    begin
-      v_idx := (p_action->>'index')::integer;
-    exception when others then raise exception 'invalid_choice';
-    end;
-    if v_idx is null or v_idx < 0 or v_idx >= jsonb_array_length(v_q->'choices') then
-      raise exception 'invalid_choice';
-    end if;
-    p_server := jsonb_set(p_server, array['picks', v_me], to_jsonb(v_idx), true);
-    v_ok := v_idx = (v_q->>'correct')::integer;
-    if not v_ok then
-      p_state := jsonb_set(p_state, '{missed}', (p_state->'missed') || to_jsonb(v_me));
-      return public._cef_check_done(p_state, p_server);
-    end if;
-  end if;
-
-  -- Bonne réponse : base + bonus vitesse (proportionnel au temps restant) + premier.
-  v_frac := greatest(0, least(1, extract(epoch from (v_deadline - now())) / (p_state->>'duration')::numeric));
-  v_rank := jsonb_array_length(p_state->'found') + 1;
-  v_pts := case when v_q->>'mode' = 'typed' then 100 + round(100 * v_frac) else 60 + round(60 * v_frac) end
-           + case when v_rank = 1 then 20 else 0 end;
-  v_ms := greatest(0, round(extract(epoch from (now() - (p_state->>'started_at')::timestamptz)) * 1000));
-  p_state := jsonb_set(p_state, '{found}', (p_state->'found') || jsonb_build_array(jsonb_build_object(
-    'profile_id', v_me, 'rank', v_rank, 'ms', v_ms, 'points', v_pts)));
-  return public._cef_check_done(p_state, p_server);
-end $$;
-
-revoke all on function public._cef_norm(text) from public, anon, authenticated;
-revoke all on function public._cef_lev(text, text) from public, anon, authenticated;
-revoke all on function public._cef_match(text, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_open(jsonb, jsonb, integer) from public, anon, authenticated;
-revoke all on function public._cef_reveal(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_finish(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_tstats(jsonb, text) from public, anon, authenticated;
-revoke all on function public._cef_check_done(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public.game_cerveau_en_fete_start(uuid[], jsonb) from public, anon, authenticated;
-revoke all on function public.game_cerveau_en_fete_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

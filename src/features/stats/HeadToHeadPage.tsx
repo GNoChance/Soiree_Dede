@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Swords } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -108,6 +108,11 @@ export function HeadToHeadPage() {
               )}
             </>
           )}
+          <StaggerItem>
+            <Button size="lg" fullWidth icon={<Swords className="size-6" />} onClick={() => navigate(`/defis-potes?ami=${id}`)}>
+              Défier {nick}
+            </Button>
+          </StaggerItem>
         </StaggerList>
       )}
     </div>

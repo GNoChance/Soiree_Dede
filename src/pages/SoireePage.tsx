@@ -30,6 +30,7 @@ import { errorCode, toastError } from '@/features/soiree/errors'
 import { SoireePodium, SoireeStandingsCard } from '@/features/stats/SoireeStandings'
 import { SoireeRecap } from '@/features/recap/RecapViewer'
 import { TutoButton } from '@/features/tutos/TutoButton'
+import { ChallengeLaunchCard } from '@/features/mises/ChallengeLaunchCard'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -183,6 +184,8 @@ export function SoireePage() {
           {!isHost && !match.player_ids.includes(meId) && <p className="text-center text-sm font-bold text-muted">Tu joueras à la suivante</p>}
         </div>
       )}
+
+      <ChallengeLaunchCard soireeId={soiree.id} isHost={isHost} meId={meId} byId={byId} busy={Boolean(match) || Boolean(launching)} onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })} />
 
       {isHost ? (
         <HostPanel

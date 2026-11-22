@@ -255,16 +255,20 @@ drop policy if exists item_purchases_select on public.item_purchases;
 create policy item_purchases_select on public.item_purchases for select to authenticated using (true);
 -- Aucune policy d'ecriture : tout passe par buy_item.
 
--- Solde de pieces (derive de l'historique, retroactif).
+-- Solde de pieces (derive de l'historique, retroactif) + mouvements du registre coin_ledger (mises :
+-- paris entre potes et defis, features/mises.sql). plpgsql (et non sql) : coin_ledger est cree plus loin
+-- (mises.sql), le corps n'est donc pas verifie a la creation.
 create or replace function public._coins(p_profile uuid)
-returns integer language sql stable security definer
+returns integer language plpgsql stable security definer
 set search_path = public, extensions
 as $$
-  select (select coalesce(5 * count(*) + 15 * count(*) filter (where won), 0) from public.match_players where profile_id = p_profile)::int
+begin
+  return (select coalesce(5 * count(*) + 15 * count(*) filter (where won), 0) from public.match_players where profile_id = p_profile)::int
        + (select 10 * count(*) from public.daily_runs where profile_id = p_profile and finished_at is not null)::int
        + (select 20 * count(*) from public.trophy_unlocks where profile_id = p_profile)::int
        - (select coalesce(sum(price), 0) from public.item_purchases where profile_id = p_profile)::int
-$$;
+       + (select coalesce(sum(delta), 0) from public.coin_ledger where profile_id = p_profile)::int;
+end $$;
 
 -- Vitrine de la semaine : 6 articles (ordre md5(semaine || id)), hors articles possedes avant le lundi.
 create or replace function public._shop_items(p_profile uuid, p_week date)

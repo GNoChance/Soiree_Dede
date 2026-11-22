@@ -14,6 +14,7 @@ import { HeadToHeadPage } from '@/features/stats/HeadToHeadPage'
 import { ProfilePage } from '@/features/stats/ProfilePage'
 import { DailyPage } from '@/features/daily/DailyPage'
 import { AdventPage } from '@/features/advent/AdventPage'
+import { ChallengesPage } from '@/features/mises/ChallengesPage'
 import { SoloRoute } from '@/features/solo/SoloRoute'
 import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
 import { RouteError } from '@/pages/RouteError'
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
               { path: '/historique/:id', element: <HistoryDetailPage /> },
               { path: '/profil/:id', element: <ProfilePage /> },
               { path: '/face-a-face/:id', element: <HeadToHeadPage /> },
+              { path: '/defis-potes', element: <ChallengesPage /> },
               { path: '/parametres', element: <SettingsPage /> },
             ],
           },

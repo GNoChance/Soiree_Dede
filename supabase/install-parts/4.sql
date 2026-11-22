@@ -1,5 +1,481 @@
 -- MORCEAU 4 / 5 — -- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent. À exécuter dans l'ordre (1, puis 2…) dans Supabase > SQL Editor > Run.
 
+-- ===== games\kems.sql =====
+-- =============================================================================
+-- JEU « kems » (Kems, le jeu de cartes de la cour de récré) — idempotent (create or replace).
+-- Dépend de schema.sql (game_action, start_match, finish_match).
+-- Conception : docs/superpowers/specs/2026-11-19-kems-design.md (section 10 = décisions).
+--
+-- 2 à 4 équipes (red, blue, green, yellow : ordre fixe) de EXACTEMENT 2 joueurs ; les autres sont
+-- sur le banc (p_players hors équipes, absents de state.players : ils regardent).
+-- Cartes : 4 joueurs = 32 cartes (7 -> As), 6 ou 8 joueurs = 52 cartes. Id d'une carte = valeur + couleur
+-- (« 7H », « 10S », « AD »…) ; couleurs S (pique) H (coeur) D (carreau) C (trèfle).
+-- Phases : signs (les équipes choisissent leur signe, « Prêt » ou 45 s) -> playing (échanges simultanés,
+-- balayage du centre, KEMS / CONTRE-KEMS) -> reveal (6 s, mains retournées) -> playing … -> finished.
+--
+-- Secrets : les mains ne sont JAMAIS dans le state public avant la révélation. server.hands = {joueur: [4 cartes]}
+-- (autoritaire) ; match_secrets[joueur] = {round, hand, square, sign_ideas, v}. state.hand_ver[joueur] augmente à
+-- chaque nouvelle main (le front relit son secret). game_action verrouille la ligne du match : les échanges
+-- simultanés sont sérialisés, le premier arrivé gagne (le 2e reçoit card_taken).
+-- Le signe, lui, se fait dans la vraie vie : le serveur ne le connaît pas (il ne distribue que des idées).
+-- =============================================================================
+
+-- Mélange d'un tableau jsonb.
+create or replace function public._kems_shuffle(p jsonb)
+returns jsonb language sql volatile
+set search_path = public, extensions
+as $$ select coalesce(jsonb_agg(x order by random()), '[]'::jsonb) from jsonb_array_elements(coalesce(p, '[]'::jsonb)) x $$;
+
+-- Une main de 4 cartes est-elle un carré (4 cartes de même valeur) ?
+create or replace function public._kems_square(p_hand jsonb)
+returns boolean language sql immutable
+set search_path = public, extensions
+as $$
+  select coalesce(jsonb_typeof(p_hand) = 'array' and jsonb_array_length(p_hand) = 4
+         and (select count(distinct left(c, -1)) from jsonb_array_elements_text(p_hand) c) = 1, false)
+$$;
+
+-- Ajoute p_delta au compteur p_key du joueur p_pid (server.pstats).
+create or replace function public._kems_bump(p_server jsonb, p_pid text, p_key text, p_delta integer)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select case when p_server->'pstats' ? p_pid
+    then jsonb_set(p_server, array['pstats', p_pid, p_key],
+                   to_jsonb(coalesce((p_server->'pstats'->p_pid->>p_key)::integer, 0) + p_delta))
+    else p_server end
+$$;
+
+-- Idem pour les compteurs d'équipe publics (state.tstats : kems, counters, errors, countered).
+create or replace function public._kems_tbump(p_state jsonb, p_team text, p_key text, p_delta integer)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select jsonb_set(p_state, array['tstats', p_team, p_key],
+                   to_jsonb(coalesce((p_state->'tstats'->p_team->>p_key)::integer, 0) + p_delta))
+$$;
+
+-- Secret d'un joueur (main, carré, idées de signe). La version vient de state.hand_ver (déjà incrémentée).
+create or replace function public._kems_secret(p_state jsonb, p_server jsonb, p_pid text)
+returns jsonb language sql immutable
+set search_path = public, extensions
+as $$
+  select jsonb_build_object(
+    'round', (p_state->>'round')::integer,
+    'hand', coalesce(p_server->'hands'->p_pid, '[]'::jsonb),
+    'square', public._kems_square(p_server->'hands'->p_pid),
+    'sign_ideas', coalesce(p_server->'signs'->p_pid, '[]'::jsonb),
+    'v', coalesce((p_state->'hand_ver'->>p_pid)::integer, 1))
+$$;
+
+-- state.deadline = prochaine échéance du tick pendant « playing » (balayage auto ou manche blanche).
+create or replace function public._kems_playing_deadline(p_state jsonb)
+returns jsonb language sql stable
+set search_path = public, extensions
+as $$
+  select p_state || jsonb_build_object('deadline', to_jsonb(least(
+    (p_state->'sweep'->>'deadline')::timestamptz, (p_state->>'round_deadline')::timestamptz)))
+$$;
+
+-- Distribue la manche p_round : paquet mélangé, 4 cartes par joueur, 4 au centre. Renvoie {state, server, secrets}.
+create or replace function public._kems_deal(p_state jsonb, p_server jsonb, p_round integer)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_players text[] := array(select jsonb_array_elements_text(p_state->'players'));
+  v_n       integer := array_length(v_players, 1);
+  v_ranks   text[] := case when array_length(v_players, 1) <= 4
+                           then array['7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+                           else array['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'] end;
+  v_deck    text[];
+  v_i       integer;
+  v_pid     text;
+  v_hands   jsonb := '{}'::jsonb;
+  v_ver     jsonb := coalesce(p_state->'hand_ver', '{}'::jsonb);
+  v_secrets jsonb := '{}'::jsonb;
+  v_sq      jsonb := '{}'::jsonb;
+begin
+  select array_agg(r || s order by random()) into v_deck
+    from unnest(v_ranks) r, unnest(array['S', 'H', 'D', 'C']) s;
+  for v_i in 1 .. v_n loop
+    v_pid := v_players[v_i];
+    v_hands := v_hands || jsonb_build_object(v_pid, to_jsonb(v_deck[(v_i - 1) * 4 + 1 : v_i * 4]));
+    v_ver := v_ver || jsonb_build_object(v_pid, coalesce((v_ver->>v_pid)::integer, 0) + 1);
+    if public._kems_square(v_hands->v_pid) then
+      p_server := public._kems_bump(p_server, v_pid, 'squares', 1);
+      v_sq := v_sq || jsonb_build_object(v_pid, p_round);
+    end if;
+  end loop;
+
+  p_state := p_state || jsonb_build_object(
+    'phase', 'playing', 'round', p_round, 'ready', '[]'::jsonb, 'hand_ver', v_ver,
+    'center', to_jsonb(v_deck[v_n * 4 + 1 : v_n * 4 + 4]),
+    'deck_count', array_length(v_deck, 1) - v_n * 4 - 4,
+    'sweep', jsonb_build_object('votes', '[]'::jsonb, 'deadline', to_jsonb(now() + interval '10 seconds')),
+    'round_deadline', to_jsonb(now() + interval '180 seconds'),
+    'feed', '[]'::jsonb, 'call', null);
+  p_state := public._kems_playing_deadline(p_state);
+  p_server := p_server || jsonb_build_object(
+    'deck', to_jsonb(v_deck[v_n * 4 + 5 : array_length(v_deck, 1)]), 'discard', '[]'::jsonb,
+    'hands', v_hands, 'round_started_at', to_jsonb(now()),
+    'sq_counted', coalesce(p_server->'sq_counted', '{}'::jsonb) || v_sq, 'last_swap', '{}'::jsonb);
+  foreach v_pid in array v_players loop
+    v_secrets := v_secrets || jsonb_build_object(v_pid, public._kems_secret(p_state, p_server, v_pid));
+  end loop;
+  return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
+end $$;
+
+-- Balaie le centre : 4 nouvelles cartes (pioche vide -> la défausse est remélangée, sans le centre balayé).
+create or replace function public._kems_sweep(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_swept jsonb := p_state->'center';
+  v_deck  jsonb := p_server->'deck';
+  v_new   jsonb;
+  v_need  integer;
+begin
+  v_new := (select coalesce(jsonb_agg(x order by o), '[]'::jsonb) from jsonb_array_elements(v_deck) with ordinality t(x, o) where o <= 4);
+  v_deck := (select coalesce(jsonb_agg(x order by o), '[]'::jsonb) from jsonb_array_elements(v_deck) with ordinality t(x, o) where o > 4);
+  v_need := 4 - jsonb_array_length(v_new);
+  if v_need > 0 then
+    v_deck := public._kems_shuffle(p_server->'discard');
+    v_new := v_new || (select coalesce(jsonb_agg(x order by o), '[]'::jsonb) from jsonb_array_elements(v_deck) with ordinality t(x, o) where o <= v_need);
+    v_deck := (select coalesce(jsonb_agg(x order by o), '[]'::jsonb) from jsonb_array_elements(v_deck) with ordinality t(x, o) where o > v_need);
+    p_server := p_server || jsonb_build_object('discard', '[]'::jsonb);
+  end if;
+  p_server := p_server || jsonb_build_object('deck', v_deck, 'discard', (p_server->'discard') || v_swept);
+  p_state := p_state || jsonb_build_object(
+    'center', v_new, 'deck_count', jsonb_array_length(v_deck),
+    'sweeps', coalesce((p_state->>'sweeps')::integer, 0) + 1,
+    'sweep', jsonb_build_object('votes', '[]'::jsonb, 'deadline', to_jsonb(now() + interval '10 seconds')));
+  return jsonb_build_object('state', public._kems_playing_deadline(p_state), 'server', p_server);
+end $$;
+
+-- Fin de partie : équipes à l'objectif = gagnantes (co-vainqueurs possibles) ; un résultat par membre d'équipe.
+create or replace function public._kems_finish(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_results jsonb;
+  v_t       jsonb;
+  v_m       text;
+  v_target  integer := (p_state->>'target')::integer;
+begin
+  -- Poker face : victoire sans erreur de l'équipe et sans contre réussi contre elle
+  for v_t in select t from jsonb_array_elements(p_state->'teams') t where (t->>'score')::integer >= v_target loop
+    if coalesce((p_state->'tstats'->(v_t->>'id')->>'errors')::integer, 0) = 0
+       and coalesce((p_state->'tstats'->(v_t->>'id')->>'countered')::integer, 0) = 0 then
+      for v_m in select jsonb_array_elements_text(v_t->'players') loop
+        p_server := public._kems_bump(p_server, v_m, 'clean_win', 1);
+      end loop;
+    end if;
+  end loop;
+  with t as (
+    select x->>'id' as id, x->'players' as players, (x->>'score')::integer as score
+      from jsonb_array_elements(p_state->'teams') x
+  ), r as (
+    select t.*, dense_rank() over (order by score desc) as rk from t
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'profile_id', m, 'points', r.score, 'won', r.score >= v_target, 'placement', r.rk,
+           'stats', coalesce(p_server->'pstats'->m, '{}'::jsonb))), '[]'::jsonb)
+    into v_results
+    from r, jsonb_array_elements_text(r.players) m;
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'results', v_results, 'deadline', null,
+    'winners', (select jsonb_agg(x->>'id') from jsonb_array_elements(p_state->'teams') x where (x->>'score')::integer >= v_target));
+  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
+-- Fin de manche : applique p_call.deltas aux scores, retourne les mains (state.call) puis révélation ou fin de partie.
+create or replace function public._kems_end_round(p_state jsonb, p_server jsonb, p_call jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_teams jsonb;
+begin
+  select jsonb_agg(t || jsonb_build_object('score',
+           (t->>'score')::integer + coalesce((p_call->'deltas'->>(t->>'id'))::integer, 0)) order by o)
+    into v_teams from jsonb_array_elements(p_state->'teams') with ordinality x(t, o);
+  p_call := p_call || jsonb_build_object('hands', p_server->'hands', 'round', p_state->'round',
+    'holders', (select coalesce(jsonb_agg(k), '[]'::jsonb) from jsonb_each(p_server->'hands') e(k, v) where public._kems_square(v)));
+  p_state := p_state || jsonb_build_object(
+    'teams', v_teams, 'call', p_call, 'phase', 'reveal',
+    'sweep', jsonb_build_object('votes', '[]'::jsonb, 'deadline', null),
+    'deadline', to_jsonb(now() + interval '6 seconds'));
+  if exists (select 1 from jsonb_array_elements(v_teams) t where (t->>'score')::integer >= (p_state->>'target')::integer) then
+    return public._kems_finish(p_state, p_server);
+  end if;
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+create or replace function public.game_kems_start(p_players uuid[], p_options jsonb)
+returns jsonb language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_in      jsonb := p_options->'teams';
+  v_colors  text[] := array['red', 'blue', 'green', 'yellow'];
+  v_c       text;
+  v_k       text;
+  v_members jsonb;
+  v_teams   jsonb := '[]'::jsonb;
+  v_players jsonb := '[]'::jsonb;
+  v_seen    text[] := '{}';
+  v_m       text;
+  v_target  integer := case when p_options->>'target' in ('3', '5', '7') then (p_options->>'target')::integer else 5 end;
+  v_pool    jsonb := case when jsonb_typeof(p_options->'signs') = 'array' then p_options->'signs' else '[]'::jsonb end;
+  v_signs   jsonb := '{}'::jsonb;
+  v_ideas   jsonb;
+  v_pstats  jsonb := '{}'::jsonb;
+  v_tstats  jsonb := '{}'::jsonb;
+  v_ver     jsonb := '{}'::jsonb;
+  v_secrets jsonb := '{}'::jsonb;
+  v_bench   jsonb;
+  v_state   jsonb;
+  v_server  jsonb;
+begin
+  if v_in is null or jsonb_typeof(v_in) <> 'object' then raise exception 'invalid_teams'; end if;
+  for v_k in select jsonb_object_keys(v_in) loop
+    if not (v_k = any(v_colors)) then raise exception 'invalid_teams'; end if;
+  end loop;
+  foreach v_c in array v_colors loop
+    continue when not (v_in ? v_c);
+    v_members := v_in->v_c;
+    if jsonb_typeof(v_members) <> 'array' or jsonb_array_length(v_members) <> 2 then raise exception 'invalid_teams'; end if;
+    for v_m in select jsonb_array_elements_text(v_members) loop
+      if v_m = any(v_seen) or not (v_m::uuid = any(p_players)) then raise exception 'invalid_teams'; end if;
+      v_seen := v_seen || v_m;
+    end loop;
+    v_teams := v_teams || jsonb_build_array(jsonb_build_object('id', v_c, 'players', v_members, 'score', 0));
+    v_players := v_players || v_members;
+    v_tstats := v_tstats || jsonb_build_object(v_c, jsonb_build_object('kems', 0, 'counters', 0, 'errors', 0, 'countered', 0));
+    -- 3 idées de signe par équipe, les mêmes pour les deux coéquipiers
+    select coalesce(jsonb_agg(left(x, 80)), '[]'::jsonb) into v_ideas
+      from (select x from jsonb_array_elements_text(v_pool) x where btrim(x) <> '' order by random() limit 3) q;
+    for v_m in select jsonb_array_elements_text(v_members) loop
+      v_signs := v_signs || jsonb_build_object(v_m, v_ideas);
+    end loop;
+  end loop;
+  if jsonb_array_length(v_teams) not between 2 and 4 then raise exception 'invalid_teams'; end if;
+
+  for v_m in select jsonb_array_elements_text(v_players) loop
+    v_pstats := v_pstats || jsonb_build_object(v_m, jsonb_build_object(
+      'false_kems', 0, 'countered', 0, 'false_counters', 0, 'squares', 0, 'team_kems', 0,
+      'counters_ok', 0, 'fast_kems', 0, 'clean_win', 0, 'double_kems', 0));
+    v_ver := v_ver || jsonb_build_object(v_m, 1);
+  end loop;
+  select coalesce(jsonb_agg(to_jsonb(p) order by o), '[]'::jsonb) into v_bench
+    from unnest(p_players) with ordinality t(p, o) where not (p::text = any(v_seen));
+
+  v_state := jsonb_build_object(
+    'game', 'kems', 'phase', 'signs', 'players', v_players, 'bench', v_bench, 'round', 0, 'target', v_target,
+    'teams', v_teams, 'ready', '[]'::jsonb, 'center', '[]'::jsonb, 'deck_count', 0,
+    'sweep', jsonb_build_object('votes', '[]'::jsonb, 'deadline', null), 'round_deadline', null,
+    'deadline', to_jsonb(now() + interval '45 seconds'), 'feed', '[]'::jsonb, 'swaps', 0, 'sweeps', 0,
+    'hand_ver', v_ver, 'call', null, 'tstats', v_tstats);
+  v_server := jsonb_build_object('signs', v_signs, 'pstats', v_pstats, 'hands', '{}'::jsonb, 'deck', '[]'::jsonb,
+    'discard', '[]'::jsonb, 'sq_counted', '{}'::jsonb, 'last_swap', '{}'::jsonb);
+  for v_m in select jsonb_array_elements_text(v_players) loop
+    v_secrets := v_secrets || jsonb_build_object(v_m, public._kems_secret(v_state, v_server, v_m));
+  end loop;
+  return jsonb_build_object('state', v_state, 'server', v_server, 'secrets', v_secrets);
+end $$;
+
+create or replace function public.game_kems_action(
+  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_type    text := p_action->>'type';
+  v_phase   text := p_state->>'phase';
+  v_me      text := p_actor::text;
+  v_team    jsonb;
+  v_partner text;
+  v_n       integer := jsonb_array_length(p_state->'players');
+  v_unchanged jsonb := jsonb_build_object('state', p_state, 'server', p_server);
+  v_give    text;
+  v_take    text;
+  v_hand    jsonb;
+  v_ms      bigint;
+  v_votes   jsonb;
+  v_res     jsonb;
+  v_call    jsonb;
+  v_deltas  jsonb;
+  v_tid     text;
+  v_target  jsonb;
+  v_others  text[];
+  v_ok      boolean;
+  v_double  boolean;
+  v_m       text;
+  v_ver     jsonb;
+  v_started timestamptz;
+begin
+  select t into v_team from jsonb_array_elements(p_state->'teams') t where t->'players' ? v_me;
+  if v_team is not null then
+    select x into v_partner from jsonb_array_elements_text(v_team->'players') x where x <> v_me limit 1;
+  end if;
+
+  -- ---------------------------------------------------------------- ready
+  if v_type = 'ready' then
+    if v_phase <> 'signs' then return v_unchanged; end if;
+    if v_team is null then raise exception 'not_in_match'; end if;
+    if not ((p_state->'ready') ? v_me) then
+      p_state := p_state || jsonb_build_object('ready', (p_state->'ready') || to_jsonb(v_me));
+    end if;
+    if jsonb_array_length(p_state->'ready') >= v_n then return public._kems_deal(p_state, p_server, 1); end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- swap {give, take} (identifiants de cartes)
+  elsif v_type = 'swap' then
+    if v_phase <> 'playing' then return v_unchanged; end if;
+    if v_team is null then raise exception 'not_in_match'; end if;
+    if jsonb_typeof(p_action->'give') <> 'string' or jsonb_typeof(p_action->'take') <> 'string' then raise exception 'invalid_action'; end if;
+    v_give := p_action->>'give';
+    v_take := p_action->>'take';
+    -- double appui : un échange du même joueur moins de 250 ms après le précédent est ignoré
+    v_ms := (extract(epoch from clock_timestamp()) * 1000)::bigint;
+    if v_ms - coalesce((p_server->'last_swap'->>v_me)::bigint, 0) < 250 then return v_unchanged; end if;
+    v_hand := p_server->'hands'->v_me;
+    if not (v_hand ? v_give) then raise exception 'not_in_hand'; end if;
+    if not ((p_state->'center') ? v_take) then raise exception 'card_taken'; end if;
+    v_hand := (select jsonb_agg(case when c = v_give then v_take else c end order by o) from jsonb_array_elements_text(v_hand) with ordinality t(c, o));
+    p_state := p_state || jsonb_build_object(
+      'center', (select jsonb_agg(case when c = v_take then v_give else c end order by o) from jsonb_array_elements_text(p_state->'center') with ordinality t(c, o)),
+      'swaps', coalesce((p_state->>'swaps')::integer, 0) + 1,
+      'feed', (jsonb_build_array(jsonb_build_object('n', coalesce((p_state->>'swaps')::integer, 0) + 1, 'by', v_me, 'took', v_take, 'gave', v_give))
+               || (p_state->'feed')) - 6,
+      'sweep', jsonb_build_object('votes', '[]'::jsonb, 'deadline', to_jsonb(now() + interval '10 seconds')),
+      'hand_ver', (p_state->'hand_ver') || jsonb_build_object(v_me, coalesce((p_state->'hand_ver'->>v_me)::integer, 0) + 1));
+    p_state := public._kems_playing_deadline(p_state);
+    p_server := p_server || jsonb_build_object(
+      'hands', (p_server->'hands') || jsonb_build_object(v_me, v_hand),
+      'last_swap', coalesce(p_server->'last_swap', '{}'::jsonb) || jsonb_build_object(v_me, v_ms));
+    -- carré réuni : compté une fois par manche
+    if public._kems_square(v_hand) and (p_server->'sq_counted'->>v_me) is distinct from (p_state->>'round') then
+      p_server := public._kems_bump(p_server, v_me, 'squares', 1);
+      p_server := p_server || jsonb_build_object('sq_counted', (p_server->'sq_counted') || jsonb_build_object(v_me, (p_state->>'round')::integer));
+    end if;
+    return jsonb_build_object('state', p_state, 'server', p_server,
+                              'secrets', jsonb_build_object(v_me, public._kems_secret(p_state, p_server, v_me)));
+
+  -- ---------------------------------------------------------------- sweep (bascule du vote « Suivantes »)
+  elsif v_type = 'sweep' then
+    if v_phase <> 'playing' then return v_unchanged; end if;
+    if v_team is null then raise exception 'not_in_match'; end if;
+    v_votes := p_state->'sweep'->'votes';
+    if v_votes ? v_me then
+      v_votes := (select coalesce(jsonb_agg(x), '[]'::jsonb) from jsonb_array_elements_text(v_votes) x where x <> v_me);
+    else
+      v_votes := v_votes || to_jsonb(v_me);
+    end if;
+    p_state := p_state || jsonb_build_object('sweep', (p_state->'sweep') || jsonb_build_object('votes', v_votes));
+    if jsonb_array_length(v_votes) >= v_n then return public._kems_sweep(p_state, p_server); end if;
+    return jsonb_build_object('state', p_state, 'server', p_server);
+
+  -- ---------------------------------------------------------------- kems : le PARTENAIRE du détenteur du carré
+  elsif v_type = 'kems' then
+    if v_phase <> 'playing' then return v_unchanged; end if;
+    if v_team is null then raise exception 'not_in_match'; end if;
+    v_tid := v_team->>'id';
+    v_ok := public._kems_square(p_server->'hands'->v_partner);
+    if v_ok then
+      v_double := public._kems_square(p_server->'hands'->v_me);
+      v_started := (p_server->>'round_started_at')::timestamptz;
+      v_deltas := jsonb_build_object(v_tid, case when v_double then 2 else 1 end);
+      p_state := public._kems_tbump(p_state, v_tid, 'kems', 1);
+      for v_m in select jsonb_array_elements_text(v_team->'players') loop
+        p_server := public._kems_bump(p_server, v_m, 'team_kems', 1);
+        if v_double then p_server := public._kems_bump(p_server, v_m, 'double_kems', 1); end if;
+        if extract(epoch from now() - v_started) < 20 then p_server := public._kems_bump(p_server, v_m, 'fast_kems', 1); end if;
+      end loop;
+    else
+      v_double := false;
+      v_deltas := (select coalesce(jsonb_object_agg(t->>'id', 1), '{}'::jsonb) from jsonb_array_elements(p_state->'teams') t where t->>'id' <> v_tid);
+      p_state := public._kems_tbump(p_state, v_tid, 'errors', 1);
+      p_server := public._kems_bump(p_server, v_me, 'false_kems', 1);
+    end if;
+    v_call := jsonb_build_object('type', 'kems', 'by', v_me, 'team', v_tid, 'target', null, 'ok', v_ok, 'double', v_double, 'deltas', v_deltas);
+    return public._kems_end_round(p_state, p_server, v_call);
+
+  -- ---------------------------------------------------------------- counter {team} : CONTRE-KEMS
+  elsif v_type = 'counter' then
+    if v_phase <> 'playing' then return v_unchanged; end if;
+    if v_team is null then raise exception 'not_in_match'; end if;
+    v_tid := v_team->>'id';
+    v_others := array(select t->>'id' from jsonb_array_elements(p_state->'teams') t where t->>'id' <> v_tid);
+    if p_action->>'team' is null or jsonb_typeof(p_action->'team') = 'null' then
+      if array_length(v_others, 1) <> 1 then raise exception 'invalid_action'; end if;
+      v_target := to_jsonb(v_others[1]);
+    elsif (p_action->>'team') = any(v_others) then
+      v_target := to_jsonb(p_action->>'team');
+    else
+      raise exception 'invalid_action';
+    end if;
+    select t into v_res from jsonb_array_elements(p_state->'teams') t where t->>'id' = (v_target #>> '{}');
+    v_ok := exists (select 1 from jsonb_array_elements_text(v_res->'players') x where public._kems_square(p_server->'hands'->x));
+    if v_ok then
+      v_deltas := jsonb_build_object(v_tid, 1);
+      p_state := public._kems_tbump(public._kems_tbump(p_state, v_tid, 'counters', 1), v_target #>> '{}', 'countered', 1);
+      p_server := public._kems_bump(p_server, v_me, 'counters_ok', 1);
+      for v_m in select jsonb_array_elements_text(v_res->'players') loop
+        p_server := public._kems_bump(p_server, v_m, 'countered', 1);
+      end loop;
+    else
+      v_deltas := (select coalesce(jsonb_object_agg(t->>'id', 1), '{}'::jsonb) from jsonb_array_elements(p_state->'teams') t where t->>'id' <> v_tid);
+      p_state := public._kems_tbump(p_state, v_tid, 'errors', 1);
+      p_server := public._kems_bump(p_server, v_me, 'false_counters', 1);
+    end if;
+    v_call := jsonb_build_object('type', 'counter', 'by', v_me, 'team', v_tid, 'target', v_target, 'ok', v_ok, 'double', false, 'deltas', v_deltas);
+    return public._kems_end_round(p_state, p_server, v_call);
+
+  -- ---------------------------------------------------------------- tick (idempotent)
+  elsif v_type = 'tick' then
+    if v_phase = 'signs' and now() >= (p_state->>'deadline')::timestamptz then
+      return public._kems_deal(p_state, p_server, 1);
+    elsif v_phase = 'playing' then
+      if now() >= (p_state->>'round_deadline')::timestamptz then
+        -- manche blanche : on redistribue sans point
+        return public._kems_end_round(p_state, p_server, jsonb_build_object(
+          'type', 'timeout', 'by', null, 'team', null, 'target', null, 'ok', false, 'double', false, 'deltas', '{}'::jsonb));
+      elsif now() >= (p_state->'sweep'->>'deadline')::timestamptz then
+        return public._kems_sweep(p_state, p_server);
+      end if;
+    elsif v_phase = 'reveal' and now() >= (p_state->>'deadline')::timestamptz then
+      return public._kems_deal(p_state, p_server, (p_state->>'round')::integer + 1);
+    end if;
+    return v_unchanged;
+
+  -- ---------------------------------------------------------------- next (hôte : passer la révélation)
+  elsif v_type = 'next' then
+    if not p_is_host then raise exception 'not_host'; end if;
+    if v_phase <> 'reveal' then return v_unchanged; end if;
+    return public._kems_deal(p_state, p_server, (p_state->>'round')::integer + 1);
+
+  else
+    raise exception 'unknown_action';
+  end if;
+end $$;
+
+revoke all on function public._kems_shuffle(jsonb) from public, anon, authenticated;
+revoke all on function public._kems_square(jsonb) from public, anon, authenticated;
+revoke all on function public._kems_bump(jsonb, text, text, integer) from public, anon, authenticated;
+revoke all on function public._kems_tbump(jsonb, text, text, integer) from public, anon, authenticated;
+revoke all on function public._kems_secret(jsonb, jsonb, text) from public, anon, authenticated;
+revoke all on function public._kems_playing_deadline(jsonb) from public, anon, authenticated;
+revoke all on function public._kems_deal(jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public._kems_sweep(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._kems_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._kems_end_round(jsonb, jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public.game_kems_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
+revoke all on function public.game_kems_start(uuid[], jsonb) from public, anon, authenticated;
+
+
 -- ===== games\le-plus-proche.sql =====
 -- =============================================================================
 -- JEU « le-plus-proche » : estimations chiffrées multi-écrans
@@ -4298,336 +4774,3 @@ revoke all on function public.game_quatre_a_la_suite_board_move(jsonb, jsonb, te
 revoke all on function public.game_quatre_a_la_suite_board_auto(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_quatre_a_la_suite_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
-
-
--- ===== games\qui-suis-je.sql =====
--- =============================================================================
--- JEU « qui-suis-je » (Qui suis-je ? — téléphone sur le front) — idempotent.
--- Contrat complet : src/games/qui-suis-je/types.ts (en-tête).
---
--- Options (p_options de start_match), préparées par le front de l'hôte :
---   {"rounds": 1|2, "turn_seconds": 45|60|90, "difficulty": "facile|mixte|difficile",
---    "themes": ["celebrites", ...],
---    "cards": [{"id":"qs0001","name":"Astérix","theme":"dessins-animes","difficulty":1,
---               "slug":"dede"?, "sub":"Delphine"?}, ...]}
---   `cards` = file unique consommée dans l'ordre par tous les tours (les cartes
---   non montrées d'un tour servent au suivant ; on reboucle si elle est épuisée).
--- Les cartes ne sont pas secrètes (tout le monde sauf le devineur doit les voir),
--- mais seule la carte courante est publiée dans le state ; la file vit dans `server`.
--- =============================================================================
-
--- Horodatage ISO-8601 UTC millisecondes (parsable partout, Safari compris).
-create or replace function public._qsj_iso(p timestamptz)
-returns text language sql immutable
-set search_path = public, extensions
-as $$ select to_char(p at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') $$;
-
--- Tour p_turn : le devineur se prépare (pose le téléphone sur son front).
--- Pas d'échéance : le devineur envoie `ready` (l'hôte peut passer le tour).
-create or replace function public._qsj_start_turn(p_state jsonb, p_server jsonb, p_turn integer)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_n integer := jsonb_array_length(p_state->'order');
-begin
-  p_state := p_state || jsonb_build_object(
-    'phase', 'placing',
-    'turn', p_turn,
-    'round', ((p_turn - 1) / v_n) + 1,
-    'guesser', p_state->'order'->((p_turn - 1) % v_n),
-    'card', null,
-    'card_index', 0,
-    'starts_at', null,
-    'deadline', null,
-    'turn_found', 0,
-    'turn_passed', 0,
-    'turn_log', '[]'::jsonb);
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Carte suivante de la file (rebouclage en fin de file).
-create or replace function public._qsj_next_card(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_len integer := jsonb_array_length(p_server->'cards');
-  v_pos integer := coalesce((p_server->>'pos')::integer, 0);
-begin
-  if v_pos >= v_len then v_pos := 0; end if;
-  p_state := p_state || jsonb_build_object('card', p_server->'cards'->v_pos);
-  p_server := p_server || jsonb_build_object('pos', v_pos + 1);
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Fin du tour : récap 4 s.
-create or replace function public._qsj_end_turn(p_state jsonb, p_server jsonb, p_skipped boolean)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_summary jsonb;
-begin
-  v_summary := jsonb_build_object(
-    'turn', p_state->'turn',
-    'guesser', p_state->'guesser',
-    'found', coalesce((p_state->>'turn_found')::integer, 0),
-    'passed', coalesce((p_state->>'turn_passed')::integer, 0),
-    'skipped', p_skipped,
-    -- log compact : [{n: nom, r: 'found'|'pass', s?: slug}]
-    'log', coalesce((select jsonb_agg(
-                       jsonb_strip_nulls(jsonb_build_object('n', e->'card'->>'name', 'r', e->>'r', 's', e->'card'->>'slug',
-                                          'd', e->'card'->>'difficulty'))
-                       order by o)
-                       from jsonb_array_elements(coalesce(p_state->'turn_log', '[]'::jsonb)) with ordinality as x(e, o)),
-                    '[]'::jsonb));
-  p_state := p_state || jsonb_build_object(
-    'phase', 'recap',
-    'card', null,
-    'starts_at', null,
-    'deadline', public._qsj_iso(now() + make_interval(secs => (p_state->>'recap_seconds')::integer)),
-    'last_turn', v_summary,
-    'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(v_summary));
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Stats de fin de partie pour les trophées (features/trophees.sql) : tours du joueur dans history[].
-create or replace function public._qsj_tstats(p_state jsonb, p_pl text)
-returns jsonb language sql immutable
-set search_path = public, extensions
-as $$
-  with t as (
-    select e.o, (e.v->>'found')::integer as found, (e.v->>'passed')::integer as passed, e.v->'log' as log
-      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
-     where e.v->>'guesser' = p_pl and not coalesce((e.v->>'skipped')::boolean, false)
-  ), l as (
-    select t.o as turn_o, x.o as i, x.e->>'r' as r, x.e->>'s' as s, x.e->>'d' as d
-      from t, jsonb_array_elements(coalesce(t.log, '[]'::jsonb)) with ordinality as x(e, o)
-  ), runs as (
-    select turn_o, r, i - row_number() over (partition by turn_o, r order by i) as grp from l
-  )
-  select jsonb_build_object(
-    'empty_turns', count(*) filter (where found = 0),
-    'max_passed', coalesce(max(passed), 0),
-    'clean_turns', count(*) filter (where passed = 0 and found >= 3),
-    'best_turn', coalesce(max(found), 0),
-    'steady', case when count(*) >= 2 and min(found) >= 5 then 1 else 0 end,
-    'crew_found', (select count(*) from l where r = 'found' and s is not null),
-    'hard_found', (select count(*) from l where r = 'found' and d = '3'),
-    'best_run', coalesce((select max(c) from (select count(*) as c from runs where r = 'found' group by turn_o, grp) z), 0))
-  from t
-$$;
-
--- Fin de partie : classement par cartes trouvées.
-create or replace function public._qsj_finish(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_max     integer;
-  v_results jsonb;
-  v_winners jsonb;
-begin
-  select coalesce(max(value::integer), 0) into v_max from jsonb_each_text(p_state->'scores');
-  select jsonb_agg(jsonb_build_object(
-           'profile_id', t.key,
-           'points', t.value::integer,
-           'won', v_max > 0 and t.value::integer = v_max,
-           'placement', t.r,
-           'stats', jsonb_build_object('found', t.value::integer) || public._qsj_tstats(p_state, t.key))
-         order by t.r, t.key)
-    into v_results
-    from (select key, value, rank() over (order by value::integer desc) as r
-            from jsonb_each_text(p_state->'scores')) t;
-  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
-    from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
-  p_state := p_state || jsonb_build_object(
-    'phase', 'finished', 'deadline', null, 'starts_at', null, 'card', null,
-    'winners', v_winners, 'results', v_results);
-  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
-end $$;
-
--- -----------------------------------------------------------------------------
--- Démarrage
--- -----------------------------------------------------------------------------
-create or replace function public.game_qui_suis_je_start(p_players uuid[], p_options jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_n      integer := cardinality(p_players);
-  v_rounds integer;
-  v_secs   integer;
-  v_diff   text;
-  v_cards  jsonb := p_options->'cards';
-  v_clean  jsonb;
-  v_themes jsonb;
-  v_order  jsonb;
-  v_zero   jsonb;
-  v_state  jsonb;
-begin
-  if v_n < 2 then raise exception 'not_enough_players'; end if;
-  if v_n > 9 then raise exception 'too_many_players'; end if;
-  v_rounds := coalesce(nullif(p_options->>'rounds', '')::integer, 1);
-  if v_rounds not in (1, 2) then v_rounds := 1; end if;
-  v_secs := coalesce(nullif(p_options->>'turn_seconds', '')::integer, 60);
-  if v_secs not in (45, 60, 90) then v_secs := 60; end if;
-  v_diff := coalesce(p_options->>'difficulty', 'mixte');
-  if v_diff not in ('facile', 'mixte', 'difficile') then v_diff := 'mixte'; end if;
-
-  if v_cards is null or jsonb_typeof(v_cards) <> 'array' then raise exception 'missing_cards'; end if;
-  if jsonb_array_length(v_cards) < 5 then raise exception 'not_enough_cards'; end if;
-  if jsonb_array_length(v_cards) > 800 then raise exception 'invalid_cards'; end if;
-  if exists (
-    select 1 from jsonb_array_elements(v_cards) c
-     where jsonb_typeof(c) <> 'object'
-        or jsonb_typeof(c->'name') is distinct from 'string'
-        or char_length(btrim(c->>'name')) not between 1 and 60
-        or (c ? 'slug' and jsonb_typeof(c->'slug') <> 'null'
-            and (jsonb_typeof(c->'slug') <> 'string' or (c->>'slug') !~ '^[a-z0-9-]{2,24}$')))
-  then
-    raise exception 'invalid_cards';
-  end if;
-  select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
-           'id', left(coalesce(nullif(btrim(c->>'id'), ''), 'c' || o), 40),
-           'name', btrim(regexp_replace(c->>'name', '\s+', ' ', 'g')),
-           'theme', left(coalesce(nullif(btrim(c->>'theme'), ''), 'divers'), 30),
-           'difficulty', least(greatest(coalesce(
-                           case when jsonb_typeof(c->'difficulty') = 'number' then (c->>'difficulty')::numeric::integer end, 2), 1), 3),
-           'slug', case when jsonb_typeof(c->'slug') = 'string' then c->>'slug' end,
-           'sub', case when jsonb_typeof(c->'sub') = 'string' and btrim(c->>'sub') <> '' then left(btrim(c->>'sub'), 40) end))
-           order by o)
-    into v_clean
-    from jsonb_array_elements(v_cards) with ordinality as t(c, o);
-
-  select coalesce(jsonb_agg(left(t, 30)), '[]'::jsonb) into v_themes
-    from (select t from jsonb_array_elements_text(
-            case when jsonb_typeof(p_options->'themes') = 'array' then p_options->'themes' else '[]'::jsonb end) t
-           where btrim(t) <> '' limit 12) s;
-
-  select jsonb_agg(p order by random()) into v_order from unnest(p_players) p;
-  select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
-
-  v_state := jsonb_build_object(
-    'game', 'qui-suis-je',
-    'phase', 'placing',
-    'players', to_jsonb(p_players),
-    'order', v_order,
-    'round', 1,
-    'total_rounds', v_rounds,
-    'turn', 1,
-    'total_turns', v_rounds * v_n,
-    'difficulty', v_diff,
-    'themes', v_themes,
-    'turn_seconds', v_secs,
-    'countdown_seconds', 4,
-    'recap_seconds', 4,
-    'scores', v_zero,
-    'last_turn', null,
-    'history', '[]'::jsonb,
-    'winners', null,
-    'results', null);
-
-  return public._qsj_start_turn(v_state, jsonb_build_object('cards', v_clean, 'pos', 0), 1);
-end $$;
-
--- -----------------------------------------------------------------------------
--- Actions
--- -----------------------------------------------------------------------------
-create or replace function public.game_qui_suis_je_action(
-  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_type  text := p_action->>'type';
-  v_phase text := p_state->>'phase';
-  v_me    text := p_actor::text;
-  v_turn  integer := (p_state->>'turn')::integer;
-  v_idx   integer;
-  v_start timestamptz;
-  v_r     text;
-begin
-  -- ---------------------------------------------------------------------- ready
-  if v_type = 'ready' then
-    if v_phase <> 'placing' then raise exception 'wrong_phase'; end if;
-    if v_me <> p_state->>'guesser' then raise exception 'not_your_turn'; end if;
-    v_start := now() + make_interval(secs => (p_state->>'countdown_seconds')::integer);
-    p_state := p_state || jsonb_build_object(
-      'phase', 'playing',
-      'starts_at', public._qsj_iso(v_start),
-      'deadline', public._qsj_iso(v_start + make_interval(secs => (p_state->>'turn_seconds')::integer)));
-    return public._qsj_next_card(p_state, p_server);
-
-  -- -------------------------------------------------------------- found / pass
-  elsif v_type in ('found', 'pass') then
-    if v_phase <> 'playing' then raise exception 'wrong_phase'; end if;
-    if v_me <> p_state->>'guesser' then raise exception 'not_your_turn'; end if;
-    -- Pendant le 3-2-1 : trop tôt. Après l'échéance : 1 s de grâce (latence réseau)
-    -- tant que personne n'a envoyé le tick de fin.
-    if now() < (p_state->>'starts_at')::timestamptz
-       or now() >= (p_state->>'deadline')::timestamptz + interval '1 second' then
-      raise exception 'wrong_phase';
-    end if;
-    begin
-      v_idx := (p_action->>'index')::integer;
-    exception when others then
-      raise exception 'invalid_card';
-    end;
-    if v_idx is null then raise exception 'invalid_card'; end if;
-    if v_idx <> (p_state->>'card_index')::integer then raise exception 'wrong_card'; end if;
-    v_r := v_type;
-    p_state := p_state || jsonb_build_object(
-      'card_index', v_idx + 1,
-      'turn_log', coalesce(p_state->'turn_log', '[]'::jsonb)
-                  || jsonb_build_array(jsonb_build_object('i', v_idx, 'r', v_r, 'card', p_state->'card')),
-      'turn_found', coalesce((p_state->>'turn_found')::integer, 0) + case when v_r = 'found' then 1 else 0 end,
-      'turn_passed', coalesce((p_state->>'turn_passed')::integer, 0) + case when v_r = 'pass' then 1 else 0 end);
-    if v_r = 'found' then
-      p_state := p_state || jsonb_build_object('scores', (p_state->'scores')
-                   || jsonb_build_object(v_me, coalesce((p_state->'scores'->>v_me)::integer, 0) + 1));
-    end if;
-    return public._qsj_next_card(p_state, p_server);
-
-  -- ----------------------------------------------------------------------- tick
-  elsif v_type = 'tick' then
-    if v_phase = 'playing' then
-      if now() < (p_state->>'deadline')::timestamptz then
-        return jsonb_build_object('state', p_state, 'server', p_server);
-      end if;
-      return public._qsj_end_turn(p_state, p_server, false);
-    elsif v_phase = 'recap' then
-      if now() < (p_state->>'deadline')::timestamptz then
-        return jsonb_build_object('state', p_state, 'server', p_server);
-      end if;
-      if v_turn >= (p_state->>'total_turns')::integer then
-        return public._qsj_finish(p_state, p_server);
-      end if;
-      return public._qsj_start_turn(p_state, p_server, v_turn + 1);
-    end if;
-    -- placing (pas d'échéance) ou autre : ignoré sans erreur.
-    return jsonb_build_object('state', p_state, 'server', p_server);
-
-  -- ------------------------------------------------------------------ skip_turn
-  elsif v_type = 'skip_turn' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase not in ('placing', 'playing') then raise exception 'wrong_phase'; end if;
-    return public._qsj_end_turn(p_state, p_server, true);
-
-  else
-    raise exception 'unknown_action';
-  end if;
-end $$;
-
--- -----------------------------------------------------------------------------
--- Droits : fonctions internes, appelées uniquement via start_match / game_action.
--- -----------------------------------------------------------------------------
-revoke all on function public._qsj_iso(timestamptz) from public, anon, authenticated;
-revoke all on function public._qsj_start_turn(jsonb, jsonb, integer) from public, anon, authenticated;
-revoke all on function public._qsj_next_card(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._qsj_end_turn(jsonb, jsonb, boolean) from public, anon, authenticated;
-revoke all on function public._qsj_tstats(jsonb, text) from public, anon, authenticated;
-revoke all on function public._qsj_finish(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public.game_qui_suis_je_start(uuid[], jsonb) from public, anon, authenticated;
-revoke all on function public.game_qui_suis_je_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
