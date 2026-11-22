@@ -12,6 +12,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 ## Commandes
 - `npm run dev` · `npm run build` (tsc + vite) · `npm run lint`
 - `npm run sql` → régénère `supabase/install.sql` (schema + features + games + seed, pour les tests PGlite) **et** `supabase/install-parts/1.sql, 2.sql…` (même contenu découpé : install.sql dépasse la limite ~1 Mo du SQL Editor). L'utilisateur colle **les morceaux, dans l'ordre**, dans le SQL Editor Supabase → le rappeler après toute modif SQL.
+- Quiz : `node tools/quiz-check/check.mjs` (doublons, distracteurs acceptés en saisie → 'QCM'). Nouvelles questions **toujours en fin de banque** (fichiers `<theme>-2.ts`…) : les ids `c0001`/`pp0001` sont positionnels (historique, QCM_ONLY, défi du jour).
 - Chibis : `cd tools/slice-chibis && node slice.mjs [--tenues | <slug>-<tenue>]` (package.json séparé).
 
 ## Arborescence clé

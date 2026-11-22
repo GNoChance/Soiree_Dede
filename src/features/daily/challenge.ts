@@ -29,10 +29,14 @@ export type DailyRound = QcmRound | EstimateRound
  * Attention : changer la composition/les banques change le défi (à éviter en cours de journée).
  */
 export async function buildChallenge(day: string): Promise<DailyRound[]> {
-  const [{ QUESTIONS }, { CLOSE_QUESTIONS }] = await Promise.all([
+  const [banks, closeBanks] = await Promise.all([
     import('@/games/cerveau-en-fete/questions'),
     import('@/games/le-plus-proche/questions'),
   ])
+  // Lot 2 de questions ajouté le 2026-11-22 : les jours d'avant gardent l'ancienne banque (défi inchangé).
+  const old = day <= '2026-11-22'
+  const QUESTIONS = old ? banks.QUESTIONS.slice(0, 718) : banks.QUESTIONS
+  const CLOSE_QUESTIONS = old ? closeBanks.CLOSE_QUESTIONS.slice(0, 310) : closeBanks.CLOSE_QUESTIONS
   const rand = rng(hash(`defi-${day}`))
   const shuffle = <T,>(arr: T[]): T[] => {
     const a = [...arr]
