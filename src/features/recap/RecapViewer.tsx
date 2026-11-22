@@ -15,7 +15,8 @@ import { fx } from '@/lib/feedback'
 import { toast } from '@/store/toast'
 import { useSession } from '@/store/session'
 import { fetchRecap, type SoireeRecap } from './api'
-import { buildCards, type AwardView, type RecapCard } from './cards'
+import { buildCards, profilesOf, type AwardView, type RecapCard } from './cards'
+import { ReveillonRecapCard } from '@/features/reveillon/ReveillonRecapCard'
 import { shareRecap } from './share'
 import { shareSouvenir } from './souvenir'
 
@@ -208,7 +209,7 @@ export function SoireeRecap({ soireeId, recap, onDone, doneLabel = 'Terminer' }:
   const kind = cards[idx]?.kind
   const awardKey = (cards[idx] as { view?: AwardView } | undefined)?.view?.key
   useEffect(() => {
-    if (kind === 'final' || awardKey === 'star') victoryConfetti(1600)
+    if (kind === 'final' || kind === 'reveillon' || awardKey === 'star') victoryConfetti(1600)
   }, [kind, awardKey])
 
   if (!data) return null
@@ -247,6 +248,7 @@ export function SoireeRecap({ soireeId, recap, onDone, doneLabel = 'Terminer' }:
   const card = cards[idx]
   let body: React.ReactNode
   if (card.kind === 'numbers') body = <NumbersCard r={data} />
+  else if (card.kind === 'reveillon' && data.reveillon) body = <ReveillonRecapCard sc={data.reveillon} profiles={profilesOf(data)} className={BASE} />
   else if (card.kind === 'topgame') body = <TopGameCard r={data} />
   else if (card.kind === 'award') body = <AwardCard v={card.view} />
   else if (card.kind === 'standings') body = <StandingsCard r={data} meId={meId} onShare={share} busy={busy} />

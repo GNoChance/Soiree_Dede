@@ -1,7 +1,8 @@
 import { getGame } from '@/games/registry'
 import { fmtDuration } from '@/features/stats/api'
 import type { SoireeRecap } from './api'
-import { buildAwards } from './cards'
+import { buildAwards, profilesOf } from './cards'
+import { reveillonSummary } from '@/features/reveillon/ReveillonRecapCard'
 import { FONT, INK, avatarDisc, canvasToBlob, dotsBackground, ensureFonts, fit, loadChibi, makeCanvas, shareImage, sticker } from './imageKit'
 
 /** « Photo souvenir » de fin de soirée : image carrée 4:5 (1080x1350), podium en chibis. */
@@ -18,7 +19,9 @@ export async function renderSouvenirImage(r: SoireeRecap): Promise<Blob> {
   sticker(ctx, 60, 50, W - 130, 190, 48, '#ffb703')
   ctx.fillStyle = INK
   ctx.font = `800 84px ${FONT}`
-  ctx.fillText('👑 Star de la soirée', W / 2 - 5, 150)
+  // soirée scénarisée : titre du thème + ligne « champion·ne » en tête des awards
+  const rv = r.reveillon ? reveillonSummary(r.reveillon, profilesOf(r)) : null
+  ctx.fillText(fit(ctx, rv ? `${rv.theme.emoji} ${rv.theme.name}` : '👑 Star de la soirée', W - 170), W / 2 - 5, 150)
   const date = r.ended_at ? new Date(r.ended_at).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : ''
   ctx.font = `700 42px ${FONT}`
   ctx.fillText(date, W / 2 - 5, 210)
@@ -60,7 +63,9 @@ export async function renderSouvenirImage(r: SoireeRecap): Promise<Blob> {
   }
 
   // un ou deux awards
-  const awards = buildAwards(r).filter((a) => a.key !== 'star').slice(0, 2)
+  const awards = buildAwards(r).filter((a) => a.key !== 'star')
+  if (rv && rv.champs.length) awards.unshift({ key: 'reveillon', emoji: '🏆', title: `Champion·ne · ${rv.theme.name}`, big: `${rv.champPoints} pts · 🎁 ${rv.defis} défi${rv.defis > 1 ? 's' : ''}`, line: '', bg: 'bg-sun', who: rv.champs })
+  awards.splice(2)
   let y = 1085
   for (const a of awards) {
     sticker(ctx, 60, y, W - 130, 96, 28, AWARD_FILLS[a.bg] ?? '#ffb703', 8)

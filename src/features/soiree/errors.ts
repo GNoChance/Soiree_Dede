@@ -22,6 +22,12 @@ const MESSAGES: Record<string, string> = {
   cannot_kick_self: 'Tu ne peux pas t’exclure toi-même.',
   invalid_wheel: 'Il faut au moins 2 jeux pour faire tourner la roue.',
   match_in_progress: 'Une partie est déjà en cours !',
+  // Mode Réveillon / soirée scénarisée (supabase/features/reveillon.sql)
+  reveillon_already_on: 'Une soirée scénarisée est déjà en cours !',
+  reveillon_off: 'La soirée scénarisée est terminée.',
+  reveillon_wrong_phase: 'Pas maintenant : la soirée scénarisée est passée à l’étape suivante.',
+  reveillon_invalid: 'Choix de thème ou de manches invalide.',
+  reveillon_no_games: 'Aucun jeu possible avec ce nombre de joueurs.',
   pronos_closed: 'Les pronostics sont terminés.',
   invalid_pick: 'Ce joueur ne fait pas partie de la manche.',
   invalid_pronos: 'Impossible d’ouvrir les pronostics avec ces joueurs.',

@@ -10,6 +10,7 @@ import { isSupabaseConfigured, SUPABASE_MISSING_MESSAGE } from '@/lib/supabase'
 import { LiveSoireeBanner } from '@/features/soiree/SoireeLive'
 import { SoireeChat } from '@/features/chat/SoireeChat'
 import { WheelWatcher } from '@/features/soiree/WheelWatcher'
+import { ReveillonWatcher } from '@/features/reveillon/ReveillonWatcher'
 import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
@@ -41,6 +42,7 @@ export function Root() {
       <LiveSoireeBanner />
       <SoireeChat />
       <WheelWatcher />
+      <ReveillonWatcher />
       <ToastHost />
       <UpdatePrompt />
     </MotionConfig>

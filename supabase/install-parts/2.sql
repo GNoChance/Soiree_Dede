@@ -1,5 +1,560 @@
 -- MORCEAU 2 / 5 — -- GÉNÉRÉ par scripts/build-sql.mjs — ne pas éditer. Idempotent. À exécuter dans l'ordre (1, puis 2…) dans Supabase > SQL Editor > Run.
 
+-- ===== features\reveillon.sql =====
+-- =============================================================================
+-- MODE RÉVEILLON / SOIRÉE SCÉNARISÉE — idempotent, exécuté APRÈS schema.sql (features/*).
+-- Front : src/features/reveillon/ (thèmes + textes des défis dans themes.ts).
+--
+-- L'hôte lance une soirée scénarisée (thème noel | nouvel-an | surprise, 4/6/8 manches) :
+-- l'appli tire un jeu au sort (parmi les ids compatibles envoyés par le front, jamais deux
+-- fois le même tant que c'est possible), l'hôte le lance, et à la fin de chaque partie un
+-- DÉFI SURPRISE (petit gage IRL) s'affiche chez tout le monde ; l'hôte coche qui l'a relevé
+-- (+1 point) puis passe à la manche suivante. Dernière manche : points doublés.
+--
+-- État : colonne jsonb soirees.scenario (tout le monde suit via le Realtime de soirees) :
+--   {v, theme, rounds, round, phase 'draw'|'playing'|'challenge'|'finished',
+--    game_id, pool[] (parts de la roue du tirage), draw (compteur de tirages), drawn_at,
+--    match_id, challenge {id, winner_id, loser_id, random_id} | null,
+--    challenge_ids[], deck[] (défis restants, mélangés),
+--    history [{round, game_id, match_id, points {profile_id: pts}, wins [], double, challenge, bravo []}],
+--    started_at, finished_at, closed (true = retour au salon normal ; gardé pour le récap)}
+-- Barème d'une manche = _soiree_points (stats.sql : 3/2/1…), x2 à la dernière manche ;
+-- +1 par défi relevé. Le classement est calculé côté front à partir de history.
+-- Fin de partie : trigger matches_reveillon_end (AFTER UPDATE OF status, erreurs avalées :
+-- ne bloque jamais la fin d'une partie). Partie annulée -> retour au tirage (même jeu).
+--
+-- RPC (hôte) : reveillon_start, reveillon_reroll, reveillon_launch, reveillon_next, reveillon_stop.
+-- Lecture : reveillon_recap(soiree) (récap de fin, mêmes accès que soiree_recap).
+-- Erreurs : not_host, soiree_ended, soiree_not_found, match_in_progress, not_enough_players,
+--   reveillon_already_on, reveillon_off, reveillon_wrong_phase, reveillon_invalid, reveillon_no_games.
+-- =============================================================================
+
+alter table public.soirees add column if not exists scenario jsonb;
+
+-- Ids propres (jeux / défis), sans doublon.
+create or replace function public._rv_ids(p text[])
+returns text[] language sql immutable
+as $$
+  select coalesce(array(select distinct x from unnest(coalesce(p, '{}'::text[])) x
+                         where x ~ '^[a-z0-9_-]{1,40}$' order by x), '{}'::text[])
+$$;
+
+create or replace function public._rv_shuffle(p text[])
+returns text[] language sql volatile
+as $$
+  select coalesce(array(select x from unnest(coalesce(p, '{}'::text[])) x order by random()), '{}'::text[])
+$$;
+
+-- Tire le jeu de la manche parmi p_ids (compatibles avec le nombre de joueurs, filtrés par le
+-- front) : d'abord les jeux pas encore joués ; p_reroll exclut aussi le jeu tiré actuel.
+-- Plus rien ? on autorise les déjà joués sauf le dernier, puis tout.
+create or replace function public._rv_draw(p_sc jsonb, p_ids text[], p_reroll boolean)
+returns jsonb language plpgsql volatile
+set search_path = public, extensions
+as $$
+declare
+  v_played text[] := array(select e->>'game_id' from jsonb_array_elements(coalesce(p_sc->'history', '[]'::jsonb)) e);
+  v_last   text := (p_sc->'history'->-1)->>'game_id';
+  v_cur    text := case when p_reroll then p_sc->>'game_id' end;
+  v_cand   text[];
+begin
+  if coalesce(cardinality(p_ids), 0) = 0 then raise exception 'reveillon_no_games'; end if;
+  v_cand := array(select x from unnest(p_ids) x where not (x = any(v_played)) and x is distinct from v_cur);
+  if cardinality(v_cand) = 0 then
+    v_cand := array(select x from unnest(p_ids) x where x is distinct from v_last and x is distinct from v_cur);
+  end if;
+  if cardinality(v_cand) = 0 then
+    v_cand := array(select x from unnest(p_ids) x where x is distinct from v_cur);
+  end if;
+  if cardinality(v_cand) = 0 then v_cand := p_ids; end if;
+  return p_sc || jsonb_build_object(
+    'phase', 'draw',
+    'game_id', v_cand[1 + floor(random() * cardinality(v_cand))::int],
+    'pool', to_jsonb(v_cand),
+    'draw', coalesce((p_sc->>'draw')::int, 0) + 1,
+    'drawn_at', now(),
+    'match_id', null,
+    'challenge', null);
+end $$;
+
+-- Verrouille la soirée et vérifie l'hôte. Erreurs : soiree_not_found, not_host, soiree_ended.
+create or replace function public._rv_lock(p_soiree_id uuid)
+returns public.soirees language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_s  public.soirees%rowtype;
+begin
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  return v_s;
+end $$;
+
+-- Scénario en cours (ni absent, ni refermé) : sinon reveillon_off.
+create or replace function public._rv_active(p_sc jsonb)
+returns jsonb language plpgsql immutable
+as $$
+begin
+  if p_sc is null or coalesce((p_sc->>'closed')::boolean, false) then raise exception 'reveillon_off'; end if;
+  return p_sc;
+end $$;
+
+-- Démarre la soirée scénarisée (manche 1 tirée au sort). p_game_ids : jeux compatibles avec le
+-- nombre de joueurs (1 à 40) ; p_challenge_ids : défis du thème (1 à 60, textes côté front).
+create or replace function public.reveillon_start(p_soiree_id uuid, p_theme text, p_rounds integer,
+                                                  p_game_ids text[], p_challenge_ids text[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s     public.soirees%rowtype := public._rv_lock(p_soiree_id);
+  v_games text[] := public._rv_ids(p_game_ids);
+  v_ch    text[] := public._rv_ids(p_challenge_ids);
+  v_sc    jsonb;
+begin
+  if v_s.scenario is not null and not coalesce((v_s.scenario->>'closed')::boolean, false)
+     and v_s.scenario->>'phase' <> 'finished' then
+    raise exception 'reveillon_already_on';
+  end if;
+  if exists (select 1 from public.matches m where m.soiree_id = p_soiree_id and m.status <> 'finished') then
+    raise exception 'match_in_progress';
+  end if;
+  if p_theme is null or p_theme not in ('noel', 'nouvel-an', 'surprise')
+     or p_rounds is null or p_rounds not in (4, 6, 8)
+     or cardinality(v_ch) not between 1 and 60 then
+    raise exception 'reveillon_invalid';
+  end if;
+  if cardinality(v_games) not between 1 and 40 then raise exception 'reveillon_no_games'; end if;
+  if (select count(*) from public.soiree_players where soiree_id = p_soiree_id) < 2 then
+    raise exception 'not_enough_players';
+  end if;
+  v_sc := public._rv_draw(jsonb_build_object(
+    'v', 1, 'theme', p_theme, 'rounds', p_rounds, 'round', 1, 'draw', 0,
+    'history', '[]'::jsonb, 'challenge_ids', to_jsonb(v_ch), 'deck', to_jsonb(public._rv_shuffle(v_ch)),
+    'started_at', now(), 'finished_at', null, 'closed', false), v_games, false);
+  update public.soirees set scenario = v_sc where id = p_soiree_id;
+  return v_sc;
+end $$;
+
+-- Nouveau tirage pour la manche en cours (phase draw seulement).
+create or replace function public.reveillon_reroll(p_soiree_id uuid, p_game_ids text[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s  public.soirees%rowtype := public._rv_lock(p_soiree_id);
+  v_sc jsonb := public._rv_active(v_s.scenario);
+begin
+  if v_sc->>'phase' <> 'draw' then raise exception 'reveillon_wrong_phase'; end if;
+  v_sc := public._rv_draw(v_sc, public._rv_ids(p_game_ids), true);
+  update public.soirees set scenario = v_sc where id = p_soiree_id;
+  return v_sc;
+end $$;
+
+-- Lance le jeu tiré (start_match : mêmes contrôles et mêmes options que le lancement normal).
+create or replace function public.reveillon_launch(p_soiree_id uuid, p_options jsonb)
+returns uuid language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s  public.soirees%rowtype := public._rv_lock(p_soiree_id);
+  v_sc jsonb := public._rv_active(v_s.scenario);
+  v_id uuid;
+begin
+  if v_sc->>'phase' <> 'draw' then raise exception 'reveillon_wrong_phase'; end if;
+  v_id := public.start_match(p_soiree_id, v_sc->>'game_id', coalesce(p_options, '{}'::jsonb));
+  update public.soirees
+     set scenario = scenario || jsonb_build_object('phase', 'playing', 'match_id', v_id)
+   where id = p_soiree_id;
+  return v_id;
+end $$;
+
+-- Fin d'une partie de la soirée : si c'est la manche en cours, points de la manche + défi surprise.
+create or replace function public._rv_on_match_finished()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_sc     jsonb;
+  v_n      integer;
+  v_double boolean;
+  v_pts    jsonb;
+  v_wins   jsonb;
+  v_winner uuid;
+  v_loser  uuid;
+  v_rand   uuid;
+  v_deck   jsonb;
+  v_ch     text;
+begin
+  begin
+    select scenario into v_sc from public.soirees where id = new.soiree_id for update;
+    if v_sc is null or coalesce((v_sc->>'closed')::boolean, false) or v_sc->>'phase' <> 'playing'
+       or v_sc->>'match_id' is distinct from new.id::text then
+      return new;
+    end if;
+    -- Partie annulée : retour au tirage, même jeu (l'hôte relance ou change de jeu).
+    if coalesce((new.state->>'aborted')::boolean, false) then
+      update public.soirees set scenario = v_sc || jsonb_build_object('phase', 'draw', 'match_id', null)
+       where id = new.soiree_id;
+      return new;
+    end if;
+
+    v_double := (v_sc->>'round')::int >= (v_sc->>'rounds')::int;
+    select count(*)::int into v_n from public.match_players where match_id = new.id;
+    select coalesce(jsonb_object_agg(mp.profile_id::text,
+                      public._soiree_points(mp.won, mp.placement, v_n) * case when v_double then 2 else 1 end), '{}'::jsonb),
+           coalesce(jsonb_agg(mp.profile_id) filter (where mp.won), '[]'::jsonb)
+      into v_pts, v_wins
+      from public.match_players mp where mp.match_id = new.id;
+    select mp.profile_id into v_winner from public.match_players mp
+     where mp.match_id = new.id and mp.won order by random() limit 1;
+    select mp.profile_id into v_loser from public.match_players mp
+     where mp.match_id = new.id and not mp.won order by mp.placement desc nulls last, random() limit 1;
+    select sp.profile_id into v_rand from public.soiree_players sp
+     where sp.soiree_id = new.soiree_id order by random() limit 1;
+
+    -- Pioche du défi (paquet mélangé ; vide -> on remélange tous les défis du thème).
+    v_deck := coalesce(v_sc->'deck', '[]'::jsonb);
+    if jsonb_array_length(v_deck) = 0 then
+      v_deck := to_jsonb(public._rv_shuffle(array(select jsonb_array_elements_text(coalesce(v_sc->'challenge_ids', '[]'::jsonb)))));
+    end if;
+    v_ch := v_deck->>0;
+    v_deck := v_deck - 0;
+
+    update public.soirees set scenario = v_sc || jsonb_build_object(
+        'phase', 'challenge',
+        'deck', v_deck,
+        'challenge', case when v_ch is null then null else jsonb_build_object(
+          'id', v_ch, 'winner_id', v_winner, 'loser_id', v_loser, 'random_id', v_rand) end,
+        'history', coalesce(v_sc->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+          'round', (v_sc->>'round')::int, 'game_id', new.game_id, 'match_id', new.id,
+          'points', v_pts, 'wins', v_wins, 'double', v_double, 'challenge', v_ch, 'bravo', '[]'::jsonb)))
+     where id = new.soiree_id;
+  exception when others then
+    null; -- ne jamais empêcher la fin d'une partie
+  end;
+  return new;
+end $$;
+
+drop trigger if exists matches_reveillon_end on public.matches;
+create trigger matches_reveillon_end after update of status on public.matches
+  for each row when (new.status = 'finished' and old.status is distinct from 'finished')
+  execute function public._rv_on_match_finished();
+
+-- Après le défi : p_bravo = joueurs qui l'ont relevé (+1 point chacun), puis manche suivante
+-- (nouveau tirage parmi p_game_ids) ou fin du scénario après la dernière manche.
+create or replace function public.reveillon_next(p_soiree_id uuid, p_bravo uuid[], p_game_ids text[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s     public.soirees%rowtype := public._rv_lock(p_soiree_id);
+  v_sc    jsonb := public._rv_active(v_s.scenario);
+  v_len   integer;
+  v_bravo jsonb;
+begin
+  if v_sc->>'phase' <> 'challenge' then raise exception 'reveillon_wrong_phase'; end if;
+  v_len := jsonb_array_length(coalesce(v_sc->'history', '[]'::jsonb));
+  if v_len > 0 then
+    select coalesce(jsonb_agg(distinct x), '[]'::jsonb) into v_bravo
+      from unnest(coalesce(p_bravo, '{}'::uuid[])) x
+     where exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = x);
+    v_sc := jsonb_set(v_sc, array['history', (v_len - 1)::text, 'bravo'], v_bravo);
+  end if;
+  if (v_sc->>'round')::int >= (v_sc->>'rounds')::int then
+    v_sc := v_sc || jsonb_build_object('phase', 'finished', 'challenge', null, 'match_id', null, 'finished_at', now());
+  else
+    v_sc := public._rv_draw(v_sc || jsonb_build_object('round', (v_sc->>'round')::int + 1),
+                            public._rv_ids(p_game_ids), false);
+  end if;
+  update public.soirees set scenario = v_sc where id = p_soiree_id;
+  return v_sc;
+end $$;
+
+-- Arrête le scénario (pas pendant une partie). Sans manche jouée : effacé. Sinon refermé
+-- (closed = true, retour au salon normal) mais gardé pour le récap de fin.
+create or replace function public.reveillon_stop(p_soiree_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_s  public.soirees%rowtype := public._rv_lock(p_soiree_id);
+  v_sc jsonb := public._rv_active(v_s.scenario);
+begin
+  if v_sc->>'phase' = 'playing' then raise exception 'match_in_progress'; end if;
+  if jsonb_array_length(coalesce(v_sc->'history', '[]'::jsonb)) = 0 then
+    update public.soirees set scenario = null where id = p_soiree_id;
+  else
+    update public.soirees
+       set scenario = v_sc || jsonb_build_object('closed', true, 'challenge', null,
+                                                 'finished_at', case when v_sc->>'finished_at' is null then to_jsonb(now())
+                                                                     else v_sc->'finished_at' end)
+     where id = p_soiree_id;
+  end if;
+end $$;
+
+-- Récap : le scénario d'une soirée (au moins une manche jouée), sans le paquet de défis ; null sinon.
+-- Accès : hôte, membre ou ancien joueur de la soirée. Erreurs : soiree_not_found, not_in_soiree.
+create or replace function public.reveillon_recap(p_soiree_id uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  s    public.soirees%rowtype;
+begin
+  select * into s from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if not (s.host_id = v_me
+          or exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_me)
+          or exists (select 1 from public.match_players x join public.matches m on m.id = x.match_id
+                      where m.soiree_id = s.id and x.profile_id = v_me)) then
+    raise exception 'not_in_soiree';
+  end if;
+  if s.scenario is null or jsonb_array_length(coalesce(s.scenario->'history', '[]'::jsonb)) = 0 then
+    return null;
+  end if;
+  return s.scenario - 'deck' - 'challenge_ids' - 'pool';
+end $$;
+
+revoke all on function public._rv_ids(text[]) from public, anon, authenticated;
+revoke all on function public._rv_shuffle(text[]) from public, anon, authenticated;
+revoke all on function public._rv_draw(jsonb, text[], boolean) from public, anon, authenticated;
+revoke all on function public._rv_lock(uuid) from public, anon, authenticated;
+revoke all on function public._rv_active(jsonb) from public, anon, authenticated;
+revoke all on function public._rv_on_match_finished() from public, anon, authenticated;
+revoke all on function public.reveillon_start(uuid, text, integer, text[], text[]) from public, anon;
+revoke all on function public.reveillon_reroll(uuid, text[]) from public, anon;
+revoke all on function public.reveillon_launch(uuid, jsonb) from public, anon;
+revoke all on function public.reveillon_next(uuid, uuid[], text[]) from public, anon;
+revoke all on function public.reveillon_stop(uuid) from public, anon;
+revoke all on function public.reveillon_recap(uuid) from public, anon;
+grant execute on function public.reveillon_start(uuid, text, integer, text[], text[]) to authenticated;
+grant execute on function public.reveillon_reroll(uuid, text[]) to authenticated;
+grant execute on function public.reveillon_launch(uuid, jsonb) to authenticated;
+grant execute on function public.reveillon_next(uuid, uuid[], text[]) to authenticated;
+grant execute on function public.reveillon_stop(uuid) to authenticated;
+grant execute on function public.reveillon_recap(uuid) to authenticated;
+
+
+-- ===== features\soiree-hote.sql =====
+-- =============================================================================
+-- OUTILS DE L'HÔTE — idempotent, exécuté APRÈS schema.sql (features/*).
+--  1. Exclusion d'un joueur (kick_soiree_player) + ré-invitation (invite_to_soiree).
+--     Table soiree_bans (schema.sql) : un exclu ne peut pas revenir par le code
+--     (join_soiree_by_code -> soiree_banned) tant que l'hôte ne l'a pas ré-invité.
+--  2. Roue des jeux (spin_game_wheel) : le tirage est fait CÔTÉ SERVEUR et écrit
+--     dans soiree_wheel_spins ; tous les téléphones le reçoivent en Realtime
+--     (INSERT) et font tourner la roue sur le même jeu.
+-- =============================================================================
+
+-- Exclure un joueur. Erreurs : not_host, soiree_ended, cannot_kick_self,
+-- match_in_progress (partie lobby/playing), soiree_not_found, player_not_in_soiree.
+create or replace function public.kick_soiree_player(p_soiree_id uuid, p_profile_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_s  public.soirees%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if p_profile_id = v_me then raise exception 'cannot_kick_self'; end if;
+  if exists (select 1 from public.matches m
+              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
+    raise exception 'match_in_progress';
+  end if;
+  if not exists (select 1 from public.soiree_players
+                  where soiree_id = p_soiree_id and profile_id = p_profile_id) then
+    raise exception 'player_not_in_soiree';
+  end if;
+  insert into public.soiree_bans(soiree_id, profile_id) values (p_soiree_id, p_profile_id)
+    on conflict do nothing;
+  delete from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id;
+end $$;
+
+-- Ré-inviter un joueur (lève l'exclusion et l'ajoute au salon).
+-- Erreurs : not_host, soiree_ended, unknown_profile, player_busy (déjà dans 5 soirées).
+create or replace function public.invite_to_soiree(p_soiree_id uuid, p_profile_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_s  public.soirees%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if not exists (select 1 from public.profiles where id = p_profile_id) then
+    raise exception 'unknown_profile';
+  end if;
+  delete from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id;
+  if exists (select 1 from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id) then
+    return;
+  end if;
+  if public._open_soirees_count(p_profile_id) >= public._soiree_max_open() then
+    raise exception 'player_busy' using detail = (select nickname from public.profiles where id = p_profile_id);
+  end if;
+  insert into public.soiree_players(soiree_id, profile_id) values (p_soiree_id, p_profile_id);
+end $$;
+
+revoke all on function public.kick_soiree_player(uuid, uuid) from public, anon;
+revoke all on function public.invite_to_soiree(uuid, uuid) from public, anon;
+grant execute on function public.kick_soiree_player(uuid, uuid) to authenticated;
+grant execute on function public.invite_to_soiree(uuid, uuid) to authenticated;
+
+-- ------------------------------------------------------------------ Roue des jeux
+create table if not exists public.soiree_wheel_spins (
+  id         bigint generated always as identity primary key,
+  soiree_id  uuid not null references public.soirees(id) on delete cascade,
+  host_id    uuid not null references public.profiles(id) on delete cascade,
+  game_ids   text[] not null,      -- les parts de la roue, dans l'ordre d'affichage
+  result     text not null,        -- le jeu tiré (∈ game_ids)
+  created_at timestamptz not null default now()
+);
+create index if not exists soiree_wheel_spins_soiree_idx on public.soiree_wheel_spins(soiree_id, id);
+
+alter table public.soiree_wheel_spins enable row level security;
+drop policy if exists soiree_wheel_spins_select on public.soiree_wheel_spins;
+create policy soiree_wheel_spins_select on public.soiree_wheel_spins for select to authenticated
+  using (public.is_soiree_member(soiree_id));
+revoke all on table public.soiree_wheel_spins from anon, authenticated;
+grant select on table public.soiree_wheel_spins to authenticated;
+
+-- Tire au sort un jeu parmi p_game_ids (2 à 40 ids ; le front filtre selon le nombre de
+-- joueurs). Hôte seulement, pas pendant une partie. Renvoie {id, game_ids, result}.
+-- Erreurs : not_host, soiree_ended, match_in_progress, invalid_wheel, soiree_not_found.
+create or replace function public.spin_game_wheel(p_soiree_id uuid, p_game_ids text[])
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me  uuid := public._require_profile();
+  v_s   public.soirees%rowtype;
+  v_ids text[];
+  v_res text;
+  v_id  bigint;
+begin
+  select * into v_s from public.soirees where id = p_soiree_id;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  if exists (select 1 from public.matches m
+              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
+    raise exception 'match_in_progress';
+  end if;
+  v_ids := array(select distinct x from unnest(coalesce(p_game_ids, '{}')) x where x ~ '^[a-z0-9_-]{1,40}$');
+  if coalesce(array_length(v_ids, 1), 0) < 2 or array_length(v_ids, 1) > 40 then
+    raise exception 'invalid_wheel';
+  end if;
+  v_res := v_ids[1 + floor(random() * array_length(v_ids, 1))::int];
+  insert into public.soiree_wheel_spins(soiree_id, host_id, game_ids, result)
+    values (p_soiree_id, v_me, v_ids, v_res) returning id into v_id;
+  delete from public.soiree_wheel_spins where soiree_id = p_soiree_id and id < v_id - 4;
+  return jsonb_build_object('id', v_id, 'game_ids', to_jsonb(v_ids), 'result', v_res);
+end $$;
+revoke all on function public.spin_game_wheel(uuid, text[]) from public, anon;
+grant execute on function public.spin_game_wheel(uuid, text[]) to authenticated;
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                  where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'soiree_wheel_spins') then
+    alter publication supabase_realtime add table public.soiree_wheel_spins;
+  end if;
+end $$;
+
+
+-- ===== features\spectateur.sql =====
+-- =============================================================================
+-- MODE SPECTATEUR — idempotent, exécuté APRÈS schema.sql (features/*).
+-- Un spectateur regarde l'état PUBLIC d'une partie en cours, sans jouer.
+--
+-- Qui peut lire une partie (matches) :
+--   * un membre de la soirée (comme avant) ;
+--   * un AMI ACCEPTÉ (friendships.status = 'accepted', dans les deux sens) d'un joueur de la partie
+--     (state->'players') ou de l'hôte de la soirée, pour une partie EN COURS ou terminée depuis moins de
+--     30 min (écran de résultats) — jamais l'historique ancien — et s'il n'a pas été EXCLU de la soirée
+--     (soiree_bans). Pas d'interrupteur de confidentialité : tout ami accepté peut regarder (décision de conception).
+-- Rien d'autre n'est ouvert : soirees, soiree_players, soiree_messages, match_secrets (réservés au
+-- joueur concerné) et match_server_state (aucun accès client) restent comme avant.
+--
+-- RPC (security definer, grant authenticated) :
+--   can_watch_match(p_match_id) -> boolean
+--   friends_playing() -> [{profile_id, match_id, soiree_id, game_id}]
+--       un élément par ami accepté qui figure dans state->'players' d'une partie 'playing'
+--       (la plus récente s'il est dans plusieurs).
+-- Le serveur refuse déjà toute action d'un non-joueur non-hôte (game_action : not_in_match).
+-- =============================================================================
+
+create or replace function public.can_watch_match(p_match_id uuid)
+returns boolean language sql stable security definer
+set search_path = public, extensions
+as $$
+  select exists (
+    select 1 from public.matches m
+     where m.id = p_match_id
+       and (
+         public.is_soiree_member(m.soiree_id)
+         or (
+           (m.status = 'playing' or m.finished_at > now() - interval '30 minutes')
+           and not exists (select 1 from public.soiree_bans b
+                            where b.soiree_id = m.soiree_id and b.profile_id = public.current_profile_id())
+           and exists (
+           select 1 from public.friendships f
+            where f.status = 'accepted'
+              and (f.requester_id = public.current_profile_id() or f.addressee_id = public.current_profile_id())
+              and (case when f.requester_id = public.current_profile_id() then f.addressee_id else f.requester_id end)::text
+                  in (select jsonb_array_elements_text(case when jsonb_typeof(m.state->'players') = 'array'
+                                                            then m.state->'players' else '[]'::jsonb end)
+                      union select s.host_id::text from public.soirees s where s.id = m.soiree_id))))
+  )
+$$;
+
+-- La lecture de matches s'élargit aux amis (lecture seule, jamais de secrets).
+drop policy if exists matches_select on public.matches;
+create policy matches_select on public.matches for select to authenticated
+  using (public.is_soiree_member(soiree_id) or public.can_watch_match(id));
+
+-- Mes amis acceptés qui sont dans une partie en cours (une ligne par ami, la plus récente).
+create or replace function public.friends_playing()
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('profile_id', x.friend, 'match_id', x.mid, 'soiree_id', x.sid, 'game_id', x.gid)
+                     order by x.created_at desc)
+      from (
+        select distinct on (fr.friend) fr.friend, m.id as mid, m.soiree_id as sid, m.game_id as gid, m.created_at
+          from (select case when f.requester_id = v_me then f.addressee_id else f.requester_id end as friend
+                  from public.friendships f
+                 where f.status = 'accepted' and (f.requester_id = v_me or f.addressee_id = v_me)) fr
+          join public.matches m
+            on m.status = 'playing'
+           and jsonb_typeof(m.state->'players') = 'array'
+           and (m.state->'players') ? fr.friend::text
+         order by fr.friend, m.created_at desc) x), '[]'::jsonb);
+end $$;
+
+revoke all on function public.can_watch_match(uuid) from public, anon;
+revoke all on function public.friends_playing() from public, anon;
+grant execute on function public.can_watch_match(uuid) to authenticated;
+grant execute on function public.friends_playing() to authenticated;
+
+
 -- ===== features\stats.sql =====
 -- =============================================================================
 -- STATS (lot B) — idempotent, exécuté APRÈS schema.sql (features/*).
@@ -3396,445 +3951,3 @@ revoke all on function public._bw_finish(jsonb, jsonb, boolean) from public, ano
 revoke all on function public._bw_tstats(jsonb, integer, jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public.game_bowling_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
-
-
--- ===== games\cerveau-en-fete.sql =====
--- =============================================================================
--- JEU « cerveau-en-fete » : quiz de culture générale multi-écrans
--- =============================================================================
--- Idempotent (create or replace). Contrat : src/games/cerveau-en-fete/types.ts.
---
--- p_options : {"duration": 20, "questions": [{id, theme, difficulty, prompt, image?,
---              answer, aliases?, distractors?, mode: "typed"|"mcq"}]}
--- Le serveur garde les réponses dans match_server_state ; le state public ne contient
--- jamais la réponse avant la phase "reveal".
---
--- Phases : question -> reveal -> question ... -> finished.
--- Échéances : state.deadline (fin du temps de réponse, puis fin de la révélation
--- automatique, CEF_REVEAL_SECONDS = 8 s). N'importe quel joueur envoie {"type":"tick"}.
--- Toute action portant un "round" différent de la manche courante est ignorée
--- sans erreur (state inchangé) : clics en retard, ticks concurrents.
-
--- Normalisation tolérante : casse, accents, ligatures, ponctuation/espaces,
--- article en tête (le, la, les, l', un, une, des).
-create or replace function public._cef_norm(p text)
-returns text language sql immutable
-set search_path = public, extensions
-as $$
-  select replace(
-    regexp_replace(
-      btrim(regexp_replace(
-        lower(translate(
-          replace(replace(replace(replace(left(coalesce(p, ''), 120), 'œ', 'oe'), 'Œ', 'OE'), 'æ', 'ae'), 'Æ', 'AE'),
-          'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ',
-          'aaaaaaceeeeiiiinooooouuuuyyAAAAAACEEEEIIIINOOOOOUUUUYY')),
-        '[^a-z0-9]+', ' ', 'g')),
-      '^(les|le|la|l|une|un|des) ', ''),
-    ' ', '')
-$$;
-
--- Distance de Levenshtein (implémentation maison : pas besoin de fuzzystrmatch).
-create or replace function public._cef_lev(a text, b text)
-returns integer language plpgsql immutable
-set search_path = public, extensions
-as $$
-declare
-  la   integer := char_length(a);
-  lb   integer := char_length(b);
-  prev integer[];
-  cur  integer[];
-  i    integer;
-  j    integer;
-begin
-  if la = 0 then return lb; end if;
-  if lb = 0 then return la; end if;
-  prev := array(select generate_series(0, lb));
-  for i in 1..la loop
-    cur := array[i];
-    for j in 1..lb loop
-      cur := cur || least(prev[j + 1] + 1, cur[j] + 1,
-                          prev[j] + case when substr(a, i, 1) = substr(b, j, 1) then 0 else 1 end);
-    end loop;
-    prev := cur;
-  end loop;
-  return prev[lb + 1];
-end $$;
-
--- La proposition correspond-elle à l'une des formes acceptées (déjà normalisées) ?
--- Fautes de frappe : distance <= 1 jusqu'à 6 caractères, <= 2 au-delà ;
--- exact obligatoire si la réponse contient un chiffre (dates !) ou fait <= 3 caractères.
-create or replace function public._cef_match(p_guess text, p_accept jsonb)
-returns boolean language plpgsql immutable
-set search_path = public, extensions
-as $$
-declare
-  v_g   text := public._cef_norm(p_guess);
-  v_a   text;
-  v_tol integer;
-begin
-  if v_g = '' then return false; end if;
-  for v_a in select value from jsonb_array_elements_text(coalesce(p_accept, '[]'::jsonb)) loop
-    if v_g = v_a then return true; end if;
-    if v_a ~ '[0-9]' or char_length(v_a) <= 3 then continue; end if;
-    v_tol := case when char_length(v_a) <= 6 then 1 else 2 end;
-    if abs(char_length(v_g) - char_length(v_a)) <= v_tol and public._cef_lev(v_g, v_a) <= v_tol then
-      return true;
-    end if;
-  end loop;
-  return false;
-end $$;
-
--- Ouvre la question d'index p_idx (0-based).
-create or replace function public._cef_open(p_state jsonb, p_server jsonb, p_idx integer)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_q   jsonb := p_server->'questions'->p_idx;
-  v_now timestamptz := now();
-begin
-  p_state := p_state || jsonb_build_object(
-    'phase', 'question',
-    'round', p_idx + 1,
-    'started_at', to_jsonb(v_now),
-    'deadline', to_jsonb(v_now + make_interval(secs => (p_state->>'duration')::integer)),
-    'question', v_q - 'answer' - 'accept' - 'correct',
-    'found', '[]'::jsonb, 'passed', '[]'::jsonb, 'missed', '[]'::jsonb);
-  p_server := p_server || jsonb_build_object('picks', '{}'::jsonb, 'tries', '{}'::jsonb);
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
-create or replace function public.game_cerveau_en_fete_start(p_players uuid[], p_options jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_in      jsonb := p_options->'questions';
-  v_dur     integer;
-  v_qs      jsonb := '[]'::jsonb;
-  e         jsonb;
-  v_mode    text;
-  v_acc     jsonb;
-  v_dis     jsonb;
-  v_choices jsonb;
-  v_correct integer;
-  v_img     jsonb;
-  v_zero    jsonb;
-  v_st      jsonb;
-begin
-  if cardinality(p_players) < 2 then raise exception 'not_enough_players'; end if;
-  if v_in is null or jsonb_typeof(v_in) <> 'array' or jsonb_array_length(v_in) = 0 then
-    raise exception 'missing_questions';
-  end if;
-  begin
-    v_dur := coalesce(nullif(p_options->>'duration', '')::integer, 20);
-  exception when others then v_dur := 20;
-  end;
-  v_dur := least(greatest(v_dur, 5), 120);
-
-  for e in select value from jsonb_array_elements(v_in) with ordinality t(value, o) order by o limit 50 loop
-    if jsonb_typeof(e) <> 'object' or jsonb_typeof(e->'prompt') <> 'string' or jsonb_typeof(e->'answer') <> 'string'
-       or char_length(btrim(e->>'prompt')) = 0 or char_length(e->>'prompt') > 500
-       or char_length(btrim(e->>'answer')) = 0 or char_length(e->>'answer') > 120 then
-      raise exception 'invalid_questions';
-    end if;
-
-    -- 3 premiers distracteurs valides, distincts de la réponse.
-    select coalesce(jsonb_agg(d order by o), '[]'::jsonb) into v_dis
-      from (select d, o from jsonb_array_elements_text(
-                     case when jsonb_typeof(e->'distractors') = 'array' then e->'distractors' else '[]'::jsonb end)
-                     with ordinality t(d, o)
-             where char_length(btrim(d)) between 1 and 120 and d <> e->>'answer'
-             order by o limit 3) z;
-
-    -- Formes acceptées (normalisées) : réponse + alias.
-    select coalesce(jsonb_agg(distinct x), '[]'::jsonb) into v_acc
-      from (select public._cef_norm(e->>'answer') as x
-            union
-            select public._cef_norm(a) from jsonb_array_elements_text(
-                     case when jsonb_typeof(e->'aliases') = 'array' then e->'aliases' else '[]'::jsonb end) a) t
-     where x <> '';
-
-    v_mode := case when e->>'mode' = 'mcq' then 'mcq' else 'typed' end;
-    if v_mode = 'mcq' and jsonb_array_length(v_dis) < 3 then v_mode := 'typed'; end if;
-    if v_mode = 'typed' and jsonb_array_length(v_acc) = 0 then
-      if jsonb_array_length(v_dis) >= 3 then v_mode := 'mcq'; else raise exception 'invalid_questions'; end if;
-    end if;
-
-    v_choices := null;
-    v_correct := null;
-    if v_mode = 'mcq' then
-      select jsonb_agg(c order by random()) into v_choices
-        from (select e->>'answer' as c union all select value from jsonb_array_elements_text(v_dis)) y;
-      select (o - 1)::integer into v_correct
-        from jsonb_array_elements_text(v_choices) with ordinality t(c, o) where c = e->>'answer' limit 1;
-    end if;
-
-    v_img := null;
-    if jsonb_typeof(e->'image') = 'object' and coalesce(e->'image'->>'url', '') ~ '^https://' then
-      v_img := jsonb_build_object('url', left(e->'image'->>'url', 500),
-                                  'credit', left(coalesce(e->'image'->>'credit', ''), 200),
-                                  'license', left(coalesce(e->'image'->>'license', ''), 60));
-    end if;
-
-    v_qs := v_qs || jsonb_build_array(jsonb_build_object(
-      'id', left(coalesce(e->>'id', ''), 40),
-      'theme', left(coalesce(e->>'theme', ''), 40),
-      'difficulty', case when e->>'difficulty' in ('1', '2', '3') then (e->>'difficulty')::integer end,
-      'prompt', e->>'prompt',
-      'image', v_img,
-      'mode', v_mode,
-      'choices', v_choices,
-      'answer', e->>'answer',
-      'accept', v_acc,
-      'correct', v_correct));
-  end loop;
-
-  select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
-
-  v_st := public._cef_open(
-    jsonb_build_object(
-      'game', 'cerveau-en-fete',
-      'round', 1,
-      'total_rounds', jsonb_array_length(v_qs),
-      'duration', v_dur,
-      'reveal_seconds', 8,
-      'players', to_jsonb(p_players),
-      'scores', v_zero,
-      'last_reveal', null,
-      'history', '[]'::jsonb,
-      'winners', null,
-      'results', null),
-    jsonb_build_object('questions', v_qs),
-    0);
-  return v_st || jsonb_build_object('secrets', '{}'::jsonb);
-end $$;
-
--- Passe en révélation : réponse publiée, points ajoutés aux scores.
-create or replace function public._cef_reveal(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_round  integer := (p_state->>'round')::integer;
-  v_q      jsonb := p_server->'questions'->(v_round - 1);
-  v_points jsonb;
-begin
-  select coalesce(jsonb_object_agg(f->>'profile_id', (f->>'points')::integer), '{}'::jsonb) into v_points
-    from jsonb_array_elements(p_state->'found') f;
-
-  p_state := p_state || jsonb_build_object(
-    'phase', 'reveal',
-    'deadline', to_jsonb(now() + make_interval(secs => coalesce((p_state->>'reveal_seconds')::integer, 8))),
-    'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
-                 from jsonb_each_text(p_state->'scores')),
-    'last_reveal', jsonb_build_object(
-      'round', v_round,
-      'question', p_state->'question',
-      'answer', v_q->'answer',
-      'mode', v_q->'mode',
-      'choices', v_q->'choices',
-      'correct', v_q->'correct',
-      'found', p_state->'found',
-      'passed', p_state->'passed',
-      'missed', p_state->'missed',
-      'picks', coalesce(p_server->'picks', '{}'::jsonb),
-      'tries', coalesce(p_server->'tries', '{}'::jsonb),
-      'points', v_points),
-    'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-      'round', v_round,
-      'id', v_q->'id',
-      'theme', v_q->'theme',
-      'prompt', v_q->'prompt',
-      'answer', v_q->'answer',
-      'mode', v_q->'mode',
-      'found', p_state->'found')));
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
--- Stats de fin de partie pour les trophées (features/trophees.sql) : tout se lit dans history[].found.
-create or replace function public._cef_tstats(p_state jsonb, p_pl text)
-returns jsonb language sql immutable
-set search_path = public, extensions
-as $$
-  with q as (
-    select e.o, e.v->>'mode' as mode,
-           (select f from jsonb_array_elements(e.v->'found') f where f->>'profile_id' = p_pl limit 1) as me,
-           jsonb_array_length(e.v->'found') as nfound
-      from jsonb_array_elements(coalesce(p_state->'history', '[]'::jsonb)) with ordinality as e(v, o)
-  ), r as (
-    select q.*, (q.me is not null) as ok from q
-  ), g as (
-    select r.*, r.o - row_number() over (partition by r.ok order by r.o) as grp from r
-  )
-  select jsonb_build_object(
-    'correct', (select count(*) from g where ok),
-    'firsts', (select count(*) from g where ok and (me->>'rank')::integer = 1),
-    'last_finder', (select count(*) from g where ok and nfound >= 3 and (me->>'rank')::integer = nfound),
-    'close_finds', (select count(*) from g where ok
-                      and (me->>'ms')::integer >= (p_state->>'duration')::integer * 1000 - 3000),
-    'fast_typed', (select count(*) from g where ok and mode = 'typed' and (me->>'ms')::integer < 3000),
-    'best_streak', coalesce((select max(c) from (select count(*) as c from g where ok group by grp) x), 0),
-    'miss_streak', coalesce((select max(c) from (select count(*) as c from g where not ok group by grp) x), 0),
-    'qcm_perfect', case when (select count(*) from g where mode = 'mcq') >= 5
-                         and not exists (select 1 from g where mode = 'mcq' and not ok) then 1 else 0 end,
-    'perfect', case when (select count(*) from g) >= 10 and not exists (select 1 from g where not ok) then 1 else 0 end)
-$$;
-
-create or replace function public._cef_finish(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_max     integer;
-  v_results jsonb;
-  v_winners jsonb;
-begin
-  select coalesce(max(value::integer), 0) into v_max from jsonb_each_text(p_state->'scores');
-
-  -- points (XP = points x 10) : score du quiz / 100 arrondi, pour rester à l'échelle des autres jeux.
-  select jsonb_agg(jsonb_build_object(
-           'profile_id', t.key,
-           'points', round(t.value::integer / 100.0)::integer,
-           'won', v_max > 0 and t.value::integer = v_max,
-           'placement', t.r,
-           'stats', public._cef_tstats(p_state, t.key))
-         order by t.r, t.key)
-    into v_results
-    from (select key, value, rank() over (order by value::integer desc) as r
-            from jsonb_each_text(p_state->'scores')) t;
-
-  select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
-    from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
-
-  p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null,
-                                           'winners', v_winners, 'results', v_results);
-  return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
-end $$;
-
--- Révélation si tous les joueurs ont trouvé, passé ou raté (QCM).
-create or replace function public._cef_check_done(p_state jsonb, p_server jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-begin
-  if not exists (
-    select 1 from jsonb_array_elements_text(p_state->'players') pl
-     where not (p_state->'passed' ? pl) and not (p_state->'missed' ? pl)
-       and not exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = pl))
-  then
-    return public._cef_reveal(p_state, p_server);
-  end if;
-  return jsonb_build_object('state', p_state, 'server', p_server);
-end $$;
-
-create or replace function public.game_cerveau_en_fete_action(
-  p_state jsonb, p_server jsonb, p_actor uuid, p_is_host boolean, p_action jsonb)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_type     text := p_action->>'type';
-  v_phase    text := p_state->>'phase';
-  v_round    integer := (p_state->>'round')::integer;
-  v_total    integer := (p_state->>'total_rounds')::integer;
-  v_deadline timestamptz := (p_state->>'deadline')::timestamptz;
-  v_me       text := p_actor::text;
-  v_q        jsonb;
-  v_same     jsonb := jsonb_build_object('state', p_state, 'server', p_server);
-  v_ok       boolean;
-  v_idx      integer;
-  v_frac     numeric;
-  v_rank     integer;
-  v_pts      integer;
-  v_ms       integer;
-begin
-  if v_type not in ('answer', 'choose', 'pass', 'skip', 'next', 'tick') then
-    raise exception 'unknown_action';
-  end if;
-  -- Action d'une manche passée (ou partie finie) : ignorée sans erreur.
-  if v_phase not in ('question', 'reveal') then return v_same; end if;
-  if p_action ? 'round' and (p_action->>'round') is distinct from (p_state->>'round') then
-    return v_same;
-  end if;
-
-  if v_type = 'tick' then
-    if v_deadline is null or now() < v_deadline then return v_same; end if;
-    if v_phase = 'question' then return public._cef_reveal(p_state, p_server); end if;
-    if v_round >= v_total then return public._cef_finish(p_state, p_server); end if;
-    return public._cef_open(p_state, p_server, v_round);
-
-  elsif v_type = 'skip' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase <> 'question' then return v_same; end if;
-    return public._cef_reveal(p_state, p_server);
-
-  elsif v_type = 'next' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase <> 'reveal' then return v_same; end if;
-    if v_round >= v_total then return public._cef_finish(p_state, p_server); end if;
-    return public._cef_open(p_state, p_server, v_round);
-  end if;
-
-  -- answer / choose / pass : joueurs uniquement, pendant la question.
-  if not (p_state->'players' ? v_me) then raise exception 'not_a_player'; end if;
-  if v_phase <> 'question' then return v_same; end if;
-  if now() >= v_deadline then return public._cef_reveal(p_state, p_server); end if;
-  if (p_state->'passed' ? v_me) or (p_state->'missed' ? v_me)
-     or exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = v_me) then
-    return v_same;   -- déjà fini pour cette question
-  end if;
-
-  if v_type = 'pass' then
-    p_state := jsonb_set(p_state, '{passed}', (p_state->'passed') || to_jsonb(v_me));
-    return public._cef_check_done(p_state, p_server);
-  end if;
-
-  v_q := p_server->'questions'->(v_round - 1);
-  if v_type = 'answer' then
-    if v_q->>'mode' <> 'typed' then raise exception 'wrong_mode'; end if;
-    if char_length(btrim(coalesce(p_action->>'text', ''))) = 0 then return v_same; end if;
-    p_server := jsonb_set(p_server, array['tries', v_me],
-                          to_jsonb(coalesce((p_server->'tries'->>v_me)::integer, 0) + 1), true);
-    v_ok := public._cef_match(p_action->>'text', v_q->'accept');
-    if not v_ok then
-      return jsonb_build_object('state', p_state, 'server', p_server);
-    end if;
-  else -- choose
-    if v_q->>'mode' <> 'mcq' then raise exception 'wrong_mode'; end if;
-    begin
-      v_idx := (p_action->>'index')::integer;
-    exception when others then raise exception 'invalid_choice';
-    end;
-    if v_idx is null or v_idx < 0 or v_idx >= jsonb_array_length(v_q->'choices') then
-      raise exception 'invalid_choice';
-    end if;
-    p_server := jsonb_set(p_server, array['picks', v_me], to_jsonb(v_idx), true);
-    v_ok := v_idx = (v_q->>'correct')::integer;
-    if not v_ok then
-      p_state := jsonb_set(p_state, '{missed}', (p_state->'missed') || to_jsonb(v_me));
-      return public._cef_check_done(p_state, p_server);
-    end if;
-  end if;
-
-  -- Bonne réponse : base + bonus vitesse (proportionnel au temps restant) + premier.
-  v_frac := greatest(0, least(1, extract(epoch from (v_deadline - now())) / (p_state->>'duration')::numeric));
-  v_rank := jsonb_array_length(p_state->'found') + 1;
-  v_pts := case when v_q->>'mode' = 'typed' then 100 + round(100 * v_frac) else 60 + round(60 * v_frac) end
-           + case when v_rank = 1 then 20 else 0 end;
-  v_ms := greatest(0, round(extract(epoch from (now() - (p_state->>'started_at')::timestamptz)) * 1000));
-  p_state := jsonb_set(p_state, '{found}', (p_state->'found') || jsonb_build_array(jsonb_build_object(
-    'profile_id', v_me, 'rank', v_rank, 'ms', v_ms, 'points', v_pts)));
-  return public._cef_check_done(p_state, p_server);
-end $$;
-
-revoke all on function public._cef_norm(text) from public, anon, authenticated;
-revoke all on function public._cef_lev(text, text) from public, anon, authenticated;
-revoke all on function public._cef_match(text, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_open(jsonb, jsonb, integer) from public, anon, authenticated;
-revoke all on function public._cef_reveal(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_finish(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public._cef_tstats(jsonb, text) from public, anon, authenticated;
-revoke all on function public._cef_check_done(jsonb, jsonb) from public, anon, authenticated;
-revoke all on function public.game_cerveau_en_fete_start(uuid[], jsonb) from public, anon, authenticated;
-revoke all on function public.game_cerveau_en_fete_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;

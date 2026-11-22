@@ -30,6 +30,9 @@ import { errorCode, toastError } from '@/features/soiree/errors'
 import { SoireePodium, SoireeStandingsCard } from '@/features/stats/SoireeStandings'
 import { SoireeRecap } from '@/features/recap/RecapViewer'
 import { TutoButton } from '@/features/tutos/TutoButton'
+import { readScenario } from '@/features/reveillon/api'
+import { ReveillonLauncher } from '@/features/reveillon/ReveillonLauncher'
+import { ReveillonStage } from '@/features/reveillon/ReveillonStage'
 
 export function SoireePage() {
   const { id } = useParams()
@@ -65,6 +68,8 @@ export function SoireePage() {
 
   const soiree = data?.soiree
   const isHost = soiree?.host_id === meId
+  /** Soirée scénarisée (mode Réveillon) en cours : remplace le panneau de lancement. */
+  const scenario = readScenario(soiree)
   const playerIds = useMemo(() => data?.playerIds ?? [], [data])
   /** Fin auto prévue (my_active_soirees) ; null pendant une partie. */
   useWheelSpins(id ?? '', (sp) => {
@@ -130,6 +135,11 @@ export function SoireePage() {
   }
 
   const launchGame = launching ? getGame(launching.game) : undefined
+  const onHostEnded = (u: NewUnlocks) => {
+    endingRef.current = true
+    setEnded(null) // l'évènement temps réel a pu arriver avant la réponse
+    setHostPodium({ next: Object.values(u).some((l) => l.length) ? u : null })
+  }
   return (
     // Hôte : la barre « C'est parti ! » est fixée en bas ; la page réserve sa hauteur
     // mesurée pour que la fin (« Terminer la soirée ») reste atteignable.
@@ -157,7 +167,7 @@ export function SoireePage() {
 
       <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} onKick={isHost ? setKickTarget : undefined} />
 
-      <SoireeStandingsCard soireeId={soiree.id} />
+      {!scenario && <SoireeStandingsCard soireeId={soiree.id} />}
 
       {isHost && bannedIds.length > 0 && (
         <BannedList
@@ -184,24 +194,39 @@ export function SoireePage() {
         </div>
       )}
 
-      {isHost ? (
-        <HostPanel
+      {scenario ? (
+        <ReveillonStage
           soireeId={soiree.id}
+          scenario={scenario}
+          isHost={isHost}
+          meId={meId}
           playerIds={playerIds}
           byId={byId}
-          meId={meId}
           busy={Boolean(match) || Boolean(launching)}
-          launchReq={launchReq}
-          onSpin={async (ids) => {
-            const { spin, error } = await spinWheel(soiree.id, ids)
-            if (error || !spin) return toastError(error)
-            lastSpinId.current = Math.max(lastSpinId.current, spin.id)
-            setWheel(spin)
-          }}
-          idleDeadline={match || launching ? null : idleDeadline}
-          onBarHeight={setBarH}
           onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })}
+          onEnded={onHostEnded}
         />
+      ) : isHost ? (
+        <>
+          <ReveillonLauncher soireeId={soiree.id} playerCount={playerIds.length} disabled={Boolean(match) || Boolean(launching)} />
+          <HostPanel
+            soireeId={soiree.id}
+            playerIds={playerIds}
+            byId={byId}
+            meId={meId}
+            busy={Boolean(match) || Boolean(launching)}
+            launchReq={launchReq}
+            onSpin={async (ids) => {
+              const { spin, error } = await spinWheel(soiree.id, ids)
+              if (error || !spin) return toastError(error)
+              lastSpinId.current = Math.max(lastSpinId.current, spin.id)
+              setWheel(spin)
+            }}
+            idleDeadline={match || launching ? null : idleDeadline}
+            onBarHeight={setBarH}
+            onStarted={(matchId, game) => setLaunching((l) => l ?? { id: matchId, game })}
+          />
+        </>
       ) : (
         <>
           {!launching && <PronosCard soireeId={soiree.id} meId={meId} byId={byId} />}
@@ -212,11 +237,7 @@ export function SoireePage() {
       <FooterActions
         soireeId={soiree.id}
         isHost={isHost}
-        onEnded={(u) => {
-          endingRef.current = true
-          setEnded(null) // l'évènement temps réel a pu arriver avant la réponse
-          setHostPodium({ next: Object.values(u).some((l) => l.length) ? u : null })
-        }}
+        onEnded={onHostEnded}
         onLeft={() => {
           endingRef.current = true
           setEnded(null)

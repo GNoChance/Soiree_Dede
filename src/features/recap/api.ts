@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { MiniProfile, StandingRow } from '@/features/stats/api'
+import { fetchReveillonRecap, type Scenario } from '@/features/reveillon/api'
 
 /** Miroir TS de `soiree_recap` (supabase/features/recap.sql, non typée dans db.ts). */
 export type AwardId = 'serie' | 'bluff' | 'deuxieme' | 'pasdebol' | 'bavard' | 'sticker' | 'devin'
@@ -25,13 +26,15 @@ export interface SoireeRecap {
   awards: RecapAward[]
   standings: StandingRow[]
   winner_ids: string[]
+  /** Soirée scénarisée (mode Réveillon) jouée pendant la soirée, sinon null. */
+  reveillon?: Scenario | null
 }
 
 type Rpc = (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>
 const rpc: Rpc = (fn, args) => (supabase as unknown as { rpc: Rpc }).rpc(fn, args)
 
 export async function fetchRecap(soireeId: string): Promise<SoireeRecap> {
-  const { data, error } = await rpc('soiree_recap', { p_soiree_id: soireeId })
+  const [{ data, error }, reveillon] = await Promise.all([rpc('soiree_recap', { p_soiree_id: soireeId }), fetchReveillonRecap(soireeId).catch(() => null)])
   if (error) throw error
-  return data as SoireeRecap
+  return { ...(data as SoireeRecap), reveillon }
 }
