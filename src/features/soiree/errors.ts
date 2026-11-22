@@ -213,6 +213,13 @@ const MESSAGES: Record<string, string> = {
   push_dismissed: 'Il faut toucher « Autoriser » pour recevoir le rappel.',
   push_no_sw: 'L’app n’est pas encore prête : recharge-la puis réessaie.',
   push_failed: 'Impossible d’activer les rappels sur cet appareil. Réessaie plus tard.',
+  // Mode invité (supabase/features/guest.sql)
+  guest_forbidden: 'En mode invité, on joue seulement dans la soirée rejointe.',
+  guests_closed: 'L’hôte n’a pas ouvert les invitations : demande-lui d’afficher le QR code.',
+  already_member: 'Ce téléphone a déjà un profil de la bande : rejoins la soirée avec ton profil.',
+  too_many_guests: 'Il y a déjà 8 personnes de passage dans cette soirée.',
+  invalid_avatar: 'Choisis un avatar.',
+  invalid_nickname: 'Ton prénom doit faire entre 1 et 20 caractères.',
 }
 
 function raw(err: unknown): string {

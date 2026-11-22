@@ -30,6 +30,7 @@ function formatCountdown(ms: number) {
 
 export function OnboardingPage() {
   const profile = useSession((s) => s.profile)
+  const navigate = useNavigate()
   const booted = useSession((s) => s.booted)
   const [profiles, setProfiles] = useState<PublicProfile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -200,6 +201,12 @@ export function OnboardingPage() {
                   </StaggerItem>
                 ))}
               </StaggerList>
+            )}
+            {/* Mode invité : une personne de passage rejoint une soirée sans profil. */}
+            {isSupabaseConfigured && (
+              <Button variant="secondary" size="lg" fullWidth onClick={() => navigate('/invite')}>
+                👋 Je suis de passage (sans compte)
+              </Button>
             )}
           </div>
         ) : (

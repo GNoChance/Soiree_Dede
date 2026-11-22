@@ -29,6 +29,10 @@ create table if not exists public.profiles (
   created_at          timestamptz not null default now()
 );
 alter table public.profiles add column if not exists sort_order integer not null default 100;
+-- Mode invité (features/guest.sql) : profil temporaire sans PIN, lié à une seule soirée,
+-- exclu des classements / XP / stats / trophées, purgé après guest_expires_at.
+alter table public.profiles add column if not exists is_guest boolean not null default false;
+alter table public.profiles add column if not exists guest_expires_at timestamptz;
 
 -- Hash du PIN : table séparée, jamais lisible par les clients (écart au contrat,
 -- voir README : évite qu'un `select('*')` sur profiles n'expose le hash).
@@ -223,6 +227,19 @@ begin
   return v_id;
 end $$;
 
+-- Comme _require_profile, mais refuse les invités (profiles.is_guest) : RPC réservées à la bande.
+create or replace function public._require_member()
+returns uuid language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_id uuid := public._require_profile();
+begin
+  if exists (select 1 from public.profiles where id = v_id and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
+  return v_id;
+end $$;
+
 create or replace function public._profile_json(p_id uuid)
 returns jsonb language sql stable security definer
 set search_path = public, extensions
@@ -352,7 +369,7 @@ begin
 
   select count(*) into v_friends from public.friendships f
    where f.status = 'accepted' and (f.requester_id = p_profile_id or f.addressee_id = p_profile_id);
-  select count(*) - 1 into v_others from public.profiles;
+  select count(*) - 1 into v_others from public.profiles where not is_guest;
   select coalesce(max(wins), 0) into v_maxwins from public.player_stats;
 
   if v_s.wins >= 5  then v_c := v_c || 'pouces'::text; end if;
@@ -420,6 +437,7 @@ as $$
   select p.id, p.slug, p.first_name, p.nickname, p.equipped_expression, p.expressions,
          exists (select 1 from public.profile_credentials c where c.profile_id = p.id)
   from public.profiles p
+  where not p.is_guest  -- écran de connexion : la bande seulement
   order by p.sort_order, p.slug
 $$;
 
@@ -574,6 +592,9 @@ declare
   v_row public.friendships%rowtype;
 begin
   if p_profile_id is null or p_profile_id = v_me then raise exception 'invalid_friend'; end if;
+  if exists (select 1 from public.profiles where id in (v_me, p_profile_id) and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
   if not exists (select 1 from public.profiles where id = p_profile_id) then
     raise exception 'unknown_profile';
   end if;
@@ -689,6 +710,7 @@ begin
   v_players := array(
     select distinct mp.profile_id from public.match_players mp
     join public.matches m on m.id = mp.match_id
+    join public.profiles p on p.id = mp.profile_id and not p.is_guest  -- invités : pas de stats
     where m.soiree_id = p_soiree_id);
   if cardinality(v_players) = 0 then return '{}'::jsonb; end if;
 
@@ -831,7 +853,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me   uuid := public._require_profile();
+  v_me   uuid := public._require_member();
   v_ids  uuid[];
   v_busy text;
   v_id   uuid;
@@ -845,7 +867,7 @@ begin
   end if;
 
   v_ids := array(select distinct x from unnest(coalesce(p_player_ids, '{}') || v_me) x where x is not null);
-  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x)) then
+  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x and not p.is_guest)) then
     raise exception 'unknown_profile';
   end if;
   select string_agg(p.nickname, ', ' order by p.sort_order) into v_busy
@@ -878,7 +900,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();  -- invités : join_as_guest (features/guest.sql)
   v_sid uuid;
 begin
   perform pg_advisory_xact_lock(hashtext('soiree_membership'));
@@ -928,8 +950,10 @@ begin
   if not found then return; end if;
 
   if v_host = v_me then
-    select profile_id into v_new from public.soiree_players
-     where soiree_id = v_sid order by joined_at, profile_id limit 1;
+    -- Un invité ne devient jamais hôte : s'il ne reste que des invités, la soirée se termine.
+    select sp.profile_id into v_new from public.soiree_players sp
+      join public.profiles p on p.id = sp.profile_id and not p.is_guest
+     where sp.soiree_id = v_sid order by sp.joined_at, sp.profile_id limit 1;
     if v_new is null then
       perform public._close_soiree(v_sid, 'empty', true, now());
     else
@@ -1064,6 +1088,12 @@ begin
               || jsonb_build_object('last', case when v_maxp > v_minp and r.placement = v_maxp then 1 else 0 end,
                                     'nplayers', v_np));
 
+    -- Invité (features/guest.sql) : ligne match_players gardée (salon, récap, pronos) mais ni XP,
+    -- ni player_stats, ni déblocages/tenues/trophées.
+    if exists (select 1 from public.profiles where id = r.profile_id and is_guest) then
+      v_xpmap := v_xpmap || jsonb_build_object(r.profile_id::text, 0);
+      continue;
+    end if;
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;
 
@@ -1813,7 +1843,8 @@ select p.id as profile_id, p.slug, p.first_name, p.nickname, p.equipped_expressi
        coalesce(s.games_played, 0) as games_played,
        rank() over (order by coalesce(s.wins, 0) desc) as rank
 from public.profiles p
-left join public.player_stats s on s.profile_id = p.id;
+left join public.player_stats s on s.profile_id = p.id
+where not p.is_guest;  -- invités hors classements (features/guest.sql)
 
 drop view if exists public.leaderboard_by_game;
 create view public.leaderboard_by_game with (security_invoker = true) as
@@ -1824,7 +1855,7 @@ select mp.game_id, p.id as profile_id, p.slug, p.first_name, p.nickname, p.equip
        rank() over (partition by mp.game_id
                     order by count(*) filter (where mp.won) desc, coalesce(sum(mp.points), 0) desc) as rank
 from public.match_players mp
-join public.profiles p on p.id = mp.profile_id
+join public.profiles p on p.id = mp.profile_id and not p.is_guest
 group by mp.game_id, p.id;
 
 -- =============================================================================
@@ -2463,6 +2494,8 @@ returns integer language plpgsql stable security definer
 set search_path = public, extensions
 as $$
 begin
+  -- Invite de passage (features/guest.sql) : jamais de pieces (pas d'achat, de pari ni de defi).
+  if exists (select 1 from public.profiles where id = p_profile and is_guest) then return 0; end if;
   return (select coalesce(5 * count(*) + 15 * count(*) filter (where won), 0) from public.match_players where profile_id = p_profile)::int
        + (select 10 * count(*) from public.daily_runs where profile_id = p_profile and finished_at is not null)::int
        + (select 20 * count(*) from public.trophy_unlocks where profile_id = p_profile)::int
@@ -2957,7 +2990,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
 begin
   insert into public.daily_runs(profile_id, day) values (v_me, v_day)
@@ -2974,7 +3007,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer := 0; v_pts integer; v_xp integer; v_rank integer; v_n integer; i integer;
@@ -3022,7 +3055,7 @@ returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_len integer;
@@ -3051,7 +3084,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer; v_xp integer; v_rank integer; v_n integer;
@@ -3181,7 +3214,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_today date := public._daily_day();
   v_new boolean := false; v_n integer; v_trophy boolean := false; v_gifts jsonb := '[]'::jsonb;
   v_from date := make_date(extract(year from p_day)::int, 12, 1);
@@ -4311,6 +4344,250 @@ end $$;
 
 revoke all on function public.head_to_head(uuid) from public, anon;
 grant execute on function public.head_to_head(uuid) to authenticated;
+
+
+-- ===== features\guest.sql =====
+-- =============================================================================
+-- MODE INVITÉ — idempotent, exécuté APRÈS schema.sql (features/*, ordre alphabétique).
+-- Un ami de passage rejoint UNE soirée depuis son téléphone, sans PIN ni compte :
+--  * l'hôte ouvre les invitations (open_guest_invites) -> soirees.guest_token (10 car.)
+--    affiché en QR code (/invite/<token>) ; le code à 4 caractères du salon marche aussi
+--    tant que les invitations sont ouvertes (close_guest_invites les ferme) ;
+--  * l'invité (session anonyme de son appareil) appelle join_as_guest(code|token, prénom,
+--    avatar) -> profil temporaire profiles.is_guest (slug « g-<avatar>-<6 car.> »), lié à
+--    l'appareil via device_sessions, membre de cette seule soirée ;
+--  * il joue comme les autres (match_players écrit, classement/récap de la soirée, pronos)
+--    mais NE COMPTE PAS pour la bande : ni XP, ni player_stats, ni déblocages / tenues /
+--    trophées (finish_match), absent des classements général / par jeu / semaine, du défi
+--    du jour, de l'Avent, des amis, de l'écran de connexion (cf. schema.sql, weekly.sql,
+--    tenues.sql, daily.sql, soiree-hote.sql : filtres `is_guest` / _require_member()).
+--    « Grande tablée » (trophée) compte les invités présents : c'est la taille de la tablée.
+--  * il ne peut ni créer de soirée, ni rejoindre une autre soirée par code
+--    (join_soiree_by_code -> guest_forbidden), ni devenir hôte (leave_soiree), ni être
+--    invité ailleurs (create_soiree / invite_to_soiree) ; pas de PIN, jamais admin ;
+--  * purge : guest_expires_at = dernière arrivée + 24 h ; un invité expiré qui n'est plus
+--    dans aucune soirée en cours est supprimé (cascade : session, lignes de parties…) par
+--    _purge_guests(), appelée par join_as_guest / open_guest_invites + pg_cron (horaire).
+-- Erreurs : not_authenticated, invalid_nickname, invalid_avatar, soiree_not_found,
+--   guests_closed, already_member, soiree_banned, too_many_guests, not_host, soiree_ended.
+-- Pièces 🪙 (cadeaux.sql, non modifié) : _coins compterait les parties d'un invité ; le
+-- front n'affiche jamais solde ni boutique à un invité (profil purgé sous 24 h).
+-- =============================================================================
+
+alter table public.soirees add column if not exists guest_token text;
+create unique index if not exists soirees_guest_token_uq on public.soirees(guest_token)
+  where guest_token is not null and status <> 'ended';
+create index if not exists profiles_guest_exp_idx on public.profiles(guest_expires_at) where is_guest;
+
+-- Avatars génériques des invités (ids stables, emojis côté front : src/data/guests.ts).
+create or replace function public._guest_avatars()
+returns text[] language sql immutable
+as $$ select array['renard','chat','chien','panda','lapin','grenouille',
+                   'licorne','pieuvre','poussin','koala','tigre','singe'] $$;
+create or replace function public._guest_ttl()
+returns interval language sql immutable as $$ select interval '24 hours' $$;
+create or replace function public._guest_max_per_soiree()
+returns integer language sql immutable as $$ select 8 $$;
+
+-- Supprime les invités expirés qui ne sont plus dans aucune soirée en cours (jamais hôtes).
+create or replace function public._purge_guests()
+returns integer language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_n integer;
+begin
+  delete from public.profiles p
+   where p.is_guest and p.guest_expires_at < now()
+     and not exists (select 1 from public.soiree_players sp join public.soirees s on s.id = sp.soiree_id
+                      where sp.profile_id = p.id and s.status <> 'ended')
+     and not exists (select 1 from public.soirees s where s.host_id = p.id);
+  get diagnostics v_n = row_count;
+  return v_n;
+end $$;
+
+-- Soirée visée par un code (4 car.) ou un jeton d'invitation ; invitations ouvertes obligatoires.
+create or replace function public._guest_soiree_of(p_code text)
+returns uuid language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_code text := upper(btrim(coalesce(p_code, '')));
+  v_sid  uuid;
+  v_tok  text;
+begin
+  if char_length(v_code) = 4 then
+    select id, guest_token into v_sid, v_tok from public.soirees where code = v_code and status <> 'ended';
+  elsif char_length(v_code) between 6 and 32 then
+    select id, guest_token into v_sid, v_tok from public.soirees where guest_token = v_code and status <> 'ended';
+  end if;
+  if v_sid is null then raise exception 'soiree_not_found'; end if;
+  if v_tok is null then raise exception 'guests_closed'; end if;
+  return v_sid;
+end $$;
+
+-- Hôte : ouvre les invitations (jeton stable tant qu'elles restent ouvertes).
+-- -> {soiree_id, code, token, guests (nb d'invités présents), max_guests}
+create or replace function public.open_guest_invites(p_soiree_id uuid)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me    uuid := public._require_member();
+  v_s     public.soirees%rowtype;
+  v_alpha constant text := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  v_tok   text;
+begin
+  perform public._purge_guests();
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  v_tok := v_s.guest_token;
+  while v_tok is null loop
+    select string_agg(substr(v_alpha, 1 + floor(random() * length(v_alpha))::integer, 1), '')
+      into v_tok from generate_series(1, 10);
+    if exists (select 1 from public.soirees where guest_token = v_tok and status <> 'ended') then
+      v_tok := null;
+    end if;
+  end loop;
+  update public.soirees set guest_token = v_tok where id = p_soiree_id;
+  return jsonb_build_object(
+    'soiree_id', p_soiree_id, 'code', v_s.code, 'token', v_tok,
+    'guests', (select count(*) from public.soiree_players sp join public.profiles p on p.id = sp.profile_id
+                where sp.soiree_id = p_soiree_id and p.is_guest),
+    'max_guests', public._guest_max_per_soiree());
+end $$;
+
+-- Hôte : ferme les invitations (les invités déjà présents restent).
+create or replace function public.close_guest_invites(p_soiree_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_member();
+begin
+  update public.soirees set guest_token = null
+   where id = p_soiree_id and host_id = v_me and status <> 'ended';
+  if not found then raise exception 'not_host'; end if;
+end $$;
+
+-- Aperçu avant de rejoindre (écran « Je suis de passage »), session anonyme suffisante.
+-- -> {soiree_id, code, host_nickname, host_slug, players, me: 'none'|'guest'|'member', joined}
+create or replace function public.guest_invite_info(p_code text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_sid uuid;
+  v_me  uuid;
+  v_g   boolean;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  v_sid := public._guest_soiree_of(p_code);
+  select p.id, p.is_guest into v_me, v_g
+    from public.device_sessions d join public.profiles p on p.id = d.profile_id
+   where d.auth_uid = auth.uid();
+  return (
+    select jsonb_build_object(
+      'soiree_id', s.id, 'code', s.code, 'host_nickname', h.nickname, 'host_slug', h.slug,
+      'players', (select count(*) from public.soiree_players sp where sp.soiree_id = s.id),
+      'me', case when v_me is null then 'none' when v_g then 'guest' else 'member' end,
+      'joined', exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_me))
+    from public.soirees s join public.profiles h on h.id = s.host_id
+    where s.id = v_sid);
+end $$;
+
+-- Rejoindre en invité. Appareil sans profil -> nouveau profil invité ; appareil déjà invité
+-- -> même profil (prénom / avatar mis à jour, expiration repoussée, quitte son ancienne
+-- soirée) ; appareil d'un membre de la bande -> already_member (utiliser join_soiree_by_code).
+-- -> {profile: ProfileJson, soiree: SoireeJson}
+create or replace function public.join_as_guest(p_code text, p_name text, p_avatar text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_name  text := btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g'));
+  v_av    text := lower(btrim(coalesce(p_avatar, '')));
+  v_alpha constant text := 'abcdefghjkmnpqrstuvwxyz23456789';
+  v_sid   uuid;
+  v_me    uuid;
+  v_g     boolean;
+  v_slug  text;
+begin
+  if v_uid is null then raise exception 'not_authenticated'; end if;
+  if char_length(v_name) < 1 or char_length(v_name) > 20 then raise exception 'invalid_nickname'; end if;
+  if not (v_av = any(public._guest_avatars())) then raise exception 'invalid_avatar'; end if;
+
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  perform public._cleanup_stale_soirees();
+  perform public._purge_guests();
+  v_sid := public._guest_soiree_of(p_code);
+
+  select p.id, p.is_guest into v_me, v_g
+    from public.device_sessions d join public.profiles p on p.id = d.profile_id
+   where d.auth_uid = v_uid;
+  if v_me is not null and not v_g then raise exception 'already_member'; end if;
+  if v_me is not null and exists (select 1 from public.soiree_bans where soiree_id = v_sid and profile_id = v_me) then
+    raise exception 'soiree_banned';
+  end if;
+  if (v_me is null or not exists (select 1 from public.soiree_players where soiree_id = v_sid and profile_id = v_me))
+     and (select count(*) from public.soiree_players sp join public.profiles p on p.id = sp.profile_id
+           where sp.soiree_id = v_sid and p.is_guest) >= public._guest_max_per_soiree() then
+    raise exception 'too_many_guests';
+  end if;
+
+  loop
+    select 'g-' || v_av || '-' || string_agg(substr(v_alpha, 1 + floor(random() * length(v_alpha))::integer, 1), '')
+      into v_slug from generate_series(1, 6);
+    exit when not exists (select 1 from public.profiles where slug = v_slug);
+  end loop;
+
+  if v_me is null then
+    insert into public.profiles(slug, first_name, nickname, expressions, sort_order, is_guest, guest_expires_at)
+    values (v_slug, v_name, v_name, array['joie'], 1000, true, now() + public._guest_ttl())
+    returning id into v_me;
+    insert into public.device_sessions(auth_uid, profile_id) values (v_uid, v_me)
+    on conflict (auth_uid) do update set profile_id = excluded.profile_id, created_at = now();
+  else
+    update public.profiles
+       set first_name = v_name, nickname = v_name,
+           slug = case when slug like 'g-' || v_av || '-%' then slug else v_slug end,
+           guest_expires_at = now() + public._guest_ttl()
+     where id = v_me;
+    -- Un invité n'est que dans une soirée à la fois.
+    delete from public.soiree_players sp using public.soirees s
+     where sp.profile_id = v_me and s.id = sp.soiree_id and s.id <> v_sid and s.status <> 'ended';
+  end if;
+
+  insert into public.soiree_players(soiree_id, profile_id) values (v_sid, v_me) on conflict do nothing;
+  return jsonb_build_object('profile', public._profile_json(v_me), 'soiree', public._soiree_json(v_sid));
+end $$;
+
+-- Purge horaire (pg_cron si dispo ; sinon purge paresseuse dans les RPC ci-dessus).
+do $$
+begin
+  begin
+    perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'guests-purge';
+    perform cron.schedule('guests-purge', '23 * * * *', 'select public._purge_guests()');
+  exception when others then
+    raise notice 'pg_cron indisponible (%) : purge des invités uniquement paresseuse', sqlerrm;
+  end;
+end $$;
+
+revoke all on function public._require_member() from public, anon, authenticated;
+revoke all on function public._guest_avatars() from public, anon, authenticated;
+revoke all on function public._guest_ttl() from public, anon, authenticated;
+revoke all on function public._guest_max_per_soiree() from public, anon, authenticated;
+revoke all on function public._purge_guests() from public, anon, authenticated;
+revoke all on function public._guest_soiree_of(text) from public, anon, authenticated;
+revoke all on function public.open_guest_invites(uuid) from public, anon;
+revoke all on function public.close_guest_invites(uuid) from public, anon;
+revoke all on function public.guest_invite_info(text) from public, anon;
+revoke all on function public.join_as_guest(text, text, text) from public, anon;
+grant execute on function public.open_guest_invites(uuid) to authenticated;
+grant execute on function public.close_guest_invites(uuid) to authenticated;
+grant execute on function public.guest_invite_info(text) to authenticated;
+grant execute on function public.join_as_guest(text, text, text) to authenticated;
 
 
 -- ===== features\mises.sql =====
@@ -6087,6 +6364,12 @@ begin
   if not exists (select 1 from public.profiles where id = p_profile_id) then
     raise exception 'unknown_profile';
   end if;
+  -- Invité (guest.sql) : seulement dans SA soirée (ré-invitation après exclusion).
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest)
+     and (not exists (select 1 from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id)
+          or public._open_soirees_count(p_profile_id) > 0) then
+    raise exception 'guest_forbidden';
+  end if;
   delete from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id;
   if exists (select 1 from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id) then
     return;
@@ -6719,6 +7002,7 @@ as $$
   select p.id, p.slug, p.first_name, p.nickname, p.equipped_expression, p.equipped_tenue, p.expressions,
          exists (select 1 from public.profile_credentials c where c.profile_id = p.id)
   from public.profiles p
+  where not p.is_guest  -- écran de connexion : la bande seulement
   order by p.sort_order, p.slug
 $$;
 revoke all on function public.list_profiles_public() from public;
@@ -6734,7 +7018,8 @@ select p.id as profile_id, p.slug, p.first_name, p.nickname, p.equipped_expressi
        coalesce(s.games_played, 0) as games_played,
        rank() over (order by coalesce(s.wins, 0) desc) as rank
 from public.profiles p
-left join public.player_stats s on s.profile_id = p.id;
+left join public.player_stats s on s.profile_id = p.id
+where not p.is_guest;  -- invités hors classements (features/guest.sql)
 
 drop view if exists public.leaderboard_by_game;
 create view public.leaderboard_by_game with (security_invoker = true) as
@@ -6745,7 +7030,7 @@ select mp.game_id, p.id as profile_id, p.slug, p.first_name, p.nickname, p.equip
        rank() over (partition by mp.game_id
                     order by count(*) filter (where mp.won) desc, coalesce(sum(mp.points), 0) desc) as rank
 from public.match_players mp
-join public.profiles p on p.id = mp.profile_id
+join public.profiles p on p.id = mp.profile_id and not p.is_guest
 group by mp.game_id, p.id;
 
 revoke all on table public.leaderboard_general, public.leaderboard_by_game from anon, authenticated;
@@ -7550,6 +7835,7 @@ as $$
            x.profile_id, count(*)::int as wins
       from public.match_players x
       join public.matches m on m.id = x.match_id and m.status = 'finished' and m.finished_at is not null
+      join public.profiles gp on gp.id = x.profile_id and not gp.is_guest  -- invités exclus (guest.sql)
      where x.won
      group by 1, 2
   ), top as (
@@ -7602,6 +7888,7 @@ begin
                    where m.status = 'finished' and m.finished_at >= v_from and m.finished_at < v_to
                      and (p_game is null or x.game_id = p_game)
                 ) mp on mp.profile_id = p.id
+               where not p.is_guest  -- invités exclus (guest.sql)
                group by p.id
             ) a
         ) r), '[]'::jsonb),

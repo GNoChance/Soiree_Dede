@@ -17,7 +17,9 @@ import { GAMES, getGame } from '@/games/registry'
 import type { GameDefinition } from '@/games/types'
 import type { GameId, GameOptions, NewUnlocks, SoireeEndReason } from '@/types/db'
 import { leaveSoiree, refetchActiveSoirees, useActiveSoirees, useCurrentMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
-import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
+import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
+import { GuestInviteButton } from '@/features/guest/GuestInvite'
+import { useIsGuest } from '@/features/guest/api'
 import { CheckableToken, ConfirmModal, LaunchCountdown, PlayerToken, UnlockReveal } from '@/features/soiree/components'
 import { GameWheel } from '@/features/soiree/GameWheel'
 import { closePronos, openPronos, usePronos } from '@/features/pronos/api'
@@ -72,6 +74,8 @@ export function SoireePage() {
   /** Soirée scénarisée (mode Réveillon) en cours : remplace le panneau de lancement. */
   const scenario = readScenario(soiree)
   const playerIds = useMemo(() => data?.playerIds ?? [], [data])
+  useEnsurePlayers(playerIds)
+  const isGuest = useIsGuest()
   /** Fin auto prévue (my_active_soirees) ; null pendant une partie. */
   useWheelSpins(id ?? '', (sp) => {
     if (sp.id <= lastSpinId.current) return
@@ -146,14 +150,14 @@ export function SoireePage() {
     // mesurée pour que la fin (« Terminer la soirée ») reste atteignable.
     <div className="flex flex-col gap-5 pb-10" style={isHost && barH ? { paddingBottom: barH + 16 } : undefined}>
       <div className="flex items-center gap-2">
-        <button
+        {!isGuest && <button
           type="button"
           aria-label="Retour au hub"
           onClick={() => navigate('/')}
           className="flex size-11 items-center justify-center rounded-full border-[3px] border-ink bg-surface shadow-sticker-sm"
         >
           <ArrowLeft className="size-5" strokeWidth={3} />
-        </button>
+        </button>}
         <h1 className="flex-1 text-3xl">Le salon</h1>
         <span className="flex items-center gap-1 font-display font-extrabold">
           <Users className="size-5" /> {playerIds.length}
@@ -166,7 +170,9 @@ export function SoireePage() {
 
       <CodeCard code={soiree.code} />
 
-      <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} onKick={isHost ? setKickTarget : undefined} />
+      {isHost && <GuestInviteButton soireeId={soiree.id} code={soiree.code} />}
+
+      <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} onKick={isHost ? setKickTarget : undefined} noLinks={isGuest} />
 
       {!scenario && <SoireeStandingsCard soireeId={soiree.id} />}
 
@@ -376,7 +382,7 @@ function CodeCard({ code }: { code: string }) {
   )
 }
 
-function PlayersGrid({ ids, hostId, meId, byId, onKick }: { ids: string[]; hostId: string; meId: string; byId: ReturnType<typeof usePlayers>['byId']; onKick?: (id: string) => void }) {
+function PlayersGrid({ ids, hostId, meId, byId, onKick, noLinks }: { ids: string[]; hostId: string; meId: string; byId: ReturnType<typeof usePlayers>['byId']; onKick?: (id: string) => void; noLinks?: boolean }) {
   return (
     <div className="grid grid-cols-3 gap-y-5 pt-3">
       <AnimatePresence>
@@ -392,9 +398,14 @@ function PlayersGrid({ ids, hostId, meId, byId, onKick }: { ids: string[]; hostI
               transition={{ type: 'spring', stiffness: 380, damping: 14 }}
               className="relative flex justify-center"
             >
-              <Link to={`/profil/${id}`} aria-label={`Voir le profil de ${p.nickname}`} className="rounded-2xl">
-                <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} showTitle label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
-              </Link>
+              {/* Invités (mode invité) : pas de page profil, ni pour eux ni pour les voir. */}
+              {noLinks || p.isGuest ? (
+                <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} showTitle label={id === meId ? `${p.nickname} (toi)` : p.isGuest ? `${p.nickname} 👋` : p.nickname} />
+              ) : (
+                <Link to={`/profil/${id}`} aria-label={`Voir le profil de ${p.nickname}`} className="rounded-2xl">
+                  <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} showTitle label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
+                </Link>
+              )}
               {onKick && id !== meId && (
                 <button
                   type="button"

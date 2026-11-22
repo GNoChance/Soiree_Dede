@@ -55,6 +55,12 @@ begin
   if not exists (select 1 from public.profiles where id = p_profile_id) then
     raise exception 'unknown_profile';
   end if;
+  -- Invité (guest.sql) : seulement dans SA soirée (ré-invitation après exclusion).
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest)
+     and (not exists (select 1 from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id)
+          or public._open_soirees_count(p_profile_id) > 0) then
+    raise exception 'guest_forbidden';
+  end if;
   delete from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id;
   if exists (select 1 from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id) then
     return;

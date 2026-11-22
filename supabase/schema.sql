@@ -26,6 +26,10 @@ create table if not exists public.profiles (
   created_at          timestamptz not null default now()
 );
 alter table public.profiles add column if not exists sort_order integer not null default 100;
+-- Mode invité (features/guest.sql) : profil temporaire sans PIN, lié à une seule soirée,
+-- exclu des classements / XP / stats / trophées, purgé après guest_expires_at.
+alter table public.profiles add column if not exists is_guest boolean not null default false;
+alter table public.profiles add column if not exists guest_expires_at timestamptz;
 
 -- Hash du PIN : table séparée, jamais lisible par les clients (écart au contrat,
 -- voir README : évite qu'un `select('*')` sur profiles n'expose le hash).
@@ -220,6 +224,19 @@ begin
   return v_id;
 end $$;
 
+-- Comme _require_profile, mais refuse les invités (profiles.is_guest) : RPC réservées à la bande.
+create or replace function public._require_member()
+returns uuid language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_id uuid := public._require_profile();
+begin
+  if exists (select 1 from public.profiles where id = v_id and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
+  return v_id;
+end $$;
+
 create or replace function public._profile_json(p_id uuid)
 returns jsonb language sql stable security definer
 set search_path = public, extensions
@@ -349,7 +366,7 @@ begin
 
   select count(*) into v_friends from public.friendships f
    where f.status = 'accepted' and (f.requester_id = p_profile_id or f.addressee_id = p_profile_id);
-  select count(*) - 1 into v_others from public.profiles;
+  select count(*) - 1 into v_others from public.profiles where not is_guest;
   select coalesce(max(wins), 0) into v_maxwins from public.player_stats;
 
   if v_s.wins >= 5  then v_c := v_c || 'pouces'::text; end if;
@@ -417,6 +434,7 @@ as $$
   select p.id, p.slug, p.first_name, p.nickname, p.equipped_expression, p.expressions,
          exists (select 1 from public.profile_credentials c where c.profile_id = p.id)
   from public.profiles p
+  where not p.is_guest  -- écran de connexion : la bande seulement
   order by p.sort_order, p.slug
 $$;
 
@@ -571,6 +589,9 @@ declare
   v_row public.friendships%rowtype;
 begin
   if p_profile_id is null or p_profile_id = v_me then raise exception 'invalid_friend'; end if;
+  if exists (select 1 from public.profiles where id in (v_me, p_profile_id) and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
   if not exists (select 1 from public.profiles where id = p_profile_id) then
     raise exception 'unknown_profile';
   end if;
@@ -686,6 +707,7 @@ begin
   v_players := array(
     select distinct mp.profile_id from public.match_players mp
     join public.matches m on m.id = mp.match_id
+    join public.profiles p on p.id = mp.profile_id and not p.is_guest  -- invités : pas de stats
     where m.soiree_id = p_soiree_id);
   if cardinality(v_players) = 0 then return '{}'::jsonb; end if;
 
@@ -828,7 +850,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me   uuid := public._require_profile();
+  v_me   uuid := public._require_member();
   v_ids  uuid[];
   v_busy text;
   v_id   uuid;
@@ -842,7 +864,7 @@ begin
   end if;
 
   v_ids := array(select distinct x from unnest(coalesce(p_player_ids, '{}') || v_me) x where x is not null);
-  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x)) then
+  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x and not p.is_guest)) then
     raise exception 'unknown_profile';
   end if;
   select string_agg(p.nickname, ', ' order by p.sort_order) into v_busy
@@ -875,7 +897,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();  -- invités : join_as_guest (features/guest.sql)
   v_sid uuid;
 begin
   perform pg_advisory_xact_lock(hashtext('soiree_membership'));
@@ -925,8 +947,10 @@ begin
   if not found then return; end if;
 
   if v_host = v_me then
-    select profile_id into v_new from public.soiree_players
-     where soiree_id = v_sid order by joined_at, profile_id limit 1;
+    -- Un invité ne devient jamais hôte : s'il ne reste que des invités, la soirée se termine.
+    select sp.profile_id into v_new from public.soiree_players sp
+      join public.profiles p on p.id = sp.profile_id and not p.is_guest
+     where sp.soiree_id = v_sid order by sp.joined_at, sp.profile_id limit 1;
     if v_new is null then
       perform public._close_soiree(v_sid, 'empty', true, now());
     else
@@ -1061,6 +1085,12 @@ begin
               || jsonb_build_object('last', case when v_maxp > v_minp and r.placement = v_maxp then 1 else 0 end,
                                     'nplayers', v_np));
 
+    -- Invité (features/guest.sql) : ligne match_players gardée (salon, récap, pronos) mais ni XP,
+    -- ni player_stats, ni déblocages/tenues/trophées.
+    if exists (select 1 from public.profiles where id = r.profile_id and is_guest) then
+      v_xpmap := v_xpmap || jsonb_build_object(r.profile_id::text, 0);
+      continue;
+    end if;
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;
 
@@ -1810,7 +1840,8 @@ select p.id as profile_id, p.slug, p.first_name, p.nickname, p.equipped_expressi
        coalesce(s.games_played, 0) as games_played,
        rank() over (order by coalesce(s.wins, 0) desc) as rank
 from public.profiles p
-left join public.player_stats s on s.profile_id = p.id;
+left join public.player_stats s on s.profile_id = p.id
+where not p.is_guest;  -- invités hors classements (features/guest.sql)
 
 drop view if exists public.leaderboard_by_game;
 create view public.leaderboard_by_game with (security_invoker = true) as
@@ -1821,7 +1852,7 @@ select mp.game_id, p.id as profile_id, p.slug, p.first_name, p.nickname, p.equip
        rank() over (partition by mp.game_id
                     order by count(*) filter (where mp.won) desc, coalesce(sum(mp.points), 0) desc) as rank
 from public.match_players mp
-join public.profiles p on p.id = mp.profile_id
+join public.profiles p on p.id = mp.profile_id and not p.is_guest
 group by mp.game_id, p.id;
 
 -- =============================================================================

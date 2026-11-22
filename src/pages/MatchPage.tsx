@@ -11,7 +11,7 @@ import { useSession } from '@/store/session'
 import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
 import { soireeEndCopy, useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
-import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
+import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
 import { ConfirmModal, LaunchCountdown } from '@/features/soiree/components'
 import { ResultsScreen } from '@/features/soiree/ResultsScreen'
 import { SpectatorBanner } from '@/features/spectate/SpectatorBanner'
@@ -53,6 +53,7 @@ export function MatchPage() {
   const isHost = Boolean(soireeData && soireeData.soiree.host_id === meId)
   const game = match ? getGame(match.game_id) : undefined
   const state = match?.state as unknown as BaseGameState | undefined
+  useEnsurePlayers(soireeData?.playerIds)
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
   // Tant que la soirée n'est pas connue (chargement), on ne sait pas si je suis l'hôte (meneur qui ne joue pas) : pas de bandeau.

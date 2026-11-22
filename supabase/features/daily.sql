@@ -126,7 +126,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
 begin
   insert into public.daily_runs(profile_id, day) values (v_me, v_day)
@@ -143,7 +143,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer := 0; v_pts integer; v_xp integer; v_rank integer; v_n integer; i integer;
@@ -191,7 +191,7 @@ returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_len integer;
@@ -220,7 +220,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer; v_xp integer; v_rank integer; v_n integer;
@@ -350,7 +350,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_today date := public._daily_day();
   v_new boolean := false; v_n integer; v_trophy boolean := false; v_gifts jsonb := '[]'::jsonb;
   v_from date := make_date(extract(year from p_day)::int, 12, 1);

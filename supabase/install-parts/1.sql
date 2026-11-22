@@ -29,6 +29,10 @@ create table if not exists public.profiles (
   created_at          timestamptz not null default now()
 );
 alter table public.profiles add column if not exists sort_order integer not null default 100;
+-- Mode invité (features/guest.sql) : profil temporaire sans PIN, lié à une seule soirée,
+-- exclu des classements / XP / stats / trophées, purgé après guest_expires_at.
+alter table public.profiles add column if not exists is_guest boolean not null default false;
+alter table public.profiles add column if not exists guest_expires_at timestamptz;
 
 -- Hash du PIN : table séparée, jamais lisible par les clients (écart au contrat,
 -- voir README : évite qu'un `select('*')` sur profiles n'expose le hash).
@@ -223,6 +227,19 @@ begin
   return v_id;
 end $$;
 
+-- Comme _require_profile, mais refuse les invités (profiles.is_guest) : RPC réservées à la bande.
+create or replace function public._require_member()
+returns uuid language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_id uuid := public._require_profile();
+begin
+  if exists (select 1 from public.profiles where id = v_id and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
+  return v_id;
+end $$;
+
 create or replace function public._profile_json(p_id uuid)
 returns jsonb language sql stable security definer
 set search_path = public, extensions
@@ -352,7 +369,7 @@ begin
 
   select count(*) into v_friends from public.friendships f
    where f.status = 'accepted' and (f.requester_id = p_profile_id or f.addressee_id = p_profile_id);
-  select count(*) - 1 into v_others from public.profiles;
+  select count(*) - 1 into v_others from public.profiles where not is_guest;
   select coalesce(max(wins), 0) into v_maxwins from public.player_stats;
 
   if v_s.wins >= 5  then v_c := v_c || 'pouces'::text; end if;
@@ -420,6 +437,7 @@ as $$
   select p.id, p.slug, p.first_name, p.nickname, p.equipped_expression, p.expressions,
          exists (select 1 from public.profile_credentials c where c.profile_id = p.id)
   from public.profiles p
+  where not p.is_guest  -- écran de connexion : la bande seulement
   order by p.sort_order, p.slug
 $$;
 
@@ -574,6 +592,9 @@ declare
   v_row public.friendships%rowtype;
 begin
   if p_profile_id is null or p_profile_id = v_me then raise exception 'invalid_friend'; end if;
+  if exists (select 1 from public.profiles where id in (v_me, p_profile_id) and is_guest) then
+    raise exception 'guest_forbidden';
+  end if;
   if not exists (select 1 from public.profiles where id = p_profile_id) then
     raise exception 'unknown_profile';
   end if;
@@ -689,6 +710,7 @@ begin
   v_players := array(
     select distinct mp.profile_id from public.match_players mp
     join public.matches m on m.id = mp.match_id
+    join public.profiles p on p.id = mp.profile_id and not p.is_guest  -- invités : pas de stats
     where m.soiree_id = p_soiree_id);
   if cardinality(v_players) = 0 then return '{}'::jsonb; end if;
 
@@ -831,7 +853,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me   uuid := public._require_profile();
+  v_me   uuid := public._require_member();
   v_ids  uuid[];
   v_busy text;
   v_id   uuid;
@@ -845,7 +867,7 @@ begin
   end if;
 
   v_ids := array(select distinct x from unnest(coalesce(p_player_ids, '{}') || v_me) x where x is not null);
-  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x)) then
+  if exists (select 1 from unnest(v_ids) x where not exists (select 1 from public.profiles p where p.id = x and not p.is_guest)) then
     raise exception 'unknown_profile';
   end if;
   select string_agg(p.nickname, ', ' order by p.sort_order) into v_busy
@@ -878,7 +900,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();  -- invités : join_as_guest (features/guest.sql)
   v_sid uuid;
 begin
   perform pg_advisory_xact_lock(hashtext('soiree_membership'));
@@ -928,8 +950,10 @@ begin
   if not found then return; end if;
 
   if v_host = v_me then
-    select profile_id into v_new from public.soiree_players
-     where soiree_id = v_sid order by joined_at, profile_id limit 1;
+    -- Un invité ne devient jamais hôte : s'il ne reste que des invités, la soirée se termine.
+    select sp.profile_id into v_new from public.soiree_players sp
+      join public.profiles p on p.id = sp.profile_id and not p.is_guest
+     where sp.soiree_id = v_sid order by sp.joined_at, sp.profile_id limit 1;
     if v_new is null then
       perform public._close_soiree(v_sid, 'empty', true, now());
     else
@@ -1064,6 +1088,12 @@ begin
               || jsonb_build_object('last', case when v_maxp > v_minp and r.placement = v_maxp then 1 else 0 end,
                                     'nplayers', v_np));
 
+    -- Invité (features/guest.sql) : ligne match_players gardée (salon, récap, pronos) mais ni XP,
+    -- ni player_stats, ni déblocages/tenues/trophées.
+    if exists (select 1 from public.profiles where id = r.profile_id and is_guest) then
+      v_xpmap := v_xpmap || jsonb_build_object(r.profile_id::text, 0);
+      continue;
+    end if;
     v_xp := greatest(coalesce(r.points, 0), 0) * 10 + case when coalesce(r.won, false) then 50 else 0 end;
     update public.profiles set xp = xp + v_xp where id = r.profile_id;
 
@@ -1813,7 +1843,8 @@ select p.id as profile_id, p.slug, p.first_name, p.nickname, p.equipped_expressi
        coalesce(s.games_played, 0) as games_played,
        rank() over (order by coalesce(s.wins, 0) desc) as rank
 from public.profiles p
-left join public.player_stats s on s.profile_id = p.id;
+left join public.player_stats s on s.profile_id = p.id
+where not p.is_guest;  -- invités hors classements (features/guest.sql)
 
 drop view if exists public.leaderboard_by_game;
 create view public.leaderboard_by_game with (security_invoker = true) as
@@ -1824,7 +1855,7 @@ select mp.game_id, p.id as profile_id, p.slug, p.first_name, p.nickname, p.equip
        rank() over (partition by mp.game_id
                     order by count(*) filter (where mp.won) desc, coalesce(sum(mp.points), 0) desc) as rank
 from public.match_players mp
-join public.profiles p on p.id = mp.profile_id
+join public.profiles p on p.id = mp.profile_id and not p.is_guest
 group by mp.game_id, p.id;
 
 -- =============================================================================
@@ -2463,6 +2494,8 @@ returns integer language plpgsql stable security definer
 set search_path = public, extensions
 as $$
 begin
+  -- Invite de passage (features/guest.sql) : jamais de pieces (pas d'achat, de pari ni de defi).
+  if exists (select 1 from public.profiles where id = p_profile and is_guest) then return 0; end if;
   return (select coalesce(5 * count(*) + 15 * count(*) filter (where won), 0) from public.match_players where profile_id = p_profile)::int
        + (select 10 * count(*) from public.daily_runs where profile_id = p_profile and finished_at is not null)::int
        + (select 20 * count(*) from public.trophy_unlocks where profile_id = p_profile)::int
@@ -2957,7 +2990,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
 begin
   insert into public.daily_runs(profile_id, day) values (v_me, v_day)
@@ -2974,7 +3007,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer := 0; v_pts integer; v_xp integer; v_rank integer; v_n integer; i integer;
@@ -3022,7 +3055,7 @@ returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_len integer;
@@ -3051,7 +3084,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_day date := public._daily_day();
   r     public.daily_runs%rowtype;
   v_score integer; v_xp integer; v_rank integer; v_n integer;
@@ -3181,7 +3214,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me  uuid := public._require_profile();
+  v_me  uuid := public._require_member();
   v_today date := public._daily_day();
   v_new boolean := false; v_n integer; v_trophy boolean := false; v_gifts jsonb := '[]'::jsonb;
   v_from date := make_date(extract(year from p_day)::int, 12, 1);
@@ -4313,579 +4346,245 @@ revoke all on function public.head_to_head(uuid) from public, anon;
 grant execute on function public.head_to_head(uuid) to authenticated;
 
 
--- ===== features\mises.sql =====
+-- ===== features\guest.sql =====
 -- =============================================================================
--- MISES DE PIECES 🪙 — idempotent, execute APRES cadeaux.sql (ordre alphabetique de features/).
---
--- Registre coin_ledger : tout mouvement de pieces qui n'est pas derive de l'historique (parties,
--- defis du jour, trophees, achats). _coins (cadeaux.sql) y ajoute sum(delta). Une ligne par
--- (profil, raison, ref) : les reglements sont idempotents (on conflict do nothing).
---   raisons : wager (- mise), wager_win (+ gain), wager_refund (+ mise) ; ref = 'match:<id>'
---             challenge (- enjeu), challenge_win (+ pot), challenge_refund (+ enjeu) ; ref = 'challenge:<id>'
--- Solde jamais negatif : chaque debit se fait sous verrou du profil (select ... for update, comme
--- buy_item) apres verification du solde.
---
--- 1. PARIS ENTRE POTES (match_wagers) : un membre de la soiree qui NE JOUE PAS la partie (spectateur,
---    hote meneur) mise 10, 25 ou 50 sur un joueur. Ouverts 45 s apres le lancement (jeux en duel :
---    en plus, seulement pendant le 1er duel, tant que son 1er coup n'est pas joue ou pendant ses 15
---    premieres secondes, comme les paris du socle). Modifiables tant qu'ouverts (1 pari par partie).
---    Cote = 1 / chances du joueur a CE jeu, chances = (victoires + 1) / (parties + nb de joueurs de
---    la partie) : un inconnu a 1 chance sur n ; arrondie au 0,5 et plafonnee entre x1,5 et x5 ;
---    figee au moment du pari. Gain = floor(mise x cote) si le joueur choisi gagne (equipe /
---    egalite : il suffit qu'il soit parmi les gagnants), sinon mise perdue. Partie annulee, sans
---    gagnant, ou joueur choisi absent des resultats : rembourse.
--- 2. DEFIS ENTRE JOUEURS (coin_challenges) : « je te defie au Morpion, enjeu 50 ». Ami accepte, jeu
---    en duel (jeu qui a un hook game_<id>_board_new), enjeu 0/10/25/50/100 <= solde des deux.
---    48 h pour accepter (sinon expire, rien preleve) ou refuser ; le defiant peut annuler tant que
---    c'est en attente. Accepte : les deux enjeux sont preleves. Le duel se joue dans une soiree
---    commune (play_challenge en trouve / cree une) ; l'hote le lance avec start_challenge (mode
---    duel, 1 manche, eux deux seuls). Fin : le gagnant empoche le pot (2 x enjeu) ; egalite, partie
---    annulee, ou defi accepte jamais joue sous 7 jours : chacun est rembourse.
--- Reglement automatique : trigger matches_mises_settle (status -> 'finished' : finish_match, abort,
--- fin de soiree, filet 3 h).
---
--- RPC (security definer, grant authenticated) — erreurs entre parentheses :
---   match_wagers(p_match_id) -> etat des paris               (match_not_found, not_in_soiree)
---   place_wager(p_match_id, p_pick, p_stake) -> idem         (wager_closed, wager_invalid_stake,
---       wager_invalid_pick, wager_player_cannot_bet, wager_not_enough_coins, not_in_soiree, match_not_found)
---   challenge_options() -> {coins, friends:[{id, max_stake, open}]}
---   create_challenge(p_other, p_game, p_stake) -> defi       (unknown_profile, challenge_not_friend,
---       challenge_invalid_game, challenge_invalid_stake, challenge_stake_too_high, challenge_already_open)
---   respond_challenge(p_id, p_accept) -> defi                (challenge_not_found, challenge_not_pending,
---       challenge_expired, challenge_not_enough_coins, challenge_opponent_broke)
---   cancel_challenge(p_id) -> defi                           (challenge_not_found, challenge_not_pending)
---   my_challenges() -> {coins, challenges:[...]}
---   play_challenge(p_id) -> {soiree_id}                      (challenge_not_found, challenge_not_accepted,
---       challenge_already_started + erreurs de create_soiree)
---   soiree_challenges(p_soiree_id) -> [defis acceptes jouables dans cette soiree]   (not_in_soiree)
---   start_challenge(p_id, p_soiree_id, p_options) -> match_id (challenge_not_found, challenge_not_accepted,
---       challenge_already_started, challenge_not_in_soiree + erreurs de start_match)
+-- MODE INVITÉ — idempotent, exécuté APRÈS schema.sql (features/*, ordre alphabétique).
+-- Un ami de passage rejoint UNE soirée depuis son téléphone, sans PIN ni compte :
+--  * l'hôte ouvre les invitations (open_guest_invites) -> soirees.guest_token (10 car.)
+--    affiché en QR code (/invite/<token>) ; le code à 4 caractères du salon marche aussi
+--    tant que les invitations sont ouvertes (close_guest_invites les ferme) ;
+--  * l'invité (session anonyme de son appareil) appelle join_as_guest(code|token, prénom,
+--    avatar) -> profil temporaire profiles.is_guest (slug « g-<avatar>-<6 car.> »), lié à
+--    l'appareil via device_sessions, membre de cette seule soirée ;
+--  * il joue comme les autres (match_players écrit, classement/récap de la soirée, pronos)
+--    mais NE COMPTE PAS pour la bande : ni XP, ni player_stats, ni déblocages / tenues /
+--    trophées (finish_match), absent des classements général / par jeu / semaine, du défi
+--    du jour, de l'Avent, des amis, de l'écran de connexion (cf. schema.sql, weekly.sql,
+--    tenues.sql, daily.sql, soiree-hote.sql : filtres `is_guest` / _require_member()).
+--    « Grande tablée » (trophée) compte les invités présents : c'est la taille de la tablée.
+--  * il ne peut ni créer de soirée, ni rejoindre une autre soirée par code
+--    (join_soiree_by_code -> guest_forbidden), ni devenir hôte (leave_soiree), ni être
+--    invité ailleurs (create_soiree / invite_to_soiree) ; pas de PIN, jamais admin ;
+--  * purge : guest_expires_at = dernière arrivée + 24 h ; un invité expiré qui n'est plus
+--    dans aucune soirée en cours est supprimé (cascade : session, lignes de parties…) par
+--    _purge_guests(), appelée par join_as_guest / open_guest_invites + pg_cron (horaire).
+-- Erreurs : not_authenticated, invalid_nickname, invalid_avatar, soiree_not_found,
+--   guests_closed, already_member, soiree_banned, too_many_guests, not_host, soiree_ended.
+-- Pièces 🪙 (cadeaux.sql, non modifié) : _coins compterait les parties d'un invité ; le
+-- front n'affiche jamais solde ni boutique à un invité (profil purgé sous 24 h).
 -- =============================================================================
 
--- ---- Registre ---------------------------------------------------------------------
-create table if not exists public.coin_ledger (
-  id         bigint generated always as identity primary key,
-  profile_id uuid not null references public.profiles(id) on delete cascade,
-  delta      integer not null,
-  reason     text not null,
-  ref        text not null default '',
-  created_at timestamptz not null default now()
-);
-create unique index if not exists coin_ledger_ref_uq on public.coin_ledger(profile_id, reason, ref);
-alter table public.coin_ledger enable row level security;
-revoke all on table public.coin_ledger from anon, authenticated;
--- Aucune policy : lecture et ecriture uniquement via les RPC.
+alter table public.soirees add column if not exists guest_token text;
+create unique index if not exists soirees_guest_token_uq on public.soirees(guest_token)
+  where guest_token is not null and status <> 'ended';
+create index if not exists profiles_guest_exp_idx on public.profiles(guest_expires_at) where is_guest;
 
--- Mouvement idempotent (meme profil / raison / ref = ignore).
-create or replace function public._ledger_add(p_profile uuid, p_delta integer, p_reason text, p_ref text)
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-begin
-  if coalesce(p_delta, 0) = 0 then return; end if;
-  insert into public.coin_ledger(profile_id, delta, reason, ref)
-  values (p_profile, p_delta, p_reason, coalesce(p_ref, ''))
-  on conflict (profile_id, reason, ref) do nothing;
-end $$;
-
--- Ids (texte) des joueurs d'une partie (state.players), uuid valides seulement.
-create or replace function public._match_player_ids(p_state jsonb)
+-- Avatars génériques des invités (ids stables, emojis côté front : src/data/guests.ts).
+create or replace function public._guest_avatars()
 returns text[] language sql immutable
+as $$ select array['renard','chat','chien','panda','lapin','grenouille',
+                   'licorne','pieuvre','poussin','koala','tigre','singe'] $$;
+create or replace function public._guest_ttl()
+returns interval language sql immutable as $$ select interval '24 hours' $$;
+create or replace function public._guest_max_per_soiree()
+returns integer language sql immutable as $$ select 8 $$;
+
+-- Supprime les invités expirés qui ne sont plus dans aucune soirée en cours (jamais hôtes).
+create or replace function public._purge_guests()
+returns integer language plpgsql security definer
 set search_path = public, extensions
 as $$
-  select coalesce(array(
-    select x from jsonb_array_elements_text(case when jsonb_typeof(p_state->'players') = 'array'
-                                                 then p_state->'players' else '[]'::jsonb end) x
-     where x ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'), '{}')
-$$;
+declare v_n integer;
+begin
+  delete from public.profiles p
+   where p.is_guest and p.guest_expires_at < now()
+     and not exists (select 1 from public.soiree_players sp join public.soirees s on s.id = sp.soiree_id
+                      where sp.profile_id = p.id and s.status <> 'ended')
+     and not exists (select 1 from public.soirees s where s.host_id = p.id);
+  get diagnostics v_n = row_count;
+  return v_n;
+end $$;
 
--- =============================================================================
--- 1. PARIS ENTRE POTES
--- =============================================================================
-create table if not exists public.match_wagers (
-  match_id   uuid not null references public.matches(id) on delete cascade,
-  profile_id uuid not null references public.profiles(id) on delete cascade,
-  pick       uuid not null references public.profiles(id) on delete cascade,
-  stake      integer not null check (stake in (10, 25, 50)),
-  odds       numeric(3, 1) not null,
-  status     text not null default 'open' check (status in ('open', 'won', 'lost', 'refunded')),
-  payout     integer not null default 0,
-  created_at timestamptz not null default now(),
-  settled_at timestamptz,
-  primary key (match_id, profile_id)
-);
-create index if not exists match_wagers_profile_idx on public.match_wagers(profile_id);
-alter table public.match_wagers enable row level security;
-revoke all on table public.match_wagers from anon, authenticated;
-
-create or replace function public._wager_window()
-returns interval language sql immutable as $$ select interval '45 seconds' $$;
-
--- Cote d'un joueur a un jeu (partie a p_n joueurs) : 1 / ((victoires + 1) / (parties + n)),
--- arrondie au 0,5, entre 1,5 et 5.
-create or replace function public._wager_odds(p_game text, p_pick uuid, p_n integer)
-returns numeric language sql stable security definer
-set search_path = public, extensions
-as $$
-  select least(5.0, greatest(1.5, round(2.0 * (s.played + greatest(p_n, 2)) / (s.wins + 1)) / 2.0))::numeric(3, 1)
-    from (select count(*)::int as played, count(*) filter (where won)::int as wins
-            from public.match_players where profile_id = p_pick and game_id = p_game) s
-$$;
-
--- Paris ouverts sur cette partie ?
-create or replace function public._wager_open(p_status text, p_created timestamptz, p_state jsonb)
-returns boolean language sql stable
-set search_path = public, extensions
-as $$
-  select p_status = 'playing'
-     and now() < p_created + public._wager_window()
-     and coalesce(p_state->>'phase', '') <> 'aborted'
-     and (jsonb_typeof(p_state->'duel') is distinct from 'object' or (
-            coalesce(p_state->'duel'->>'no', '1') = '1'
-        and coalesce(p_state->'duel'->>'game_no', '1') in ('0', '1')
-        and (coalesce(p_state->'duel'->>'moves', '0') = '0'
-             or now() < coalesce(nullif(p_state->'duel'->>'bets_until', '')::timestamptz, '-infinity'::timestamptz))))
-$$;
-
--- Etat des paris d'une partie pour moi.
--- {can_bet, open, closes_at, coins, stakes, odds:{id: x}, backers:{id: n}, total, mine|null}
-create or replace function public.match_wagers(p_match_id uuid)
-returns jsonb language plpgsql stable security definer
+-- Soirée visée par un code (4 car.) ou un jeton d'invitation ; invitations ouvertes obligatoires.
+create or replace function public._guest_soiree_of(p_code text)
+returns uuid language plpgsql stable security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me      uuid := public._require_profile();
-  v_m       public.matches%rowtype;
-  v_players text[];
-  v_n       integer;
+  v_code text := upper(btrim(coalesce(p_code, '')));
+  v_sid  uuid;
+  v_tok  text;
 begin
-  select * into v_m from public.matches where id = p_match_id;
-  if not found then raise exception 'match_not_found'; end if;
-  if not public.is_soiree_member(v_m.soiree_id) then raise exception 'not_in_soiree'; end if;
-  v_players := public._match_player_ids(v_m.state);
-  v_n := greatest(cardinality(v_players), 2);
-  return jsonb_build_object(
-    'can_bet', not (v_me::text = any(v_players)) and cardinality(v_players) >= 2,
-    'open', public._wager_open(v_m.status, v_m.created_at, v_m.state),
-    'closes_at', v_m.created_at + public._wager_window(),
-    'coins', public._coins(v_me),
-    'stakes', jsonb_build_array(10, 25, 50),
-    'odds', coalesce((select jsonb_object_agg(p, public._wager_odds(v_m.game_id, p::uuid, v_n)) from unnest(v_players) p), '{}'::jsonb),
-    'backers', coalesce((select jsonb_object_agg(pick::text, n) from (
-                  select pick, count(*)::int as n from public.match_wagers where match_id = p_match_id group by pick) b), '{}'::jsonb),
-    'total', (select count(*)::int from public.match_wagers where match_id = p_match_id),
-    'mine', (select jsonb_build_object('pick', w.pick, 'stake', w.stake, 'odds', w.odds, 'status', w.status,
-                                       'payout', w.payout, 'gain', floor(w.stake * w.odds)::int)
-               from public.match_wagers w where w.match_id = p_match_id and w.profile_id = v_me));
+  if char_length(v_code) = 4 then
+    select id, guest_token into v_sid, v_tok from public.soirees where code = v_code and status <> 'ended';
+  elsif char_length(v_code) between 6 and 32 then
+    select id, guest_token into v_sid, v_tok from public.soirees where guest_token = v_code and status <> 'ended';
+  end if;
+  if v_sid is null then raise exception 'soiree_not_found'; end if;
+  if v_tok is null then raise exception 'guests_closed'; end if;
+  return v_sid;
 end $$;
 
--- Mise (ou change sa mise tant que c'est ouvert : l'ancienne est rendue, la nouvelle prelevee).
-create or replace function public.place_wager(p_match_id uuid, p_pick uuid, p_stake integer)
+-- Hôte : ouvre les invitations (jeton stable tant qu'elles restent ouvertes).
+-- -> {soiree_id, code, token, guests (nb d'invités présents), max_guests}
+create or replace function public.open_guest_invites(p_soiree_id uuid)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me      uuid := public._require_profile();
-  v_m       public.matches%rowtype;
-  v_players text[];
-  v_old     integer;
+  v_me    uuid := public._require_member();
+  v_s     public.soirees%rowtype;
+  v_alpha constant text := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  v_tok   text;
 begin
-  -- Verrou partage : la partie ne peut pas se terminer (reglement) pendant la mise.
-  select * into v_m from public.matches where id = p_match_id for share;
-  if not found then raise exception 'match_not_found'; end if;
-  if not public.is_soiree_member(v_m.soiree_id) then raise exception 'not_in_soiree'; end if;
-  v_players := public._match_player_ids(v_m.state);
-  if v_me::text = any(v_players) then raise exception 'wager_player_cannot_bet'; end if;
-  if not public._wager_open(v_m.status, v_m.created_at, v_m.state) then raise exception 'wager_closed'; end if;
-  if p_stake is null or p_stake not in (10, 25, 50) then raise exception 'wager_invalid_stake'; end if;
-  if p_pick is null or not (p_pick::text = any(v_players)) then raise exception 'wager_invalid_pick'; end if;
-
-  perform 1 from public.profiles where id = v_me for update;  -- serialise les debits du joueur
-  select stake into v_old from public.match_wagers where match_id = p_match_id and profile_id = v_me;
-  if public._coins(v_me) + coalesce(v_old, 0) < p_stake then raise exception 'wager_not_enough_coins'; end if;
-
-  insert into public.match_wagers(match_id, profile_id, pick, stake, odds)
-  values (p_match_id, v_me, p_pick, p_stake,
-          public._wager_odds(v_m.game_id, p_pick, greatest(cardinality(v_players), 2)))
-  on conflict (match_id, profile_id) do update
-    set pick = excluded.pick, stake = excluded.stake, odds = excluded.odds, created_at = now();
-  insert into public.coin_ledger(profile_id, delta, reason, ref)
-  values (v_me, -p_stake, 'wager', 'match:' || p_match_id)
-  on conflict (profile_id, reason, ref) do update set delta = excluded.delta, created_at = now();
-  return public.match_wagers(p_match_id);
-end $$;
-
--- =============================================================================
--- 2. DEFIS ENTRE JOUEURS
--- =============================================================================
-create table if not exists public.coin_challenges (
-  id            uuid primary key default gen_random_uuid(),
-  challenger_id uuid not null references public.profiles(id) on delete cascade,
-  opponent_id   uuid not null references public.profiles(id) on delete cascade,
-  game_id       text not null,
-  stake         integer not null check (stake in (0, 10, 25, 50, 100)),
-  -- pending -> accepted | declined | cancelled | expired ; accepted -> finished (winner_id, null = egalite) | void
-  status        text not null default 'pending'
-                check (status in ('pending', 'accepted', 'declined', 'cancelled', 'expired', 'finished', 'void')),
-  match_id      uuid references public.matches(id) on delete set null,
-  winner_id     uuid references public.profiles(id) on delete set null,
-  created_at    timestamptz not null default now(),
-  expires_at    timestamptz not null default now() + interval '48 hours',
-  accepted_at   timestamptz,
-  settled_at    timestamptz,
-  check (challenger_id <> opponent_id)
-);
-create index if not exists coin_challenges_challenger_idx on public.coin_challenges(challenger_id, status);
-create index if not exists coin_challenges_opponent_idx on public.coin_challenges(opponent_id, status);
-create index if not exists coin_challenges_match_idx on public.coin_challenges(match_id) where match_id is not null;
-alter table public.coin_challenges enable row level security;
-revoke all on table public.coin_challenges from anon, authenticated;
-
-create or replace function public._challenge_json(p_c public.coin_challenges, p_me uuid)
-returns jsonb language sql stable
-set search_path = public, extensions
-as $$
-  select to_jsonb(p_c) || jsonb_build_object(
-    'role', case when p_c.challenger_id = p_me then 'sent' else 'received' end,
-    'other_id', case when p_c.challenger_id = p_me then p_c.opponent_id else p_c.challenger_id end,
-    'match_status', (select m.status from public.matches m where m.id = p_c.match_id))
-$$;
-
--- Rembourse les deux joueurs d'un defi accepte (idempotent).
-create or replace function public._challenge_refund(p_c public.coin_challenges)
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-begin
-  perform public._ledger_add(p_c.challenger_id, p_c.stake, 'challenge_refund', 'challenge:' || p_c.id);
-  perform public._ledger_add(p_c.opponent_id, p_c.stake, 'challenge_refund', 'challenge:' || p_c.id);
-end $$;
-
--- Menage paresseux : defis en attente depasses -> expires ; acceptes jamais lances sous 7 jours -> rembourses.
-create or replace function public._challenges_tidy()
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  c public.coin_challenges%rowtype;
-begin
-  update public.coin_challenges set status = 'expired', settled_at = now()
-   where status = 'pending' and expires_at <= now();
-  for c in select * from public.coin_challenges
-            where status = 'accepted' and match_id is null and accepted_at < now() - interval '7 days'
-              for update skip locked
-  loop
-    perform public._challenge_refund(c);
-    update public.coin_challenges set status = 'void', settled_at = now() where id = c.id;
+  perform public._purge_guests();
+  select * into v_s from public.soirees where id = p_soiree_id for update;
+  if not found then raise exception 'soiree_not_found'; end if;
+  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
+  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  v_tok := v_s.guest_token;
+  while v_tok is null loop
+    select string_agg(substr(v_alpha, 1 + floor(random() * length(v_alpha))::integer, 1), '')
+      into v_tok from generate_series(1, 10);
+    if exists (select 1 from public.soirees where guest_token = v_tok and status <> 'ended') then
+      v_tok := null;
+    end if;
   end loop;
-end $$;
-
--- Jeu en duel = jeu qui fournit le hook board_new du socle duel (features/duel.sql).
-create or replace function public._challenge_game_ok(p_game text)
-returns boolean language sql stable
-set search_path = public, extensions
-as $$
-  select coalesce(p_game, '') ~ '^[a-z0-9-]{1,40}$'
-     and to_regprocedure(format('public.%I(jsonb, text, text)', 'game_' || replace(p_game, '-', '_') || '_board_new')) is not null
-$$;
-
-create or replace function public._are_friends(p_a uuid, p_b uuid)
-returns boolean language sql stable security definer
-set search_path = public, extensions
-as $$
-  select exists (select 1 from public.friendships f
-                  where f.status = 'accepted'
-                    and ((f.requester_id = p_a and f.addressee_id = p_b) or (f.requester_id = p_b and f.addressee_id = p_a)))
-$$;
-
--- Defi ouvert (en attente ou accepte, pas encore regle) entre deux joueurs ?
-create or replace function public._challenge_open_between(p_a uuid, p_b uuid)
-returns boolean language sql stable security definer
-set search_path = public, extensions
-as $$
-  select exists (select 1 from public.coin_challenges c
-                  where c.status in ('pending', 'accepted')
-                    and ((c.challenger_id = p_a and c.opponent_id = p_b) or (c.challenger_id = p_b and c.opponent_id = p_a)))
-$$;
-
--- Formulaire « Defier un pote » : mon solde, mes amis, l'enjeu max possible avec chacun.
-create or replace function public.challenge_options()
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me    uuid := public._require_profile();
-  v_coins integer;
-begin
-  perform public._challenges_tidy();
-  v_coins := public._coins(v_me);
+  update public.soirees set guest_token = v_tok where id = p_soiree_id;
   return jsonb_build_object(
-    'coins', v_coins,
-    'friends', coalesce((
-      select jsonb_agg(jsonb_build_object('id', p.id, 'max_stake', greatest(0, least(v_coins, public._coins(p.id))),
-                                          'open', public._challenge_open_between(v_me, p.id))
-                       order by p.sort_order)
-        from public.profiles p
-       where p.id <> v_me and public._are_friends(v_me, p.id)), '[]'::jsonb));
+    'soiree_id', p_soiree_id, 'code', v_s.code, 'token', v_tok,
+    'guests', (select count(*) from public.soiree_players sp join public.profiles p on p.id = sp.profile_id
+                where sp.soiree_id = p_soiree_id and p.is_guest),
+    'max_guests', public._guest_max_per_soiree());
 end $$;
 
-create or replace function public.create_challenge(p_other uuid, p_game text, p_stake integer)
-returns jsonb language plpgsql security definer
+-- Hôte : ferme les invitations (les invités déjà présents restent).
+create or replace function public.close_guest_invites(p_soiree_id uuid)
+returns void language plpgsql security definer
 set search_path = public, extensions
 as $$
-declare
-  v_me uuid := public._require_profile();
-  v_c  public.coin_challenges%rowtype;
+declare v_me uuid := public._require_member();
 begin
-  perform public._challenges_tidy();
-  if p_other is null or p_other = v_me or not exists (select 1 from public.profiles where id = p_other) then
-    raise exception 'unknown_profile';
-  end if;
-  if not public._are_friends(v_me, p_other) then raise exception 'challenge_not_friend'; end if;
-  if not public._challenge_game_ok(p_game) then raise exception 'challenge_invalid_game'; end if;
-  if p_stake is null or p_stake not in (0, 10, 25, 50, 100) then raise exception 'challenge_invalid_stake'; end if;
-  -- Verrou des deux profils (ordre fixe) : pas deux defis croises en meme temps.
-  perform 1 from public.profiles where id in (v_me, p_other) order by id for update;
-  if public._challenge_open_between(v_me, p_other) then raise exception 'challenge_already_open'; end if;
-  if p_stake > public._coins(v_me) or p_stake > public._coins(p_other) then raise exception 'challenge_stake_too_high'; end if;
-  insert into public.coin_challenges(challenger_id, opponent_id, game_id, stake)
-  values (v_me, p_other, p_game, p_stake) returning * into v_c;
-  return public._challenge_json(v_c, v_me);
+  update public.soirees set guest_token = null
+   where id = p_soiree_id and host_id = v_me and status <> 'ended';
+  if not found then raise exception 'not_host'; end if;
 end $$;
 
-create or replace function public.respond_challenge(p_id uuid, p_accept boolean)
+-- Aperçu avant de rejoindre (écran « Je suis de passage »), session anonyme suffisante.
+-- -> {soiree_id, code, host_nickname, host_slug, players, me: 'none'|'guest'|'member', joined}
+create or replace function public.guest_invite_info(p_code text)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me uuid := public._require_profile();
-  v_c  public.coin_challenges%rowtype;
+  v_sid uuid;
+  v_me  uuid;
+  v_g   boolean;
 begin
-  select * into v_c from public.coin_challenges where id = p_id and opponent_id = v_me;
-  if not found then raise exception 'challenge_not_found'; end if;
-  -- Verrous : profils (ordre fixe) puis defi.
-  perform 1 from public.profiles where id in (v_c.challenger_id, v_c.opponent_id) order by id for update;
-  select * into v_c from public.coin_challenges where id = p_id for update;
-  -- (expire : le statut est mis a jour par _challenges_tidy, l'exception annulerait l'update)
-  if v_c.status = 'pending' and v_c.expires_at <= now() then raise exception 'challenge_expired'; end if;
-  if v_c.status <> 'pending' then raise exception 'challenge_not_pending'; end if;
-  if not coalesce(p_accept, false) then
-    update public.coin_challenges set status = 'declined', settled_at = now() where id = p_id returning * into v_c;
-    return public._challenge_json(v_c, v_me);
-  end if;
-  if public._coins(v_me) < v_c.stake then raise exception 'challenge_not_enough_coins'; end if;
-  if public._coins(v_c.challenger_id) < v_c.stake then raise exception 'challenge_opponent_broke'; end if;
-  perform public._ledger_add(v_c.challenger_id, -v_c.stake, 'challenge', 'challenge:' || v_c.id);
-  perform public._ledger_add(v_c.opponent_id, -v_c.stake, 'challenge', 'challenge:' || v_c.id);
-  update public.coin_challenges set status = 'accepted', accepted_at = now() where id = p_id returning * into v_c;
-  return public._challenge_json(v_c, v_me);
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  v_sid := public._guest_soiree_of(p_code);
+  select p.id, p.is_guest into v_me, v_g
+    from public.device_sessions d join public.profiles p on p.id = d.profile_id
+   where d.auth_uid = auth.uid();
+  return (
+    select jsonb_build_object(
+      'soiree_id', s.id, 'code', s.code, 'host_nickname', h.nickname, 'host_slug', h.slug,
+      'players', (select count(*) from public.soiree_players sp where sp.soiree_id = s.id),
+      'me', case when v_me is null then 'none' when v_g then 'guest' else 'member' end,
+      'joined', exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_me))
+    from public.soirees s join public.profiles h on h.id = s.host_id
+    where s.id = v_sid);
 end $$;
 
-create or replace function public.cancel_challenge(p_id uuid)
+-- Rejoindre en invité. Appareil sans profil -> nouveau profil invité ; appareil déjà invité
+-- -> même profil (prénom / avatar mis à jour, expiration repoussée, quitte son ancienne
+-- soirée) ; appareil d'un membre de la bande -> already_member (utiliser join_soiree_by_code).
+-- -> {profile: ProfileJson, soiree: SoireeJson}
+create or replace function public.join_as_guest(p_code text, p_name text, p_avatar text)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me uuid := public._require_profile();
-  v_c  public.coin_challenges%rowtype;
-begin
-  select * into v_c from public.coin_challenges where id = p_id and challenger_id = v_me for update;
-  if not found then raise exception 'challenge_not_found'; end if;
-  if v_c.status <> 'pending' then raise exception 'challenge_not_pending'; end if;
-  update public.coin_challenges set status = 'cancelled', settled_at = now() where id = p_id returning * into v_c;
-  return public._challenge_json(v_c, v_me);
-end $$;
-
--- Mes defis : en cours (en attente, acceptes) + 15 derniers regles depuis 30 jours.
-create or replace function public.my_challenges()
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me uuid := public._require_profile();
-begin
-  perform public._challenges_tidy();
-  return jsonb_build_object(
-    'coins', public._coins(v_me),
-    'challenges', coalesce((
-      select jsonb_agg(public._challenge_json(c, v_me) order by c.created_at desc)
-        from public.coin_challenges c
-       where c.id in (select x.id from public.coin_challenges x
-                       where (x.challenger_id = v_me or x.opponent_id = v_me) and x.status in ('pending', 'accepted')
-                      union all
-                      (select x.id from public.coin_challenges x
-                        where (x.challenger_id = v_me or x.opponent_id = v_me) and x.status not in ('pending', 'accepted')
-                          and coalesce(x.settled_at, x.created_at) > now() - interval '30 days'
-                        order by coalesce(x.settled_at, x.created_at) desc limit 15))), '[]'::jsonb));
-end $$;
-
--- « Jouer maintenant » : une soiree commune ouverte (de preference dont je suis l'hote), sinon une
--- nouvelle soiree a deux (l'autre recoit l'invitation habituelle). Renvoie {soiree_id}.
-create or replace function public.play_challenge(p_id uuid)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me    uuid := public._require_profile();
-  v_c     public.coin_challenges%rowtype;
-  v_other uuid;
+  v_uid   uuid := auth.uid();
+  v_name  text := btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g'));
+  v_av    text := lower(btrim(coalesce(p_avatar, '')));
+  v_alpha constant text := 'abcdefghjkmnpqrstuvwxyz23456789';
   v_sid   uuid;
+  v_me    uuid;
+  v_g     boolean;
+  v_slug  text;
 begin
-  perform public._challenges_tidy();
-  select * into v_c from public.coin_challenges where id = p_id and v_me in (challenger_id, opponent_id);
-  if not found then raise exception 'challenge_not_found'; end if;
-  if v_c.status <> 'accepted' then raise exception 'challenge_not_accepted'; end if;
-  if v_c.match_id is not null then raise exception 'challenge_already_started'; end if;
-  v_other := case when v_c.challenger_id = v_me then v_c.opponent_id else v_c.challenger_id end;
-  select s.id into v_sid from public.soirees s
-   where s.status <> 'ended'
-     and exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_me)
-     and exists (select 1 from public.soiree_players sp where sp.soiree_id = s.id and sp.profile_id = v_other)
-   order by (s.host_id = v_me) desc, s.created_at desc limit 1;
-  if v_sid is null then
-    v_sid := (public.create_soiree(array[v_other])->>'id')::uuid;
+  if v_uid is null then raise exception 'not_authenticated'; end if;
+  if char_length(v_name) < 1 or char_length(v_name) > 20 then raise exception 'invalid_nickname'; end if;
+  if not (v_av = any(public._guest_avatars())) then raise exception 'invalid_avatar'; end if;
+
+  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
+  perform public._cleanup_stale_soirees();
+  perform public._purge_guests();
+  v_sid := public._guest_soiree_of(p_code);
+
+  select p.id, p.is_guest into v_me, v_g
+    from public.device_sessions d join public.profiles p on p.id = d.profile_id
+   where d.auth_uid = v_uid;
+  if v_me is not null and not v_g then raise exception 'already_member'; end if;
+  if v_me is not null and exists (select 1 from public.soiree_bans where soiree_id = v_sid and profile_id = v_me) then
+    raise exception 'soiree_banned';
   end if;
-  return jsonb_build_object('soiree_id', v_sid);
-end $$;
-
--- Defis acceptes, pas encore lances, dont les deux joueurs sont dans cette soiree (carte de l'hote).
-create or replace function public.soiree_challenges(p_soiree_id uuid)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me uuid := public._require_profile();
-begin
-  if not public.is_soiree_member(p_soiree_id) then raise exception 'not_in_soiree'; end if;
-  perform public._challenges_tidy();
-  return coalesce((
-    select jsonb_agg(public._challenge_json(c, v_me) order by c.accepted_at)
-      from public.coin_challenges c
-     where c.status = 'accepted' and c.match_id is null
-       and exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = c.challenger_id)
-       and exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = c.opponent_id)), '[]'::jsonb);
-end $$;
-
--- L'hote lance le duel d'un defi : mode duel, 1 manche, les deux joueurs seuls. Renvoie l'id de la partie.
-create or replace function public.start_challenge(p_id uuid, p_soiree_id uuid, p_options jsonb)
-returns uuid language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_c    public.coin_challenges%rowtype;
-  v_opts jsonb;
-  v_mid  uuid;
-begin
-  perform public._require_profile();
-  select * into v_c from public.coin_challenges where id = p_id for update;
-  if not found then raise exception 'challenge_not_found'; end if;
-  if v_c.status <> 'accepted' then raise exception 'challenge_not_accepted'; end if;
-  if v_c.match_id is not null then raise exception 'challenge_already_started'; end if;
-  if not exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = v_c.challenger_id)
-     or not exists (select 1 from public.soiree_players sp where sp.soiree_id = p_soiree_id and sp.profile_id = v_c.opponent_id) then
-    raise exception 'challenge_not_in_soiree';
+  if (v_me is null or not exists (select 1 from public.soiree_players where soiree_id = v_sid and profile_id = v_me))
+     and (select count(*) from public.soiree_players sp join public.profiles p on p.id = sp.profile_id
+           where sp.soiree_id = v_sid and p.is_guest) >= public._guest_max_per_soiree() then
+    raise exception 'too_many_guests';
   end if;
-  v_opts := (case when jsonb_typeof(p_options) = 'object' then p_options else '{}'::jsonb end)
-            || jsonb_build_object('mode', 'duel', 'best_of', 1,
-                                  'duel_players', jsonb_build_array(v_c.challenger_id, v_c.opponent_id),
-                                  'player_ids', jsonb_build_array(v_c.challenger_id, v_c.opponent_id));
-  v_mid := public.start_match(p_soiree_id, v_c.game_id, v_opts);  -- not_host, match_in_progress, soiree_ended...
-  update public.coin_challenges set match_id = v_mid where id = p_id;
-  return v_mid;
-end $$;
 
--- =============================================================================
--- 3. REGLEMENT (partie terminee ou annulee)
--- =============================================================================
-create or replace function public._mises_settle(p_match_id uuid)
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_winners boolean := exists (select 1 from public.match_players where match_id = p_match_id and won);
-  w         public.match_wagers%rowtype;
-  c         public.coin_challenges%rowtype;
-  v_won     uuid[];
-  v_gain    integer;
-begin
-  -- Paris
-  for w in select * from public.match_wagers where match_id = p_match_id and status = 'open' for update loop
-    if not v_winners or not exists (select 1 from public.match_players where match_id = p_match_id and profile_id = w.pick) then
-      perform public._ledger_add(w.profile_id, w.stake, 'wager_refund', 'match:' || p_match_id);
-      update public.match_wagers set status = 'refunded', payout = w.stake, settled_at = now()
-       where match_id = p_match_id and profile_id = w.profile_id;
-    elsif exists (select 1 from public.match_players where match_id = p_match_id and profile_id = w.pick and won) then
-      v_gain := floor(w.stake * w.odds)::int;
-      perform public._ledger_add(w.profile_id, v_gain, 'wager_win', 'match:' || p_match_id);
-      update public.match_wagers set status = 'won', payout = v_gain, settled_at = now()
-       where match_id = p_match_id and profile_id = w.profile_id;
-    else
-      update public.match_wagers set status = 'lost', payout = 0, settled_at = now()
-       where match_id = p_match_id and profile_id = w.profile_id;
-    end if;
+  loop
+    select 'g-' || v_av || '-' || string_agg(substr(v_alpha, 1 + floor(random() * length(v_alpha))::integer, 1), '')
+      into v_slug from generate_series(1, 6);
+    exit when not exists (select 1 from public.profiles where slug = v_slug);
   end loop;
 
-  -- Defis
-  for c in select * from public.coin_challenges where match_id = p_match_id and status = 'accepted' for update loop
-    v_won := array(select profile_id from public.match_players
-                    where match_id = p_match_id and won and profile_id in (c.challenger_id, c.opponent_id));
-    if not exists (select 1 from public.match_players where match_id = p_match_id) then
-      perform public._challenge_refund(c);
-      update public.coin_challenges set status = 'void', settled_at = now() where id = c.id;
-    elsif cardinality(v_won) = 1 then
-      perform public._ledger_add(v_won[1], 2 * c.stake, 'challenge_win', 'challenge:' || c.id);
-      update public.coin_challenges set status = 'finished', winner_id = v_won[1], settled_at = now() where id = c.id;
-    else
-      perform public._challenge_refund(c);
-      update public.coin_challenges set status = 'finished', winner_id = null, settled_at = now() where id = c.id;
-    end if;
-  end loop;
+  if v_me is null then
+    insert into public.profiles(slug, first_name, nickname, expressions, sort_order, is_guest, guest_expires_at)
+    values (v_slug, v_name, v_name, array['joie'], 1000, true, now() + public._guest_ttl())
+    returning id into v_me;
+    insert into public.device_sessions(auth_uid, profile_id) values (v_uid, v_me)
+    on conflict (auth_uid) do update set profile_id = excluded.profile_id, created_at = now();
+  else
+    update public.profiles
+       set first_name = v_name, nickname = v_name,
+           slug = case when slug like 'g-' || v_av || '-%' then slug else v_slug end,
+           guest_expires_at = now() + public._guest_ttl()
+     where id = v_me;
+    -- Un invité n'est que dans une soirée à la fois.
+    delete from public.soiree_players sp using public.soirees s
+     where sp.profile_id = v_me and s.id = sp.soiree_id and s.id <> v_sid and s.status <> 'ended';
+  end if;
+
+  insert into public.soiree_players(soiree_id, profile_id) values (v_sid, v_me) on conflict do nothing;
+  return jsonb_build_object('profile', public._profile_json(v_me), 'soiree', public._soiree_json(v_sid));
 end $$;
 
-create or replace function public._mises_on_finish()
-returns trigger language plpgsql security definer
-set search_path = public, extensions
-as $$
+-- Purge horaire (pg_cron si dispo ; sinon purge paresseuse dans les RPC ci-dessus).
+do $$
 begin
-  perform public._mises_settle(new.id);
-  return new;
+  begin
+    perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'guests-purge';
+    perform cron.schedule('guests-purge', '23 * * * *', 'select public._purge_guests()');
+  exception when others then
+    raise notice 'pg_cron indisponible (%) : purge des invités uniquement paresseuse', sqlerrm;
+  end;
 end $$;
-drop trigger if exists matches_mises_settle on public.matches;
-create trigger matches_mises_settle after update of status on public.matches
-  for each row when (old.status is distinct from 'finished' and new.status = 'finished')
-  execute function public._mises_on_finish();
 
--- ---- Droits -------------------------------------------------------------------------
-revoke all on function public._ledger_add(uuid, integer, text, text) from public, anon, authenticated;
-revoke all on function public._match_player_ids(jsonb) from public, anon, authenticated;
-revoke all on function public._wager_window() from public, anon, authenticated;
-revoke all on function public._wager_odds(text, uuid, integer) from public, anon, authenticated;
-revoke all on function public._wager_open(text, timestamptz, jsonb) from public, anon, authenticated;
-revoke all on function public._challenge_json(public.coin_challenges, uuid) from public, anon, authenticated;
-revoke all on function public._challenge_refund(public.coin_challenges) from public, anon, authenticated;
-revoke all on function public._challenges_tidy() from public, anon, authenticated;
-revoke all on function public._challenge_game_ok(text) from public, anon, authenticated;
-revoke all on function public._are_friends(uuid, uuid) from public, anon, authenticated;
-revoke all on function public._challenge_open_between(uuid, uuid) from public, anon, authenticated;
-revoke all on function public._mises_settle(uuid) from public, anon, authenticated;
-revoke all on function public._mises_on_finish() from public, anon, authenticated;
-revoke all on function public.match_wagers(uuid) from public, anon;
-revoke all on function public.place_wager(uuid, uuid, integer) from public, anon;
-revoke all on function public.challenge_options() from public, anon;
-revoke all on function public.create_challenge(uuid, text, integer) from public, anon;
-revoke all on function public.respond_challenge(uuid, boolean) from public, anon;
-revoke all on function public.cancel_challenge(uuid) from public, anon;
-revoke all on function public.my_challenges() from public, anon;
-revoke all on function public.play_challenge(uuid) from public, anon;
-revoke all on function public.soiree_challenges(uuid) from public, anon;
-revoke all on function public.start_challenge(uuid, uuid, jsonb) from public, anon;
-grant execute on function public.match_wagers(uuid) to authenticated;
-grant execute on function public.place_wager(uuid, uuid, integer) to authenticated;
-grant execute on function public.challenge_options() to authenticated;
-grant execute on function public.create_challenge(uuid, text, integer) to authenticated;
-grant execute on function public.respond_challenge(uuid, boolean) to authenticated;
-grant execute on function public.cancel_challenge(uuid) to authenticated;
-grant execute on function public.my_challenges() to authenticated;
-grant execute on function public.play_challenge(uuid) to authenticated;
-grant execute on function public.soiree_challenges(uuid) to authenticated;
-grant execute on function public.start_challenge(uuid, uuid, jsonb) to authenticated;
+revoke all on function public._require_member() from public, anon, authenticated;
+revoke all on function public._guest_avatars() from public, anon, authenticated;
+revoke all on function public._guest_ttl() from public, anon, authenticated;
+revoke all on function public._guest_max_per_soiree() from public, anon, authenticated;
+revoke all on function public._purge_guests() from public, anon, authenticated;
+revoke all on function public._guest_soiree_of(text) from public, anon, authenticated;
+revoke all on function public.open_guest_invites(uuid) from public, anon;
+revoke all on function public.close_guest_invites(uuid) from public, anon;
+revoke all on function public.guest_invite_info(text) from public, anon;
+revoke all on function public.join_as_guest(text, text, text) from public, anon;
+grant execute on function public.open_guest_invites(uuid) to authenticated;
+grant execute on function public.close_guest_invites(uuid) to authenticated;
+grant execute on function public.guest_invite_info(text) to authenticated;
+grant execute on function public.join_as_guest(text, text, text) to authenticated;

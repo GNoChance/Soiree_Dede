@@ -121,10 +121,16 @@ export function ResultsScreen({ matchId, state, meId, players, game, onBack }: {
           </div>
           <Sparkles className="size-8" />
           <div className="text-right">
-            <p className="text-sm font-bold opacity-90">XP gagnée</p>
-            <p className="font-display text-4xl font-extrabold">
-              +<CountUp to={xp} delay={1.4} />
-            </p>
+            {players[meId]?.isGuest ? (
+              <p className="max-w-36 text-sm font-bold">De passage : la partie ne compte pas pour l’XP 😉</p>
+            ) : (
+              <>
+                <p className="text-sm font-bold opacity-90">XP gagnée</p>
+                <p className="font-display text-4xl font-extrabold">
+                  +<CountUp to={xp} delay={1.4} />
+                </p>
+              </>
+            )}
           </div>
         </motion.div>
       )}
@@ -146,7 +152,7 @@ export function ResultsScreen({ matchId, state, meId, players, game, onBack }: {
               <span className="flex-1 font-bold">{p.nickname}</span>
               {r.won && <Badge tone="sun">Gagné</Badge>}
               <span className="w-10 text-right font-display font-extrabold">{r.points} pt</span>
-              <span className="w-14 text-right text-sm font-bold text-muted">+{state.xp_gained?.[r.profile_id] ?? 0} xp</span>
+              <span className="w-14 text-right text-sm font-bold text-muted">{p.isGuest ? '👋' : `+${state.xp_gained?.[r.profile_id] ?? 0} xp`}</span>
             </motion.div>
           )
         })}

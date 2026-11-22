@@ -263,6 +263,8 @@ returns integer language plpgsql stable security definer
 set search_path = public, extensions
 as $$
 begin
+  -- Invite de passage (features/guest.sql) : jamais de pieces (pas d'achat, de pari ni de defi).
+  if exists (select 1 from public.profiles where id = p_profile and is_guest) then return 0; end if;
   return (select coalesce(5 * count(*) + 15 * count(*) filter (where won), 0) from public.match_players where profile_id = p_profile)::int
        + (select 10 * count(*) from public.daily_runs where profile_id = p_profile and finished_at is not null)::int
        + (select 20 * count(*) from public.trophy_unlocks where profile_id = p_profile)::int
