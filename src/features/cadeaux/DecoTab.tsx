@@ -14,6 +14,9 @@ import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
 import { equipItem, useOwnedItems } from './api'
 
+/** Cadeaux du calendrier de l'Avent : surprise, invisibles tant qu'on ne les a pas. */
+const isAdvent = (it: ItemDef) => Boolean(it.adventDay || it.adventCount)
+
 const howToGet = (it: ItemDef) =>
   it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : it.price ? `En boutique pour ${it.price} 🪙, quand il passe en vitrine` : (it.howTo ?? 'Bientôt…')
 
@@ -40,6 +43,7 @@ export function DecoTab() {
   }
 
   const ownedCount = ITEMS.filter((i) => owned.has(i.id)).length
+  const total = ITEMS.filter((i) => !isAdvent(i) || owned.has(i.id)).length
   return (
     <div className="flex flex-col gap-5">
       <StaggerItem className="flex flex-col items-center gap-2 text-center">
@@ -47,7 +51,7 @@ export function DecoTab() {
         <p className="mt-2 font-display text-xl font-extrabold">{profile.nickname}</p>
         <PlayerTitle slug={profile.slug} className="text-sm" />
         <p className="text-sm font-bold text-muted">
-          {loaded ? `${ownedCount}/${ITEMS.length} cadeaux` : 'Chargement…'} · touche un cadeau verrouillé pour savoir comment l’avoir
+          {loaded ? `${ownedCount}/${total} cadeaux` : 'Chargement…'} · touche un cadeau verrouillé pour savoir comment l’avoir
         </p>
       </StaggerItem>
       {SLOTS.map((slot) => (
@@ -65,7 +69,7 @@ function SlotSection({ slot, owned, equipped, busy, onTap }: {
   onTap: (it: ItemDef) => void
 }) {
   const def = SLOTS.find((s) => s.id === slot)!
-  const items = ITEMS.filter((i) => i.slot === slot)
+  const items = ITEMS.filter((i) => i.slot === slot && (!isAdvent(i) || owned.has(i.id)))
   const current = equippedOf(equipped, slot)
   return (
     <StaggerItem className="flex flex-col gap-2">

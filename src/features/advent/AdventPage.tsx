@@ -13,7 +13,7 @@ import { toast } from '@/store/toast'
 import { getTrophy } from '@/data/trophees'
 import { openAdventDay, useAdventState } from './api'
 import { ADVENT_TEXTS } from './texts'
-import { ADVENT_MILESTONES, adventDayItem, getItem, type ItemDef } from '@/data/cadeaux'
+import { adventDayItem, getItem, type ItemDef } from '@/data/cadeaux'
 import { usePlayersStore } from '@/features/soiree/players'
 
 type CaseStatus = 'opened' | 'ready' | 'today' | 'future' | 'missed'
@@ -86,33 +86,11 @@ export function AdventPage() {
       </button>
       <h1 className="text-4xl">🎄 Calendrier de l’Avent</h1>
       <Card className="flex flex-col gap-1 text-[#1f1b2e]" accent="var(--color-mint)">
-        <p className="font-extrabold">Termine le défi du jour pour ouvrir la case du jour : +25 XP, une surprise et un cadeau !</p>
+        <p className="font-extrabold">Termine le défi du jour pour ouvrir la case du jour : +25 XP et une surprise !</p>
         <p className="text-sm font-bold">
           {openedCount} case{openedCount > 1 ? 's' : ''} ouverte{openedCount > 1 ? 's' : ''} sur 24
           {readyCount > 0 && ` · ${readyCount} à ouvrir !`} · 12 cases = une tenue secrète 🧝
         </p>
-      </Card>
-      <Card className="flex flex-col gap-2">
-        <p className="font-display text-lg font-extrabold">🎁 Gros cadeaux</p>
-        <div className="grid grid-cols-4 gap-2">
-          {ADVENT_MILESTONES.map((m) => {
-            const got = openedCount >= m.count
-            return (
-              <div
-                key={m.count}
-                className={
-                  'flex flex-col items-center gap-0.5 rounded-card border-[3px] border-ink p-1.5 text-center ' +
-                  (got ? 'bg-mint text-[#1f1b2e]' : 'bg-sunk')
-                }
-              >
-                <span className="text-2xl leading-none">{m.items.map((i) => i.emoji).join('')}</span>
-                <span className="text-[0.65rem] leading-tight font-extrabold">{m.items[0].label}</span>
-                <span className="text-xs font-extrabold">{got ? '✓' : `${Math.min(openedCount, m.count)}/${m.count}`}</span>
-              </div>
-            )
-          })}
-        </div>
-        <p className="text-xs font-bold text-muted">Comptés en cases ouvertes. Cadres, titres et objets s’équipent dans Inventaire › Déco.</p>
       </Card>
       {loading && !data ? (
         <p className="text-center font-bold text-muted">Chargement…</p>
@@ -140,11 +118,6 @@ export function AdventPage() {
                 <span className="text-2xl leading-none">
                   {st === 'opened' ? t.emoji : st === 'ready' ? '🎁' : st === 'missed' ? '✖️' : st === 'today' ? '🎄' : '🔒'}
                 </span>
-                {st !== 'missed' && adventDayItem(d) && (
-                  <span aria-hidden className={'mt-0.5 text-xs leading-none' + (st === 'opened' ? '' : ' opacity-60')}>
-                    {adventDayItem(d)!.slot === 'title' ? '🏷️' : '🖼️'}
-                  </span>
-                )}
               </motion.button>
             )
           })}
