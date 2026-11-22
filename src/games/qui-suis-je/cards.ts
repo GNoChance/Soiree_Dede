@@ -8,6 +8,7 @@ import sportifs from './cards/sportifs'
 import chanteurs from './cards/chanteurs'
 import personnagesHistoriques from './cards/personnages-historiques'
 import jeuxVideo from './cards/jeux-video'
+import lot2 from './cards/lot-2'
 
 export type WhoTheme = 'celebrites' | 'films-series' | 'dessins-animes' | 'sportifs' | 'chanteurs' | 'personnages-historiques' | 'jeux-video'
 export interface WhoCard {
@@ -32,6 +33,15 @@ const raw: Omit<WhoCard, 'id'>[] = []
 for (const [theme, data] of SOURCES) {
   for (const difficulty of [1, 2, 3] as const) {
     for (const name of data[difficulty].split('|')) raw.push({ name, theme, difficulty })
+  }
+}
+// Lots suivants : toujours APRÈS les cartes d’origine (identifiants positionnels, historique « déjà jouées »).
+const LOTS: Array<Record<WhoTheme, ThemeData>> = [lot2]
+for (const lot of LOTS) {
+  for (const [theme] of SOURCES) {
+    for (const difficulty of [1, 2, 3] as const) {
+      for (const name of lot[theme][difficulty].split('|')) raw.push({ name, theme, difficulty })
+    }
   }
 }
 
