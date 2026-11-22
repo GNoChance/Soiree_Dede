@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { CustomCardsOption } from '@/features/cartes/CustomCardsOption'
 import { Toggle } from '@/components/ui/Toggle'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
@@ -94,6 +95,8 @@ export function TuPreferesOptions({ options, onChange }: GameOptionsProps) {
         </div>
         <Toggle checked={o.rebel} onChange={(v) => set({ rebel: v })} label="Bonus Rebelle" />
       </div>
+
+      <CustomCardsOption game="tu-preferes" checked={o.customCards} onChange={(v) => set({ customCards: v })} />
     </div>
   )
 }

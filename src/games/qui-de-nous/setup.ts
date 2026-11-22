@@ -3,6 +3,7 @@
  * actions envoyées à game_action et construction de p_options de start_match.
  * Contrat : supabase/README.md (jeu qui-de-nous).
  */
+import { customQuota, mergeDeck } from '../../features/cartes/merge'
 
 export const qdnActions = {
   vote: (target: string) => ({ type: 'vote', target }),
@@ -11,7 +12,7 @@ export const qdnActions = {
 }
 
 export const QDN_ROUND_CHOICES = [5, 10, 15] as const
-export const QDN_DEFAULT_OPTIONS = { rounds: 10 }
+export const QDN_DEFAULT_OPTIONS = { rounds: 10, customCards: true }
 
 const HISTORY_KEY = 'dede:qdn-played'
 
@@ -70,7 +71,14 @@ export function pickQuestions<Q extends { id: string; text: string }>(bank: Q[],
 export async function prepareQuiDeNousStart(options: Record<string, unknown>): Promise<Record<string, unknown>> {
   const { QUESTIONS } = await import('./questions')
   const rounds = Number(options.rounds) || QDN_DEFAULT_OPTIONS.rounds
-  const { picked, history } = pickQuestions(QUESTIONS, rounds)
+  let custom: { id: string; text: string; by?: string }[] = []
+  if (options.customCards !== false) {
+    const { fetchPlayableCards } = await import('../../features/cartes/api')
+    custom = (await fetchPlayableCards('qui-de-nous')).map((c) => ({ id: `cc-${c.id}`, text: String(c.payload.text ?? ''), by: c.author_id }))
+  }
+  const k = customQuota(rounds, custom.length)
+  const { picked, history } = pickQuestions(QUESTIONS, rounds - k)
   writeHistory(history)
-  return { rounds: picked.length, questions: picked.map((q) => q.text) }
+  const deck = mergeDeck<{ id: string; text: string; by?: string }>(picked, custom, rounds)
+  return { rounds: deck.length, questions: deck.map((q) => q.text), authors: deck.map((q) => q.by ?? null) }
 }

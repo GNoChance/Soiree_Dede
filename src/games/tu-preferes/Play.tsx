@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn'
 import { VoterStrip } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
+import { AuthorBadge } from '@/features/cartes/AuthorBadge'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import type { TpDilemma, TpReveal, TpSecret, TpSide, TpState } from './types'
 import { percents, themeInfo, tpActions } from './setup'
@@ -238,6 +239,11 @@ function Answering({
           </span>
         </div>
         <p className="text-center font-display text-3xl font-extrabold">Tu préfères…</p>
+        {d.by && (
+          <div className="flex justify-center">
+            <AuthorBadge by={d.by} />
+          </div>
+        )}
         <TimerBar deadline={s.deadline} totalMs={s.timer * 1000} />
       </motion.div>
 

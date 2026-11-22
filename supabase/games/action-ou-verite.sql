@@ -333,7 +333,10 @@ begin
            'id', left(coalesce(nullif(e->>'id', ''), 'c' || o), 40),
            'kind', e->>'kind',
            'level', coalesce((e->>'level')::integer, 1),
-           'text', btrim(e->>'text')) order by o), '[]'::jsonb)
+           'text', btrim(e->>'text'))
+         -- `by` : id du profil auteur d'une carte maison (optionnel, voir features/cartes-maison.sql)
+         || case when (e->>'by') ~ '^[0-9a-f-]{36}$' then jsonb_build_object('by', e->>'by') else '{}'::jsonb end
+         order by o), '[]'::jsonb)
     into v_cards
     from jsonb_array_elements(v_cards) with ordinality as t(e, o)
    where v_levels @> to_jsonb(coalesce((e->>'level')::integer, 1));

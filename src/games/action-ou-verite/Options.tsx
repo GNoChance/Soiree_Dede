@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Toggle } from '@/components/ui/Toggle'
+import { CustomCardsOption } from '@/features/cartes/CustomCardsOption'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { GameOptionsProps } from '../types'
@@ -80,6 +81,8 @@ export function ActionVeriteOptions({ options, onChange }: GameOptionsProps) {
         </div>
         <Toggle checked={o.auto} onChange={(v) => set({ auto: v })} label="Enchaînement automatique" />
       </div>
+
+      <CustomCardsOption game="action-ou-verite" checked={o.customCards} onChange={(v) => set({ customCards: v })} />
     </div>
   )
 }

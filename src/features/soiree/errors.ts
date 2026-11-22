@@ -173,6 +173,13 @@ const MESSAGES: Record<string, string> = {
   item_already_owned: 'Tu l’as déjà !',
   shop_not_available: 'Cet article n’est plus en vitrine cette semaine.',
   shop_not_enough_coins: 'Pas assez de pièces : joue encore un peu ! 🪙',
+  // Cartes maison (supabase/features/cartes-maison.sql)
+  invalid_custom_card: 'Carte invalide : vérifie les textes (ni vides, ni trop longs).',
+  duplicate_card: 'Tu as déjà écrit cette carte !',
+  too_many_cards: 'Tu as atteint la limite de 200 cartes : supprime-en quelques-unes.',
+  card_not_found: 'Cette carte n’existe plus.',
+  not_card_author: 'Tu ne peux modifier que tes propres cartes.',
+  not_admin: 'Réservé à l’administrateur.',
   daily_already_done: 'Défi déjà terminé aujourd’hui.',
   invalid_answers: 'Réponses invalides.',
   // Rappels push (src/features/push)

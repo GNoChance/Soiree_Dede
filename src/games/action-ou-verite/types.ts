@@ -14,6 +14,8 @@ export interface AovCard {
   kind: AovKind
   level: AovLevel
   text: string
+  /** Profil auteur si c'est une carte maison (features/cartes-maison.sql). */
+  by?: string
 }
 
 /** Paramètres de l'animation de roue (identiques pour tous les écrans). */

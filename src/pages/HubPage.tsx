@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { History, Trophy } from 'lucide-react'
+import { History, PenLine, Trophy } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { useState } from 'react'
 import { GAMES } from '@/games/registry'
@@ -63,6 +63,13 @@ export function HubPage() {
           <History className="size-7 text-grape" />
           <span className="flex-1 text-xl font-extrabold">Mes soirées passées</span>
           <span className="text-sm font-bold text-muted">Voir</span>
+        </Card>
+      </StaggerItem>
+      <StaggerItem>
+        <Card onClick={() => navigate('/cartes')} className="flex items-center gap-3">
+          <PenLine className="size-7 text-tomato" />
+          <span className="flex-1 text-xl font-extrabold">✍️ Mes cartes</span>
+          <span className="text-sm font-bold text-muted">Écrire</span>
         </Card>
       </StaggerItem>
       <StaggerItem>

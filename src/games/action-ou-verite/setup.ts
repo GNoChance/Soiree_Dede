@@ -6,6 +6,7 @@
  */
 import type { TruthDareCard } from './cards'
 import type { AovKind, AovLevel, AovPlayerStats, AovState } from './types'
+import { customQuota, mergeDeck } from '../../features/cartes/merge'
 
 export const aovActions = {
   choose: (kind: AovKind) => ({ type: 'choose', kind }),
@@ -40,9 +41,11 @@ export interface AovOptions {
   softTimer: boolean
   /** Tour suivant automatique après 12 s. */
   auto: boolean
+  /** Mélange les cartes écrites par la bande (jusqu'à 1 sur 3). */
+  customCards: boolean
 }
 
-export const AOV_DEFAULT_OPTIONS: AovOptions = { rounds: 10, levels: [1, 2], softTimer: true, auto: false }
+export const AOV_DEFAULT_OPTIONS: AovOptions = { rounds: 10, levels: [1, 2], softTimer: true, auto: false, customCards: true }
 
 export function readOptions(o: Record<string, unknown>): AovOptions {
   const rounds = Number(o.rounds)
@@ -54,6 +57,7 @@ export function readOptions(o: Record<string, unknown>): AovOptions {
     levels: levels.length ? levels : [1, 2, 3],
     softTimer: o.softTimer !== false,
     auto: o.auto === true,
+    customCards: o.customCards !== false,
   }
 }
 
@@ -105,12 +109,13 @@ export function pickCards(
   n: number,
   levels: AovLevel[],
   history: string[] = readHistory(),
+  counts: Record<AovKind, number> = { action: n, verite: n },
 ): { picked: TruthDareCard[]; history: string[] } {
   const seen = new Set(history)
   const picked: TruthDareCard[] = []
   for (const kind of ['action', 'verite'] as const) {
     const pool = bank.filter((c) => c.kind === kind && levels.includes(c.level))
-    const count = Math.min(n, pool.length)
+    const count = Math.min(counts[kind], pool.length)
     const fresh = shuffle(pool.filter((c) => !seen.has(c.id))).slice(0, count)
     if (fresh.length < count) {
       const byId = new Map(pool.map((c) => [c.id, c]))
@@ -129,9 +134,19 @@ export function pickCards(
 }
 
 /** p_options de start_match('action-ou-verite'). */
-export function buildStartOptions(bank: TruthDareCard[], gages: string[], options: Record<string, unknown>, history?: string[]) {
+export function buildStartOptions(bank: TruthDareCard[], gages: string[], options: Record<string, unknown>, history?: string[], custom: AovCustomCard[] = []) {
   const o = readOptions(options)
-  const { picked, history: next } = pickCards(bank, cardsPerKind(o.rounds), o.levels, history)
+  const n = cardsPerKind(o.rounds)
+  const mine = (o.customCards ? custom : []).filter((c) => o.levels.includes(c.level))
+  const mineBy = (kind: AovKind) => mine.filter((c) => c.kind === kind)
+  const counts = {
+    action: n - customQuota(n, mineBy('action').length),
+    verite: n - customQuota(n, mineBy('verite').length),
+  }
+  const { picked: basePicked, history: next } = pickCards(bank, n, o.levels, history, counts)
+  const picked: AovCustomCard[] = (['action', 'verite'] as const).flatMap((kind) =>
+    mergeDeck<AovCustomCard>(basePicked.filter((c) => c.kind === kind), mineBy(kind), n),
+  )
   return {
     options: {
       rounds: o.rounds,
@@ -139,15 +154,31 @@ export function buildStartOptions(bank: TruthDareCard[], gages: string[], option
       soft_timer: o.softTimer,
       auto: o.auto,
       gages,
-      cards: picked.map((c) => ({ id: c.id, kind: c.kind, level: c.level, text: c.text })),
+      cards: picked.map((c) => ({ id: c.id, kind: c.kind, level: c.level, text: c.text, ...(c.by ? { by: c.by } : {}) })),
     },
     history: next,
   }
 }
 
+/** Carte du lot envoyé au serveur ; `by` = profil auteur d'une carte maison. */
+export interface AovCustomCard extends TruthDareCard {
+  by?: string
+}
+
 export async function prepareActionVeriteStart(options: Record<string, unknown>): Promise<Record<string, unknown>> {
   const [{ TD_CARDS }, { GAGES }] = await Promise.all([import('./cards'), import('./gages')])
-  const { options: start, history } = buildStartOptions(TD_CARDS, GAGES, options)
+  let custom: AovCustomCard[] = []
+  if (readOptions(options).customCards) {
+    const { fetchPlayableCards } = await import('../../features/cartes/api')
+    custom = (await fetchPlayableCards('action-ou-verite')).map((c) => ({
+      id: `cc-${c.id}`,
+      kind: c.kind === 'verite' ? 'verite' : 'action',
+      level: ([1, 2, 3].includes(Number(c.payload.level)) ? Number(c.payload.level) : 1) as AovLevel,
+      text: String(c.payload.text ?? ''),
+      by: c.author_id,
+    }))
+  }
+  const { options: start, history } = buildStartOptions(TD_CARDS, GAGES, options, undefined, custom)
   writeHistory(history)
   return start
 }

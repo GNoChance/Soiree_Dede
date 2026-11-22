@@ -11,6 +11,7 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import type { AovCard, AovKind, AovResult, AovState } from './types'
+import { AuthorBadge } from '@/features/cartes/AuthorBadge'
 import { AOV_LEVELS, KIND_INFO, aovActions } from './setup'
 import { Wheel } from './Wheel'
 
@@ -290,6 +291,7 @@ function MiniCard({ c, index, selected, onPick, disabled, footer }: { c: AovCard
         <span className="mt-1 inline-block rounded-full border-2 border-ink px-2 text-xs font-extrabold text-[#1f1b2e]" style={{ backgroundColor: lv.color }}>
           {lv.emoji} {lv.label}
         </span>
+        {c.by && <AuthorBadge by={c.by} className="mt-1 ml-1" />}
         {footer}
       </div>
       <AnimatePresence>
@@ -495,6 +497,7 @@ function PerformPhase({ s, meId, get, players, act, pending, card }: PhaseProps 
               >
                 {card.text}
               </motion.p>
+              {card.by && <AuthorBadge by={card.by} className="mt-3" />}
             </>
           ) : (
             <span className="font-display text-6xl font-extrabold" style={{ transform: 'rotateY(180deg)' }}>
