@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router'
 import { Crown } from 'lucide-react'
 import { getCharacter } from '@/data/characters'
 import { Avatar } from '@/components/ui/Avatar'
+import { PlayerTitle } from '@/components/ui/PlayerTitle'
 import { Badge } from '@/components/ui/Badge'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -260,6 +261,7 @@ function Podium({ rows, me }: { rows: Row[]; me?: UUID }) {
                 />
               </motion.div>
               <p className="mt-1 max-w-full truncate font-display text-base font-extrabold">{row.nickname}</p>
+              <PlayerTitle slug={row.slug} className="max-w-full" />
               <p className="text-xs font-bold text-muted">{row.wins} victoire{row.wins > 1 ? 's' : ''}</p>
             </Link>
           )}
@@ -301,6 +303,7 @@ function RowCard({ row, me, game }: { row: Row; me: boolean; game: boolean }) {
           {row.nickname}
           {me && ' (toi)'}
         </p>
+        <PlayerTitle slug={row.slug} className={cn('block', me && 'text-[#1f1b2e]/70')} />
         <p className={cn('text-xs font-bold', me ? 'text-[#1f1b2e]/70' : 'text-muted')}>
           {row.games_played} partie{row.games_played > 1 ? 's' : ''}
           {game && row.points != null && ` · ${row.points} pts`}

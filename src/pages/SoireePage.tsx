@@ -367,7 +367,7 @@ function PlayersGrid({ ids, hostId, meId, byId, onKick }: { ids: string[]; hostI
               className="relative flex justify-center"
             >
               <Link to={`/profil/${id}`} aria-label={`Voir le profil de ${p.nickname}`} className="rounded-2xl">
-                <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
+                <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} showTitle label={id === meId ? `${p.nickname} (toi)` : p.nickname} />
               </Link>
               {onKick && id !== meId && (
                 <button

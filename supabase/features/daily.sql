@@ -341,7 +341,8 @@ begin
                          and r.day >= v_from and r.day <= v_from + 23), '[]'::jsonb));
 end $$;
 
--- Ouvre la case p_day. Renvoie {day, xp, new, count, trophy} (xp = 0 si deja ouverte).
+-- Ouvre la case p_day. Renvoie {day, xp, new, count, trophy, gifts} (xp = 0 si deja ouverte ; count = cases
+-- ouvertes cette annee ; gifts = objets nouvellement obtenus, cf. features/cadeaux.sql).
 -- Erreurs : advent_invalid_day (hors 1-24 dec), advent_not_yet (jour futur), advent_closed (apres le 6 janvier),
 -- advent_missed (defi de ce jour non termine).
 create or replace function public.advent_open(p_day date)
@@ -351,7 +352,8 @@ as $$
 declare
   v_me  uuid := public._require_profile();
   v_today date := public._daily_day();
-  v_new boolean := false; v_n integer; v_trophy boolean := false;
+  v_new boolean := false; v_n integer; v_trophy boolean := false; v_gifts jsonb := '[]'::jsonb;
+  v_from date := make_date(extract(year from p_day)::int, 12, 1);
 begin
   if p_day is null or extract(month from p_day) <> 12 or extract(day from p_day) > 24 then
     raise exception 'advent_invalid_day';
@@ -369,9 +371,23 @@ begin
     update public.profiles set xp = xp + 25 where id = v_me;
     v_trophy := public.evaluate_trophy(v_me, 'gen_esprit_noel');
   end if;
-  select count(*)::int into v_n from public.advent_opens where profile_id = v_me;
+  select count(*)::int into v_n from public.advent_opens where profile_id = v_me and day between v_from and v_from + 23;
+  v_gifts := public._advent_gifts(v_me, p_day, v_n);
   return jsonb_build_object('day', p_day, 'xp', case when v_new then 25 else 0 end, 'new', v_new,
-                            'count', v_n, 'trophy', v_trophy);
+                            'count', v_n, 'trophy', v_trophy, 'gifts', v_gifts);
+end $$;
+
+-- Rattrapage idempotent : cadeaux des cases deja ouvertes (cases ouvertes avant l'arrivee des cadeaux).
+do $$
+declare r record;
+begin
+  for r in select a.profile_id, a.day,
+                  (select count(*)::int from public.advent_opens b where b.profile_id = a.profile_id
+                     and b.day between make_date(extract(year from a.day)::int, 12, 1) and a.day) as n
+             from public.advent_opens a
+  loop
+    perform public._advent_gifts(r.profile_id, r.day, r.n);
+  end loop;
 end $$;
 
 revoke all on function public.advent_state() from public, anon;

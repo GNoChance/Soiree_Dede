@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Check, Crown } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
+import { PlayerTitle } from '@/components/ui/PlayerTitle'
 import { Button } from '@/components/ui/Button'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { Modal } from '@/components/ui/Modal'
@@ -29,11 +30,13 @@ export interface PlayerTokenProps {
   dimmed?: boolean
   label?: ReactNode
   badge?: ReactNode
+  /** Affiche le titre déco du joueur sous son pseudo (salon). */
+  showTitle?: boolean
   className?: string
 }
 
 /** Avatar + pseudo, couronne pour l'hôte. */
-export function PlayerToken({ player, expression, size = 64, host, bounce, delay = 0, selected, dimmed, label, badge, className }: PlayerTokenProps) {
+export function PlayerToken({ player, expression, size = 64, host, bounce, delay = 0, selected, dimmed, label, badge, showTitle, className }: PlayerTokenProps) {
   const reduce = useReducedMotion()
   return (
     <div className={cn('flex flex-col items-center gap-1 transition-opacity', dimmed && 'opacity-40 grayscale', className)}>
@@ -55,6 +58,7 @@ export function PlayerToken({ player, expression, size = 64, host, bounce, delay
         <Avatar slug={player.slug} expression={expression ?? player.equipped} tenue={player.equippedTenue} size={size} selected={selected} badge={badge} />
       </motion.div>
       <span className="max-w-[5.5rem] truncate font-display text-sm leading-tight font-extrabold">{label ?? player.nickname}</span>
+      {showTitle && <PlayerTitle slug={player.slug} className="max-w-[6.5rem] text-[0.65rem]" />}
     </div>
   )
 }

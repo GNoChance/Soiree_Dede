@@ -13,6 +13,15 @@ const FILL = { w: '#fff4d6', b: '#3d3358' }
 const SHINE = { w: '#ffffff', b: '#7a6aa8' }
 const DETAIL = { w: '#c9a96a', b: '#a99ad6' }
 
+/** Thème « pain d'épice » (cadeau de l'Avent c_pain_epice) : biscuit clair / foncé, détails en glaçage. */
+const GINGER = {
+  fill: { w: '#E2A56B', b: '#8B4A24' },
+  shine: { w: '#FFE3C2', b: '#C47A48' },
+  detail: { w: '#FFFFFF', b: '#FFFFFF' },
+}
+const ICING = 'M 25 81 Q 31 77 37 81 T 49 81 T 61 81 T 73 81'
+export type PieceTheme = 'gingerbread'
+
 const BASE = 'M 22 74 L 78 74 Q 82 74 82 79 L 82 84 Q 82 89 77 89 L 23 89 Q 18 89 18 84 L 18 79 Q 18 74 22 74 Z'
 
 /** Silhouettes (remplies) et détails (traits) de chaque pièce. */
@@ -72,13 +81,17 @@ export interface PieceProps {
   className?: string
   /** Pas d'ombre (petites pièces prises). */
   flat?: boolean
+  theme?: PieceTheme
 }
 
-export const Piece = memo(function Piece({ piece, className, flat }: PieceProps) {
+export const Piece = memo(function Piece({ piece, className, flat, theme }: PieceProps) {
   const side = piece === piece.toUpperCase() ? 'w' : 'b'
   const shape = SHAPES[piece.toLowerCase()]
   if (!shape) return null
-  const fill = FILL[side]
+  const ginger = theme === 'gingerbread'
+  const fill = ginger ? GINGER.fill[side] : FILL[side]
+  const shine = ginger ? GINGER.shine[side] : SHINE[side]
+  const detail = ginger ? GINGER.detail[side] : DETAIL[side]
   const sw = flat ? 6 : 5
   const all = (
     <>
@@ -101,10 +114,11 @@ export const Piece = memo(function Piece({ piece, className, flat }: PieceProps)
         {all}
       </g>
       {/* reflet « sticker » */}
-      {!flat && <path d="M 36 70 C 34 62 36 56 40 52" stroke={SHINE[side]} strokeWidth="4" strokeLinecap="round" fill="none" opacity={side === 'w' ? 0.9 : 0.7} />}
+      {!flat && <path d="M 36 70 C 34 62 36 56 40 52" stroke={shine} strokeWidth="4" strokeLinecap="round" fill="none" opacity={side === 'w' ? 0.9 : 0.7} />}
       {shape.lines?.map((d, i) => (
-        <path key={`l${i}`} d={d} stroke={DETAIL[side]} strokeWidth="4" strokeLinecap="round" fill="none" />
+        <path key={`l${i}`} d={d} stroke={detail} strokeWidth="4" strokeLinecap="round" fill="none" />
       ))}
+      {ginger && !flat && <path d={ICING} stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" fill="none" />}
       {shape.eye && <circle cx={shape.eye[0]} cy={shape.eye[1]} r="4.5" fill={INK} />}
     </svg>
   )

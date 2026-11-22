@@ -16,6 +16,8 @@ export interface AdventOpenResult {
   new: boolean
   count: number
   trophy: boolean
+  /** Cadeaux déco nouvellement obtenus (ids de src/data/cadeaux.ts). */
+  gifts?: string[]
 }
 
 type Rpc = (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>

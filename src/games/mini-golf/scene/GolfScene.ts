@@ -44,7 +44,7 @@ export interface SceneOptions {
   now: () => number
   callbacks: SceneCallbacks
   /** Ma balle (absente en télé / spectateur). */
-  ball?: { color: string }
+  ball?: { color: string; /** Balle de cadeau (gb_bonhomme : bonhomme de neige). */ style?: 'snowman' }
   frame?: Frame
   /** Taille des têtes des fantômes. */
   ghostScale?: number
@@ -151,15 +151,30 @@ export class GolfScene {
 
     // Ma balle
     const ballGeo = this.geo(new THREE.SphereGeometry(BALL_R, 20, 14))
-    const ballMat = this.mat(new THREE.MeshToonMaterial({ color: opts.ball?.color ?? '#ffffff' }))
+    const snowman = opts.ball?.style === 'snowman'
+    const ballMat = this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#F7FBFF' : (opts.ball?.color ?? '#ffffff') }))
     this.ballMesh = new THREE.Mesh(ballGeo, ballMat)
     this.ballMesh.castShadow = true
     const ink = this.mat(new THREE.MeshBasicMaterial({ color: '#1F1B2E', side: THREE.BackSide }))
     const ol = new THREE.Mesh(ballGeo, ink)
     ol.scale.setScalar(1.22)
     this.ballMesh.add(ol)
-    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: '#FFFFFF' })))
+    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#E63946' : '#FFFFFF' })))
     this.ballMesh.add(stripe)
+    if (snowman) {
+      // nez carotte + 2 yeux charbon
+      const nose = new THREE.Mesh(this.geo(new THREE.ConeGeometry(BALL_R * 0.22, BALL_R * 0.7, 8)), this.mat(new THREE.MeshToonMaterial({ color: '#FF8C42' })))
+      nose.rotation.x = Math.PI / 2
+      nose.position.set(0, BALL_R * 0.35, BALL_R * 1.15)
+      this.ballMesh.add(nose)
+      const eyeGeo = this.geo(new THREE.SphereGeometry(BALL_R * 0.12, 8, 6))
+      const eyeMat = this.mat(new THREE.MeshBasicMaterial({ color: '#1F1B2E' }))
+      for (const x of [-0.32, 0.32]) {
+        const eye = new THREE.Mesh(eyeGeo, eyeMat)
+        eye.position.set(BALL_R * x, BALL_R * 0.62, BALL_R * 0.8)
+        this.ballMesh.add(eye)
+      }
+    }
     // balle un peu grossie à l'affichage (lisibilité sur téléphone), physique inchangée
     this.ballMesh.scale.setScalar(1.3)
     this.ballMesh.position.y = BALL_R * 0.3

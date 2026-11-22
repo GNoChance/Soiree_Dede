@@ -2,6 +2,7 @@ import { ArrowLeft, Flame, Heart, Skull, Star, Trophy } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Avatar } from '@/components/ui/Avatar'
+import { PlayerTitle } from '@/components/ui/PlayerTitle'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -66,6 +67,7 @@ export function ProfilePage() {
                 <Avatar slug={data.profile.slug} tenue={data.profile.equipped_tenue} size={80} bounce />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-3xl">{data.profile.nickname}</h2>
+                  <PlayerTitle slug={data.profile.slug} className="mb-1 block text-sm" />
                   <Badge tone="grape">Niveau {data.profile.level}</Badge>
                 </div>
               </div>

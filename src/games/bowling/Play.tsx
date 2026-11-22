@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn'
 import { forceAppUpdate } from '@/lib/forceUpdate'
 import { ConfirmModal } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { equippedOf } from '@/data/cadeaux'
 import { useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { ScoreSheet } from './ScoreSheet'
@@ -313,6 +314,7 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
         try {
           scene = new Scene(host.current, {
             ballColor: me.color,
+            ballStyle: equippedOf(me.equippedItems, 'bowling_ball')?.id === 'bb_noel' ? 'noel' : undefined,
             dark: document.documentElement.classList.contains('dark'),
             callbacks: {
               onThrow: () => {

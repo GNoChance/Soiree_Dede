@@ -166,6 +166,9 @@ const MESSAGES: Record<string, string> = {
   advent_not_yet: 'Pas touche ! Cette case s’ouvrira le jour J.',
   advent_closed: 'Le calendrier de l’Avent est fermé pour cette année.',
   advent_missed: 'Trop tard : il fallait finir le défi ce jour-là. Pas de rattrapage !',
+  // Cadeaux déco (supabase/features/cadeaux.sql)
+  item_invalid_slot: 'Ce cadeau ne va pas à cet endroit.',
+  item_not_owned: 'Tu n’as pas encore ce cadeau.',
   daily_already_done: 'Défi déjà terminé aujourd’hui.',
   invalid_answers: 'Réponses invalides.',
   // Rappels push (src/features/push)

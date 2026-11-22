@@ -42,6 +42,31 @@ const r12 = await open('2026-12-04')
 ok('12e case : trophée', r12.r?.trophy === true && r12.r.count === 12, JSON.stringify(r12))
 const t = (await db.query(`select 1 from public.tenue_unlocks where profile_id = $1 and tenue_id = 'lutin'`, [A])).rows
 ok('tenue lutin débloquée', t.length === 1)
+// cadeaux : case du 5 (titre), du 4 (cadre), palier 6 et 12 (boule, balle) ; rattrapage des cases insérées à la main
+const items = async () => (await db.query(`select item_id from public.profile_items where profile_id = $1 order by 1`, [A])).rows.map((r) => r.item_id)
+ok('cadeau de la case du 5 donné à l’ouverture', r1.r?.gifts?.includes('t_pote_rennes'), JSON.stringify(r1.r?.gifts))
+ok('12e case : cadeaux du jour + paliers 6 et 12', ['f_flocons', 'bb_noel', 'gb_bonhomme'].every((x) => r12.r?.gifts?.includes(x)), JSON.stringify(r12.r?.gifts))
+ok('pas encore le kart (18)', !(await items()).includes('k_traineau'))
+const eqBad = await call(`select public.equip_item('kart', 'k_traineau') r`)
+ok('équiper un objet non possédé : refusé', eqBad.err?.includes('item_not_owned'), JSON.stringify(eqBad))
+const eqSlot = await call(`select public.equip_item('frame', 'bb_noel') r`)
+ok('mauvais slot : refusé', eqSlot.err?.includes('item_invalid_slot'), JSON.stringify(eqSlot))
+const eq = await call(`select public.equip_item('frame', 'f_flocons') r`)
+ok('équiper un cadre', eq.r?.frame === 'f_flocons', JSON.stringify(eq))
+const uneq = await call(`select public.equip_item('frame', null) r`)
+ok('retirer le cadre', uneq.r && !('frame' in uneq.r), JSON.stringify(uneq))
+// 24 cases -> tout
+await db.query(`create or replace function public._daily_day() returns date language sql stable as $$ select date '2026-12-24' $$`)
+for (let d = 1; d <= 24; d++) {
+  const day = `2026-12-${String(d).padStart(2, '0')}`
+  await run(day)
+  await open(day)
+}
+const all = await items()
+ok('24 cases : les 29 cadeaux', all.length === 29, String(all.length))
+const r24 = await open('2026-12-24')
+ok('réouverture : aucun nouveau cadeau', r24.r?.gifts?.length === 0, JSON.stringify(r24.r?.gifts))
+
 await db.query(`create or replace function public._daily_day() returns date language sql stable as $$ select date '2027-01-10' $$`)
 ok('après le 6 janvier : fermé', (await open('2026-12-05')).err?.includes('advent_closed'))
 process.exit(failed ? 1 : 0)

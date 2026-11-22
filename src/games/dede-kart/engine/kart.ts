@@ -77,6 +77,10 @@ function makeShared() {
     bubble: new THREE.SphereGeometry(2.1, 20, 14),
     puff: new THREE.SphereGeometry(1, 10, 8),
     shadow: new THREE.PlaneGeometry(3.4, 2.2),
+    curl: new THREE.TorusGeometry(0.3, 0.06, 8, 14, Math.PI),
+    bell: new THREE.SphereGeometry(0.11, 10, 8),
+    gold: toon('#FFC93C'),
+    sack: toon('#A0522D'),
     dark: toon('#2E2E3C'),
     rubber: toon('#22222A'),
     metal: toon('#D5DAE3'),
@@ -125,8 +129,19 @@ export function buildKart(color: string, sprite: string, variant: number, loader
     pipe.rotation.z = Math.PI / 2
   }
 
-  // variantes : bolide (grand aileron), buggy (arceau), classique (petit becquet + phares)
-  if (variant === 1) {
+  // variantes : bolide (grand aileron), buggy (arceau), traîneau (cadeau de l'Avent : patins dorés, hotte,
+  // grelots, pas de roues visibles), classique (petit becquet + phares)
+  if (variant === 3) {
+    for (const z of [-0.78, 0.78]) {
+      put(S.box, S.gold, 0, 0.1, z, 2.5, 0.08, 0.1)
+      const curl = put(S.curl, S.gold, 1.25, 0.4, z)
+      curl.rotation.z = -Math.PI / 2
+      for (const x of [-0.7, 0.5]) put(S.cyl, S.gold, x, 0.24, z, 0.04, 0.3, 0.04)
+    }
+    put(S.puff, S.sack, -1.05, 1.15, 0, 0.5, 0.45, 0.5).add(outline(S.puff, 1.06))
+    put(S.box, S.gold, 0, 0.66, 0, 2.3, 0.06, 1.45)
+    for (const z of [-0.3, 0, 0.3]) put(S.bell, S.gold, 1.42, 0.62, z)
+  } else if (variant === 1) {
     for (const z of [-0.45, 0.45]) put(S.box, S.dark, -1.3, 0.92, z, 0.1, 0.4, 0.06)
     put(S.box, bodyMat, -1.36, 1.14, 0, 0.5, 0.08, 1.8)
     put(S.box, accent, -1.36, 1.2, 0, 0.4, 0.03, 1.82)
@@ -146,9 +161,11 @@ export function buildKart(color: string, sprite: string, variant: number, loader
   for (const [x, z, front] of [[0.9, 0.8, true], [0.9, -0.8, true], [-0.88, 0.84, false], [-0.88, -0.84, false]] as const) {
     const r = (front ? 0.32 : 0.38) * big
     const w = new THREE.Group()
-    put(S.tire, S.rubber, 0, 0, 0, r, r, front ? 0.26 : 0.32, w).add(outline(S.tire, 1.1))
-    put(S.rim, S.metal, 0, 0, 0, r * 0.55, r * 0.55, (front ? 0.26 : 0.32) + 0.02, w)
-    put(S.box, S.dark, 0, 0, 0, r * 1.5, r * 0.25, (front ? 0.26 : 0.32) + 0.04, w)
+    if (variant !== 3) {
+      put(S.tire, S.rubber, 0, 0, 0, r, r, front ? 0.26 : 0.32, w).add(outline(S.tire, 1.1))
+      put(S.rim, S.metal, 0, 0, 0, r * 0.55, r * 0.55, (front ? 0.26 : 0.32) + 0.02, w)
+      put(S.box, S.dark, 0, 0, 0, r * 1.5, r * 0.25, (front ? 0.26 : 0.32) + 0.04, w)
+    }
     if (front) {
       const pivot = new THREE.Group()
       pivot.position.set(x, r, z)

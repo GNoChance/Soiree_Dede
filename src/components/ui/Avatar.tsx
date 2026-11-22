@@ -4,6 +4,8 @@ import { cn } from '@/lib/cn'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from './ChibiImage'
 import { useTenueArt } from './tenueArt'
+import { AvatarFrame } from './AvatarFrame'
+import { equippedOf } from '@/data/cadeaux'
 
 export interface AvatarProps {
   slug: string
@@ -14,6 +16,11 @@ export interface AvatarProps {
    * repli sur `default` + emoji de la tenue en coin.
    */
   tenue?: string
+  /**
+   * Cadre (id de cadeau, src/data/cadeaux.ts). Non renseigné -> cadre équipé du joueur dans l'annuaire ;
+   * null -> aucun cadre.
+   */
+  frame?: string | null
   size?: number
   /** Pastille de statut (ex: couronne, check) en bas a droite */
   badge?: React.ReactNode
@@ -24,18 +31,21 @@ export interface AvatarProps {
 }
 
 /** Disque sticker (couleur d'accent du perso) + chibi dedans. */
-export function Avatar({ slug, expression = 'joie', tenue, size = 56, badge, bounce, selected, className }: AvatarProps) {
+export function Avatar({ slug, expression = 'joie', tenue, frame, size = 56, badge, bounce, selected, className }: AvatarProps) {
   const color = getCharacter(slug)?.color ?? '#FFB703'
   const directoryTenue = usePlayersStore((s) => (tenue === undefined ? s.list.find((p) => p.slug === slug)?.equippedTenue : undefined))
   const wanted = tenue ?? directoryTenue ?? 'default'
   const art = useTenueArt(slug, wanted)
+  const directoryItems = usePlayersStore((s) => (frame === undefined ? s.list.find((p) => p.slug === slug)?.equippedItems : undefined))
+  const frameDef = equippedOf(frame === undefined ? directoryItems : frame ? { frame } : null, 'frame')?.frame
   return (
     <motion.div
       animate={bounce ? { y: [0, -6, 0] } : undefined}
       transition={bounce ? { repeat: Infinity, duration: 1.4, ease: 'easeInOut' } : undefined}
-      className={cn('relative inline-flex shrink-0', className)}
+      className={cn('relative isolate inline-flex shrink-0', className)}
       style={{ width: size, height: size }}
     >
+      {frameDef && <AvatarFrame frame={frameDef} size={size} />}
       <div
         className={cn(
           'flex size-full items-center justify-center overflow-hidden rounded-full border-[3px] border-ink shadow-sticker-sm',

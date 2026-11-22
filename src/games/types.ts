@@ -17,6 +17,8 @@ export interface PlayerInfo {
   equipped: string
   /** Tenue équipée (id du catalogue src/data/tenues.ts). */
   equippedTenue: string
+  /** Cadeaux déco équipés {slot: item_id} (src/data/cadeaux.ts). */
+  equippedItems?: Record<string, string>
   color: string
 }
 

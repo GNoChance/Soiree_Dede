@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { BottomSheet } from '@/components/ui/Modal'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
+import { DecoTab } from '@/features/cadeaux/DecoTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
@@ -36,7 +37,7 @@ export function InventoryPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [friends, setFriends] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<'expressions' | 'tenues'>('expressions')
+  const [tab, setTab] = useState<'expressions' | 'tenues' | 'deco'>(() => (new URLSearchParams(window.location.search).get('onglet') === 'deco' ? 'deco' : 'expressions'))
 
   const profileId = profile?.id
   const load = useCallback(async () => {
@@ -146,11 +147,14 @@ export function InventoryPage() {
           options={[
             { value: 'expressions', label: 'Expressions' },
             { value: 'tenues', label: 'Tenues 👕' },
+            { value: 'deco', label: 'Déco 🎁' },
           ]}
         />
       </StaggerItem>
 
-      {tab === 'tenues' ? (
+      {tab === 'deco' ? (
+        <DecoTab />
+      ) : tab === 'tenues' ? (
         <TenuesTab />
       ) : (
       <>

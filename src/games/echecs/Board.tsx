@@ -8,6 +8,8 @@ import { useTv } from '@/features/tv/tv'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { DuelBoardProps } from '@/features/duel/types'
+import { equippedOf } from '@/data/cadeaux'
+import type { PieceTheme } from './Piece'
 import { Aide } from './Aide'
 import {
   END_LABELS,
@@ -56,11 +58,18 @@ interface BarProps {
   ended: boolean
 }
 
+/** Thème des pièces de chaque camp (cadeau « Échecs en pain d’épice » équipé par le joueur de ce camp). */
+function themesOf(board: ChessBoard, get: BarProps['get']): Record<'w' | 'b', PieceTheme | undefined> {
+  const t = (side: 'w' | 'b') => (equippedOf(get(playerOfSide(board, side))?.equippedItems, 'chess')?.id === 'c_pain_epice' ? 'gingerbread' : undefined)
+  return { w: t('w'), b: t('b') }
+}
+
 function PlayerBar({ board, side, me, get, active, clockMs, ended }: BarProps) {
   const reduce = useReducedMotion()
   const id = playerOfSide(board, side)
   const p = get(id)
   const caps = sortCaptured(board.captured[side] ?? '')
+  const themes = themesOf(board, get)
   const lead = material(board.sq, side) - material(board.sq, otherSide(side))
   const won = ended && board.end?.winner === id
   const lost = ended && !!board.end?.winner && board.end.winner !== id
@@ -82,7 +91,7 @@ function PlayerBar({ board, side, me, get, active, clockMs, ended }: BarProps) {
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="flex items-center gap-1 truncate font-display text-base font-extrabold">
           <span className="inline-block size-5 shrink-0">
-            <Piece piece={side === 'w' ? 'K' : 'k'} flat />
+            <Piece piece={side === 'w' ? 'K' : 'k'} flat theme={themes[side]} />
           </span>
           <span className="truncate">{id === me ? 'Toi' : p.nickname}</span>
         </span>
@@ -91,7 +100,7 @@ function PlayerBar({ board, side, me, get, active, clockMs, ended }: BarProps) {
             <span className="flex flex-wrap items-center rounded-full bg-[#f6e7c1] py-px pr-1.5 pl-0.5" aria-label={`${caps.length} pièce(s) prise(s)`}>
               {caps.map((c, i) => (
                 <span key={i} className="-mr-1 inline-block size-4">
-                  <Piece piece={c} flat />
+                  <Piece piece={c} flat theme={themes[sideOfPiece(c)]} />
                 </span>
               ))}
             </span>
@@ -137,6 +146,7 @@ export default function ChessBoardView({ board, me, isMyTurn, onMove, pending, p
   const [help, setHelp] = useState(false)
 
   const flipped = isFlipped(board, me, spectator)
+  const themes = themesOf(board, get)
   const mySide = spectator ? null : sideOfPlayer(board, me)
   const ended = !!board.end
   const interactive = isMyTurn && !pending && phase === 'playing' && !ended
@@ -279,7 +289,7 @@ export default function ChessBoardView({ board, me, isMyTurn, onMove, pending, p
                       if (shake?.i === i) setShake(null)
                     }}
                   >
-                    <Piece piece={p} />
+                    <Piece piece={p} theme={themes[sideOfPiece(p)]} />
                   </motion.span>
                 )}
                 {isTarget &&

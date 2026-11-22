@@ -217,7 +217,8 @@ function stripeTexture(a: string, b: string): THREE.CanvasTexture {
   return t
 }
 
-export function buildLane(opts: { ballColor: string; dark: boolean }): LaneView {
+export function buildLane(opts: { ballColor: string; ballStyle?: 'noel'; dark: boolean }): LaneView {
+  const noel = opts.ballStyle === 'noel'
   const disposables: Array<{ dispose: () => void }> = []
   const keep = <T extends { dispose: () => void }>(x: T) => {
     disposables.push(x)
@@ -358,15 +359,20 @@ export function buildLane(opts: { ballColor: string; dark: boolean }): LaneView 
   // ---------------------------------------------------------------- boule
   const ball = new THREE.Group()
   const ballGeo = keep(new THREE.SphereGeometry(BALL_R, 28, 18))
-  const ballMesh = new THREE.Mesh(ballGeo, toon({ color: opts.ballColor }))
+  const ballMesh = new THREE.Mesh(ballGeo, toon({ color: noel ? '#C1121F' : opts.ballColor }))
   ballMesh.castShadow = true
   ball.add(ballMesh)
   ball.add(new THREE.Mesh(ballGeo, outline))
   // Bande décorative + trous
-  const bandGeo = keep(new THREE.TorusGeometry(BALL_R * 0.995, 0.007, 6, 40))
-  const band = new THREE.Mesh(bandGeo, toon({ color: '#ffffff' }))
+  const bandGeo = keep(new THREE.TorusGeometry(BALL_R * 0.995, noel ? 0.012 : 0.007, 6, 40))
+  const band = new THREE.Mesh(bandGeo, toon({ color: noel ? '#FFC93C' : '#ffffff' }))
   band.rotation.y = Math.PI / 2
   ball.add(band)
+  if (noel) {
+    // boule de Noël (cadeau de l'Avent) : 2e bande dorée croisée
+    const band2 = new THREE.Mesh(bandGeo, toon({ color: '#FFC93C' }))
+    ball.add(band2)
+  }
   const holeGeo = keep(new THREE.CircleGeometry(0.013, 12))
   const holeMat = keep(new THREE.MeshBasicMaterial({ color: INK }))
   for (const [a, b, s] of [[0.35, 0.25, 1], [0.55, 0.1, 1], [0.52, 0.42, 1.2]] as const) {

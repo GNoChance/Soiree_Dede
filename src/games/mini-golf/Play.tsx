@@ -22,6 +22,7 @@ import { useGolfNet } from './net'
 import { ScoreCard } from './ScoreCard'
 import { MiniGolfTv } from './TvView'
 import { mgActions, type GolfMsg, type MiniGolfState } from './types'
+import { equippedOf } from '@/data/cadeaux'
 import type { GolfScene, StrokeResult, Vec3 } from './scene/GolfScene'
 
 type Get = (id: string) => PlayerInfo
@@ -301,7 +302,9 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
           scene = new Scene(host.current, {
             dark: document.documentElement.classList.contains('dark'),
             now: serverNow,
-            ball: isPlayer ? { color: playerOrPlaceholder(players, meId).color } : undefined,
+            ball: isPlayer
+              ? { color: playerOrPlaceholder(players, meId).color, style: equippedOf(playerOrPlaceholder(players, meId).equippedItems, 'golf_ball')?.id === 'gb_bonhomme' ? 'snowman' : undefined }
+              : undefined,
             callbacks: {
               onShot: () => setRolling(true),
               onStrokeEnd: (r) => callbacks.current.onStrokeEnd(r),

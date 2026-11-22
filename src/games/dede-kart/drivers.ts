@@ -2,10 +2,14 @@ import { CHARACTERS, TENUE_ART_VERSION } from '@/data/characters'
 import { DEFAULT_TENUE } from '@/data/tenues'
 import { hasTenueArt, tenueArtDir } from '@/components/ui/tenueArt'
 import type { PlayerInfo } from '../types'
+import { equippedOf } from '@/data/cadeaux'
 import type { Driver } from './engine/Game'
 
 /** Forme de kart propre à chaque perso (0 classique, 1 bolide, 2 buggy). */
 export const kartOf = (slug: string) => Math.max(0, CHARACTERS.findIndex((c) => c.slug === slug)) % 3
+
+/** Variante 3 = traîneau (cadeau de l'Avent équipé), sinon la forme du perso. */
+const kartFor = (p: PlayerInfo | undefined, slug: string) => (equippedOf(p?.equippedItems, 'kart')?.id === 'k_traineau' ? 3 : kartOf(slug))
 
 /** Chibi du pilote : sa tenue équipée si elle est dessinée, sinon sa tenue de soirée. */
 function spriteOf(p: PlayerInfo) {
@@ -22,7 +26,7 @@ export function buildDrivers(playerIds: string[], botIds: string[], players: Rec
   const humans = playerIds.map((id) => {
     const p = players[id]
     const c = CHARACTERS.find((x) => x.slug === p?.slug) ?? CHARACTERS[0]
-    return { id, name: p?.nickname ?? '…', color: p?.color ?? c.color, sprite: p ? spriteOf(p) : `/chibis/${c.slug}/default/joie.webp`, kart: kartOf(c.slug) }
+    return { id, name: p?.nickname ?? '…', color: p?.color ?? c.color, sprite: p ? spriteOf(p) : `/chibis/${c.slug}/default/joie.webp`, kart: kartFor(p, c.slug) }
   })
   const taken = new Set(playerIds.map((id) => players[id]?.slug))
   const free = CHARACTERS.filter((c) => !taken.has(c.slug))

@@ -16,6 +16,18 @@ interface PlayersState {
   load: (force?: boolean) => Promise<void>
 }
 
+interface DirRow {
+  id: string
+  slug: string
+  nickname: string
+  first_name: string
+  expressions: string[] | null
+  equipped_expression: string | null
+  equipped_tenue: string | null
+  equipped_items: Record<string, string> | null
+}
+type DirQuery = { select: (c: string) => { order: (k: string) => Promise<{ data: DirRow[] | null; error: unknown }> } }
+
 export const usePlayersStore = create<PlayersState>((set, get) => ({
   byId: {},
   list: [],
@@ -24,10 +36,12 @@ export const usePlayersStore = create<PlayersState>((set, get) => ({
   load: async (force = false) => {
     if (get().loading || (get().loaded && !force)) return
     set({ loading: true })
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, slug, nickname, first_name, expressions, equipped_expression, equipped_tenue, sort_order')
-      .order('sort_order')
+    // equipped_items (features/cadeaux.sql) n'est pas dans src/types/db.ts : requête typée à la main.
+    // Repli sans equipped_items si la colonne n'existe pas encore (SQL pas encore collé).
+    const cols = 'id, slug, nickname, first_name, expressions, equipped_expression, equipped_tenue, sort_order'
+    const query = (c: string) => (supabase.from('profiles') as unknown as DirQuery).select(c).order('sort_order')
+    let { data, error } = await query(`${cols}, equipped_items`)
+    if (error) ({ data, error } = await query(cols))
     if (error || !data) {
       set({ loading: false })
       return
@@ -40,6 +54,7 @@ export const usePlayersStore = create<PlayersState>((set, get) => ({
       expressions: p.expressions?.length ? p.expressions : (getCharacter(p.slug)?.expressions ?? ['joie']),
       equipped: p.equipped_expression ?? 'joie',
       equippedTenue: p.equipped_tenue ?? 'default',
+      equippedItems: p.equipped_items ?? {},
       color: getCharacter(p.slug)?.color ?? '#FFB703',
     }))
     set({ list, byId: Object.fromEntries(list.map((p) => [p.id, p])), loaded: true, loading: false })
