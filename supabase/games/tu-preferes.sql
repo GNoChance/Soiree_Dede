@@ -85,6 +85,8 @@ begin
            'a', btrim(e->>'a'),
            'b', btrim(e->>'b'),
            'theme', case when jsonb_typeof(e->'theme') = 'string' then left(e->>'theme', 30) end)
+         -- `by` : id du profil auteur d'une carte maison (optionnel, voir features/cartes-maison.sql)
+         || case when (e->>'by') ~ '^[0-9a-f-]{36}$' then jsonb_build_object('by', e->>'by') else '{}'::jsonb end
          order by o)
     into v_d
     from jsonb_array_elements(v_d) with ordinality as t(e, o) where o <= v_rounds;

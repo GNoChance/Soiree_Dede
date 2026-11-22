@@ -9,6 +9,7 @@ import { burst } from '@/components/ui/confetti'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { QuiDeNousState } from '@/types/db'
+import { AuthorBadge } from '@/features/cartes/AuthorBadge'
 import { DropCard, VoterStrip } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GamePlayProps, PlayerInfo } from '../types'
@@ -60,6 +61,7 @@ function Voting({ s, meId, isHost, get, players, act, pending }: { s: QuiDeNousS
           Question {s.round}/{s.total_rounds}
         </Badge>
         <p className="font-display text-[1.7rem] leading-tight font-extrabold">{s.question}</p>
+        <AuthorBadge by={(s as { question_by?: string | null }).question_by} className="mt-2" />
       </DropCard>
 
       {isPlayer ? (
@@ -163,6 +165,7 @@ function Reveal({ s, meId, isHost, get, act, pending }: { s: QuiDeNousState; meI
     <>
       <div className="sticker bg-sun p-4 text-center text-[#1f1b2e]">
         <p className="font-display text-xl leading-tight font-extrabold">{lr.question}</p>
+        <AuthorBadge by={(s as { question_by?: string | null }).question_by} className="mt-2" />
       </div>
 
       {/* Vote en cours de dépouillement */}

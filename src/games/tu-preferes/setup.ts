@@ -6,6 +6,7 @@
  */
 import type { Dilemma, DilemmaTheme } from './dilemmas'
 import type { TpHistoryEntry, TpSide, TpState } from './types'
+import { customQuota, mergeDeck } from '../../features/cartes/merge'
 
 export const tpActions = {
   answer: (round: number, choice: TpSide, bet: TpSide) => ({ type: 'answer', round, choice, bet }),
@@ -41,9 +42,11 @@ export interface TpOptions {
   themes: DilemmaTheme[]
   /** Bonus « Rebelle » (+1 au seul de son avis). */
   rebel: boolean
+  /** Mélange les cartes écrites par la bande (jusqu'à 1 sur 3). */
+  customCards: boolean
 }
 
-export const TP_DEFAULT_OPTIONS: TpOptions = { rounds: 15, timer: 30, themes: [], rebel: true }
+export const TP_DEFAULT_OPTIONS: TpOptions = { rounds: 15, timer: 30, themes: [], rebel: true, customCards: true }
 
 export function readOptions(o: Record<string, unknown>): TpOptions {
   const rounds = Number(o.rounds)
@@ -54,6 +57,7 @@ export function readOptions(o: Record<string, unknown>): TpOptions {
     timer: (TP_TIMER_CHOICES as readonly number[]).includes(timer) ? timer : TP_DEFAULT_OPTIONS.timer,
     themes: Array.isArray(o.themes) ? (o.themes.filter((t) => typeof t === 'string' && valid.has(t)) as DilemmaTheme[]) : [],
     rebel: o.rebel !== false,
+    customCards: o.customCards !== false,
   }
 }
 
@@ -116,23 +120,47 @@ export function pickDilemmas(bank: Dilemma[], n: number, themes: DilemmaTheme[] 
 }
 
 /** p_options de start_match('tu-preferes') à partir des options de l'écran de lancement. */
-export function buildStartOptions(bank: Dilemma[], options: Record<string, unknown>, history?: string[]) {
+export function buildStartOptions(bank: Dilemma[], options: Record<string, unknown>, history?: string[], custom: TpCustomDilemma[] = []) {
   const o = readOptions(options)
-  const { picked, history: next } = pickDilemmas(bank, o.rounds, o.themes, history)
+  const mine = o.customCards ? custom : []
+  const k = customQuota(o.rounds, mine.length)
+  const { picked, history: next } = pickDilemmas(bank, o.rounds - k, o.themes, history)
+  const base: TpCustomDilemma[] = picked.map((d) => ({ id: d.id, a: d.a, b: d.b, theme: d.theme }))
+  const deck = mergeDeck(base, mine, o.rounds)
   return {
     options: {
-      rounds: picked.length,
+      rounds: deck.length,
       timer: o.timer,
       rebel: o.rebel,
-      dilemmas: picked.map((d) => ({ id: d.id, a: d.a, b: d.b, theme: d.theme })),
+      dilemmas: deck.map((d) => ({ id: d.id, a: d.a, b: d.b, theme: d.theme, ...(d.by ? { by: d.by } : {}) })),
     },
     history: next,
   }
 }
 
+/** Dilemme du lot envoyé au serveur ; `by` = profil auteur d'une carte maison. */
+export interface TpCustomDilemma {
+  id: string
+  a: string
+  b: string
+  theme: string | null
+  by?: string
+}
+
 export async function prepareTuPreferesStart(options: Record<string, unknown>): Promise<Record<string, unknown>> {
   const { DILEMMAS } = await import('./dilemmas')
-  const { options: start, history } = buildStartOptions(DILEMMAS, options)
+  let custom: TpCustomDilemma[] = []
+  if (readOptions(options).customCards) {
+    const { fetchPlayableCards } = await import('../../features/cartes/api')
+    custom = (await fetchPlayableCards('tu-preferes')).map((c) => ({
+      id: `cc-${c.id}`,
+      a: String(c.payload.a ?? ''),
+      b: String(c.payload.b ?? ''),
+      theme: null,
+      by: c.author_id,
+    }))
+  }
+  const { options: start, history } = buildStartOptions(DILEMMAS, options, undefined, custom)
   writeHistory(history)
   return start
 }

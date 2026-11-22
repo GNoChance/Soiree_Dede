@@ -1105,6 +1105,7 @@ set search_path = public, extensions
 as $$
 declare
   v_q      jsonb := p_options->'questions';
+  v_by     jsonb := p_options->'authors';   -- optionnel : id du profil auteur par question (cartes maison), null = carte de base
   v_rounds integer;
   v_zero   jsonb;
 begin
@@ -1123,6 +1124,11 @@ begin
 
   select jsonb_agg(q order by o) into v_q
     from jsonb_array_elements_text(v_q) with ordinality as t(q, o) where o <= v_rounds;
+  -- Auteurs alignés sur les questions (uuid valide ou null).
+  select jsonb_agg(case when jsonb_typeof(case when jsonb_typeof(v_by) = 'array' then v_by->(o - 1) end) = 'string'
+                         and (v_by->>(o - 1)) ~ '^[0-9a-f-]{36}$' then v_by->(o - 1) else 'null'::jsonb end order by o)
+    into v_by
+    from generate_series(1, v_rounds) o;
   select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
 
   return jsonb_build_object(
@@ -1132,6 +1138,7 @@ begin
       'round', 1,
       'total_rounds', v_rounds,
       'question', v_q->>0,
+      'question_by', v_by->0,
       'players', to_jsonb(p_players),
       'voters', '[]'::jsonb,
       'scores', v_zero,
@@ -1140,7 +1147,7 @@ begin
       'history', '[]'::jsonb,
       'winners', null,
       'results', null),
-    'server', jsonb_build_object('questions', v_q, 'votes', '{}'::jsonb),
+    'server', jsonb_build_object('questions', v_q, 'authors', v_by, 'votes', '{}'::jsonb),
     'secrets', '{}'::jsonb);
 end $$;
 
@@ -1290,6 +1297,7 @@ begin
     p_state := p_state || jsonb_build_object(
       'phase', 'voting', 'round', v_round + 1,
       'question', p_server->'questions'->>v_round,   -- index 0-based = manche suivante
+      'question_by', coalesce(p_server->'authors'->v_round, 'null'::jsonb),
       'voters', '[]'::jsonb);
     p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
     return jsonb_build_object('state', p_state, 'server', p_server);

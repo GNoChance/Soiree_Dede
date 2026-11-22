@@ -16,6 +16,7 @@ import { DailyPage } from '@/features/daily/DailyPage'
 import { AdventPage } from '@/features/advent/AdventPage'
 import { SoloRoute } from '@/features/solo/SoloRoute'
 import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
+import { CartesPage } from '@/features/cartes/CartesPage'
 import { RouteError } from '@/pages/RouteError'
 import { onPushOpen } from '@/features/push/push'
 
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
               { path: '/inventaire', element: <InventoryPage /> },
               { path: '/classement', element: <LeaderboardPage /> },
               { path: '/amis', element: <FriendsPage /> },
+              { path: '/cartes', element: <CartesPage /> },
               { path: '/historique', element: <HistoryPage /> },
               { path: '/historique/:id', element: <HistoryDetailPage /> },
               { path: '/profil/:id', element: <ProfilePage /> },

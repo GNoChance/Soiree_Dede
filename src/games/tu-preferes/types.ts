@@ -12,6 +12,8 @@ export interface TpDilemma {
   a: string
   b: string
   theme: string | null
+  /** Profil auteur si c'est une carte maison (features/cartes-maison.sql). */
+  by?: string
 }
 
 /** Compteurs cumulés par joueur (aussi dans results[].stats). */

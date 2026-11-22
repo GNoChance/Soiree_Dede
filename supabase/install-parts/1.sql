@@ -1108,6 +1108,7 @@ set search_path = public, extensions
 as $$
 declare
   v_q      jsonb := p_options->'questions';
+  v_by     jsonb := p_options->'authors';   -- optionnel : id du profil auteur par question (cartes maison), null = carte de base
   v_rounds integer;
   v_zero   jsonb;
 begin
@@ -1126,6 +1127,11 @@ begin
 
   select jsonb_agg(q order by o) into v_q
     from jsonb_array_elements_text(v_q) with ordinality as t(q, o) where o <= v_rounds;
+  -- Auteurs alignés sur les questions (uuid valide ou null).
+  select jsonb_agg(case when jsonb_typeof(case when jsonb_typeof(v_by) = 'array' then v_by->(o - 1) end) = 'string'
+                         and (v_by->>(o - 1)) ~ '^[0-9a-f-]{36}$' then v_by->(o - 1) else 'null'::jsonb end order by o)
+    into v_by
+    from generate_series(1, v_rounds) o;
   select jsonb_object_agg(p::text, 0) into v_zero from unnest(p_players) p;
 
   return jsonb_build_object(
@@ -1135,6 +1141,7 @@ begin
       'round', 1,
       'total_rounds', v_rounds,
       'question', v_q->>0,
+      'question_by', v_by->0,
       'players', to_jsonb(p_players),
       'voters', '[]'::jsonb,
       'scores', v_zero,
@@ -1143,7 +1150,7 @@ begin
       'history', '[]'::jsonb,
       'winners', null,
       'results', null),
-    'server', jsonb_build_object('questions', v_q, 'votes', '{}'::jsonb),
+    'server', jsonb_build_object('questions', v_q, 'authors', v_by, 'votes', '{}'::jsonb),
     'secrets', '{}'::jsonb);
 end $$;
 
@@ -1293,6 +1300,7 @@ begin
     p_state := p_state || jsonb_build_object(
       'phase', 'voting', 'round', v_round + 1,
       'question', p_server->'questions'->>v_round,   -- index 0-based = manche suivante
+      'question_by', coalesce(p_server->'authors'->v_round, 'null'::jsonb),
       'voters', '[]'::jsonb);
     p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
     return jsonb_build_object('state', p_state, 'server', p_server);
@@ -2385,6 +2393,164 @@ revoke all on function public._grant_item(uuid, text) from public, anon, authent
 revoke all on function public._advent_gifts(uuid, date, integer) from public, anon, authenticated;
 revoke all on function public.equip_item(text, text) from public, anon;
 grant execute on function public.equip_item(text, text) to authenticated;
+
+
+-- ===== features\cartes-maison.sql =====
+-- =============================================================================
+-- CARTES MAISON : chacun écrit ses cartes (blagues internes) qui entrent dans les paquets de
+-- « Tu préfères » (kind dilemma : {a, b}), « Action ou vérité » (kind action | verite : {text, level 1..3})
+-- et « Qui de nous » (kind question : {text}). Lecture : tous les authentifiés (les cartes masquées ne
+-- sont vues que par leur auteur et l'admin). Écriture : uniquement via les RPC ci-dessous.
+-- Les moteurs de jeu reçoivent les cartes dans p_options (le front les lit ici) avec `by` = id du profil auteur.
+-- =============================================================================
+
+create table if not exists public.custom_cards (
+  id         uuid primary key default gen_random_uuid(),
+  author_id  uuid not null references public.profiles(id) on delete cascade,
+  game_id    text not null check (game_id in ('tu-preferes', 'action-ou-verite', 'qui-de-nous')),
+  kind       text not null check (kind in ('dilemma', 'action', 'verite', 'question')),
+  payload    jsonb not null,
+  created_at timestamptz not null default now(),
+  hidden     boolean not null default false,
+  constraint custom_cards_kind_game check (
+    (game_id = 'tu-preferes' and kind = 'dilemma')
+    or (game_id = 'action-ou-verite' and kind in ('action', 'verite'))
+    or (game_id = 'qui-de-nous' and kind = 'question'))
+);
+create index if not exists custom_cards_game_idx on public.custom_cards (game_id, created_at desc);
+create index if not exists custom_cards_author_idx on public.custom_cards (author_id);
+alter table public.custom_cards enable row level security;
+drop policy if exists custom_cards_select on public.custom_cards;
+create policy custom_cards_select on public.custom_cards for select to authenticated
+  using (not hidden or author_id = public.current_profile_id()
+         or exists (select 1 from public.profiles p where p.id = public.current_profile_id() and p.is_admin));
+-- Aucune policy d'écriture : tout passe par les RPC.
+
+-- Valide et normalise un payload ; lève invalid_card si KO. Renvoie le payload propre.
+create or replace function public._custom_card_clean(p_kind text, p_payload jsonb)
+returns jsonb language plpgsql immutable
+set search_path = public, extensions
+as $$
+declare
+  v_a text; v_b text; v_t text; v_l integer;
+begin
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then raise exception 'invalid_custom_card'; end if;
+  if p_kind = 'dilemma' then
+    v_a := btrim(regexp_replace(coalesce(p_payload->>'a', ''), '\s+', ' ', 'g'));
+    v_b := btrim(regexp_replace(coalesce(p_payload->>'b', ''), '\s+', ' ', 'g'));
+    if char_length(v_a) < 2 or char_length(v_b) < 2 or char_length(v_a) > 120 or char_length(v_b) > 120 then
+      raise exception 'invalid_custom_card';
+    end if;
+    return jsonb_build_object('a', v_a, 'b', v_b);
+  elsif p_kind in ('action', 'verite') then
+    v_t := btrim(regexp_replace(coalesce(p_payload->>'text', ''), '\s+', ' ', 'g'));
+    if char_length(v_t) < 5 or char_length(v_t) > 300 then raise exception 'invalid_custom_card'; end if;
+    begin
+      v_l := coalesce(nullif(p_payload->>'level', '')::integer, 1);
+    exception when others then raise exception 'invalid_custom_card';
+    end;
+    if v_l not in (1, 2, 3) then raise exception 'invalid_custom_card'; end if;
+    return jsonb_build_object('text', v_t, 'level', v_l);
+  elsif p_kind = 'question' then
+    v_t := btrim(regexp_replace(coalesce(p_payload->>'text', ''), '\s+', ' ', 'g'));
+    if char_length(v_t) < 8 or char_length(v_t) > 200 then raise exception 'invalid_custom_card'; end if;
+    return jsonb_build_object('text', v_t);
+  end if;
+  raise exception 'invalid_custom_card';
+end $$;
+
+-- Clé anti-doublon d'une carte (texte en minuscules).
+create or replace function public._custom_card_key(p_kind text, p_payload jsonb)
+returns text language sql immutable
+as $$ select lower(case when p_kind = 'dilemma' then (p_payload->>'a') || '|' || (p_payload->>'b') else p_payload->>'text' end) $$;
+
+create or replace function public.create_custom_card(p_game text, p_kind text, p_payload jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_clean jsonb;
+  v_row public.custom_cards;
+begin
+  if not ((p_game = 'tu-preferes' and p_kind = 'dilemma')
+       or (p_game = 'action-ou-verite' and p_kind in ('action', 'verite'))
+       or (p_game = 'qui-de-nous' and p_kind = 'question')) then
+    raise exception 'invalid_custom_card';
+  end if;
+  v_clean := public._custom_card_clean(p_kind, p_payload);
+  if (select count(*) from public.custom_cards where author_id = v_me) >= 200 then raise exception 'too_many_cards'; end if;
+  if exists (select 1 from public.custom_cards
+              where author_id = v_me and game_id = p_game and kind = p_kind
+                and public._custom_card_key(kind, payload) = public._custom_card_key(p_kind, v_clean)) then
+    raise exception 'duplicate_card';
+  end if;
+  insert into public.custom_cards(author_id, game_id, kind, payload) values (v_me, p_game, p_kind, v_clean)
+    returning * into v_row;
+  return to_jsonb(v_row);
+end $$;
+
+create or replace function public.update_custom_card(p_id uuid, p_payload jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_row public.custom_cards;
+  v_clean jsonb;
+begin
+  select * into v_row from public.custom_cards where id = p_id;
+  if not found then raise exception 'card_not_found'; end if;
+  if v_row.author_id <> v_me then raise exception 'not_card_author'; end if;
+  v_clean := public._custom_card_clean(v_row.kind, p_payload);
+  if exists (select 1 from public.custom_cards
+              where author_id = v_me and game_id = v_row.game_id and kind = v_row.kind and id <> p_id
+                and public._custom_card_key(kind, payload) = public._custom_card_key(v_row.kind, v_clean)) then
+    raise exception 'duplicate_card';
+  end if;
+  update public.custom_cards set payload = v_clean where id = p_id returning * into v_row;
+  return to_jsonb(v_row);
+end $$;
+
+create or replace function public.delete_custom_card(p_id uuid)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me uuid := public._require_profile();
+  v_author uuid;
+begin
+  select author_id into v_author from public.custom_cards where id = p_id;
+  if not found then raise exception 'card_not_found'; end if;
+  if v_author <> v_me and not exists (select 1 from public.profiles where id = v_me and is_admin) then
+    raise exception 'not_card_author';
+  end if;
+  delete from public.custom_cards where id = p_id;
+end $$;
+
+-- Admin : masque / ré-affiche une carte (pas de modération automatique).
+create or replace function public.hide_custom_card(p_id uuid, p_hidden boolean)
+returns void language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare v_me uuid := public._require_profile();
+begin
+  if not exists (select 1 from public.profiles where id = v_me and is_admin) then raise exception 'not_admin'; end if;
+  update public.custom_cards set hidden = coalesce(p_hidden, true) where id = p_id;
+  if not found then raise exception 'card_not_found'; end if;
+end $$;
+
+revoke all on function public._custom_card_clean(text, jsonb) from public, anon, authenticated;
+revoke all on function public._custom_card_key(text, jsonb) from public, anon, authenticated;
+revoke all on function public.create_custom_card(text, text, jsonb) from public, anon;
+revoke all on function public.update_custom_card(uuid, jsonb) from public, anon;
+revoke all on function public.delete_custom_card(uuid) from public, anon;
+revoke all on function public.hide_custom_card(uuid, boolean) from public, anon;
+grant execute on function public.create_custom_card(text, text, jsonb) to authenticated;
+grant execute on function public.update_custom_card(uuid, jsonb) to authenticated;
+grant execute on function public.delete_custom_card(uuid) to authenticated;
+grant execute on function public.hide_custom_card(uuid, boolean) to authenticated;
+grant select on public.custom_cards to authenticated;
 
 
 -- ===== features\chat.sql =====
@@ -4799,218 +4965,3 @@ revoke all on function public._soiree_recap_compute(uuid) from public, anon, aut
 revoke all on function public._soiree_recap_store() from public, anon, authenticated;
 revoke all on function public.soiree_recap(uuid) from public, anon;
 grant execute on function public.soiree_recap(uuid) to authenticated;
-
-
--- ===== features\soiree-hote.sql =====
--- =============================================================================
--- OUTILS DE L'HÔTE — idempotent, exécuté APRÈS schema.sql (features/*).
---  1. Exclusion d'un joueur (kick_soiree_player) + ré-invitation (invite_to_soiree).
---     Table soiree_bans (schema.sql) : un exclu ne peut pas revenir par le code
---     (join_soiree_by_code -> soiree_banned) tant que l'hôte ne l'a pas ré-invité.
---  2. Roue des jeux (spin_game_wheel) : le tirage est fait CÔTÉ SERVEUR et écrit
---     dans soiree_wheel_spins ; tous les téléphones le reçoivent en Realtime
---     (INSERT) et font tourner la roue sur le même jeu.
--- =============================================================================
-
--- Exclure un joueur. Erreurs : not_host, soiree_ended, cannot_kick_self,
--- match_in_progress (partie lobby/playing), soiree_not_found, player_not_in_soiree.
-create or replace function public.kick_soiree_player(p_soiree_id uuid, p_profile_id uuid)
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me uuid := public._require_profile();
-  v_s  public.soirees%rowtype;
-begin
-  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
-  select * into v_s from public.soirees where id = p_soiree_id for update;
-  if not found then raise exception 'soiree_not_found'; end if;
-  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
-  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
-  if p_profile_id = v_me then raise exception 'cannot_kick_self'; end if;
-  if exists (select 1 from public.matches m
-              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
-    raise exception 'match_in_progress';
-  end if;
-  if not exists (select 1 from public.soiree_players
-                  where soiree_id = p_soiree_id and profile_id = p_profile_id) then
-    raise exception 'player_not_in_soiree';
-  end if;
-  insert into public.soiree_bans(soiree_id, profile_id) values (p_soiree_id, p_profile_id)
-    on conflict do nothing;
-  delete from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id;
-end $$;
-
--- Ré-inviter un joueur (lève l'exclusion et l'ajoute au salon).
--- Erreurs : not_host, soiree_ended, unknown_profile, player_busy (déjà dans 5 soirées).
-create or replace function public.invite_to_soiree(p_soiree_id uuid, p_profile_id uuid)
-returns void language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me uuid := public._require_profile();
-  v_s  public.soirees%rowtype;
-begin
-  perform pg_advisory_xact_lock(hashtext('soiree_membership'));
-  select * into v_s from public.soirees where id = p_soiree_id for update;
-  if not found then raise exception 'soiree_not_found'; end if;
-  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
-  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
-  if not exists (select 1 from public.profiles where id = p_profile_id) then
-    raise exception 'unknown_profile';
-  end if;
-  delete from public.soiree_bans where soiree_id = p_soiree_id and profile_id = p_profile_id;
-  if exists (select 1 from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id) then
-    return;
-  end if;
-  if public._open_soirees_count(p_profile_id) >= public._soiree_max_open() then
-    raise exception 'player_busy' using detail = (select nickname from public.profiles where id = p_profile_id);
-  end if;
-  insert into public.soiree_players(soiree_id, profile_id) values (p_soiree_id, p_profile_id);
-end $$;
-
-revoke all on function public.kick_soiree_player(uuid, uuid) from public, anon;
-revoke all on function public.invite_to_soiree(uuid, uuid) from public, anon;
-grant execute on function public.kick_soiree_player(uuid, uuid) to authenticated;
-grant execute on function public.invite_to_soiree(uuid, uuid) to authenticated;
-
--- ------------------------------------------------------------------ Roue des jeux
-create table if not exists public.soiree_wheel_spins (
-  id         bigint generated always as identity primary key,
-  soiree_id  uuid not null references public.soirees(id) on delete cascade,
-  host_id    uuid not null references public.profiles(id) on delete cascade,
-  game_ids   text[] not null,      -- les parts de la roue, dans l'ordre d'affichage
-  result     text not null,        -- le jeu tiré (∈ game_ids)
-  created_at timestamptz not null default now()
-);
-create index if not exists soiree_wheel_spins_soiree_idx on public.soiree_wheel_spins(soiree_id, id);
-
-alter table public.soiree_wheel_spins enable row level security;
-drop policy if exists soiree_wheel_spins_select on public.soiree_wheel_spins;
-create policy soiree_wheel_spins_select on public.soiree_wheel_spins for select to authenticated
-  using (public.is_soiree_member(soiree_id));
-revoke all on table public.soiree_wheel_spins from anon, authenticated;
-grant select on table public.soiree_wheel_spins to authenticated;
-
--- Tire au sort un jeu parmi p_game_ids (2 à 40 ids ; le front filtre selon le nombre de
--- joueurs). Hôte seulement, pas pendant une partie. Renvoie {id, game_ids, result}.
--- Erreurs : not_host, soiree_ended, match_in_progress, invalid_wheel, soiree_not_found.
-create or replace function public.spin_game_wheel(p_soiree_id uuid, p_game_ids text[])
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me  uuid := public._require_profile();
-  v_s   public.soirees%rowtype;
-  v_ids text[];
-  v_res text;
-  v_id  bigint;
-begin
-  select * into v_s from public.soirees where id = p_soiree_id;
-  if not found then raise exception 'soiree_not_found'; end if;
-  if v_s.host_id <> v_me then raise exception 'not_host'; end if;
-  if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
-  if exists (select 1 from public.matches m
-              where m.soiree_id = p_soiree_id and m.status in ('lobby', 'playing')) then
-    raise exception 'match_in_progress';
-  end if;
-  v_ids := array(select distinct x from unnest(coalesce(p_game_ids, '{}')) x where x ~ '^[a-z0-9_-]{1,40}$');
-  if coalesce(array_length(v_ids, 1), 0) < 2 or array_length(v_ids, 1) > 40 then
-    raise exception 'invalid_wheel';
-  end if;
-  v_res := v_ids[1 + floor(random() * array_length(v_ids, 1))::int];
-  insert into public.soiree_wheel_spins(soiree_id, host_id, game_ids, result)
-    values (p_soiree_id, v_me, v_ids, v_res) returning id into v_id;
-  delete from public.soiree_wheel_spins where soiree_id = p_soiree_id and id < v_id - 4;
-  return jsonb_build_object('id', v_id, 'game_ids', to_jsonb(v_ids), 'result', v_res);
-end $$;
-revoke all on function public.spin_game_wheel(uuid, text[]) from public, anon;
-grant execute on function public.spin_game_wheel(uuid, text[]) to authenticated;
-
-do $$
-begin
-  if not exists (select 1 from pg_publication_tables
-                  where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'soiree_wheel_spins') then
-    alter publication supabase_realtime add table public.soiree_wheel_spins;
-  end if;
-end $$;
-
-
--- ===== features\spectateur.sql =====
--- =============================================================================
--- MODE SPECTATEUR — idempotent, exécuté APRÈS schema.sql (features/*).
--- Un spectateur regarde l'état PUBLIC d'une partie en cours, sans jouer.
---
--- Qui peut lire une partie (matches) :
---   * un membre de la soirée (comme avant) ;
---   * un AMI ACCEPTÉ (friendships.status = 'accepted', dans les deux sens) d'un joueur de la partie
---     (state->'players') ou de l'hôte de la soirée, pour une partie EN COURS ou terminée depuis moins de
---     30 min (écran de résultats) — jamais l'historique ancien — et s'il n'a pas été EXCLU de la soirée
---     (soiree_bans). Pas d'interrupteur de confidentialité : tout ami accepté peut regarder (décision de conception).
--- Rien d'autre n'est ouvert : soirees, soiree_players, soiree_messages, match_secrets (réservés au
--- joueur concerné) et match_server_state (aucun accès client) restent comme avant.
---
--- RPC (security definer, grant authenticated) :
---   can_watch_match(p_match_id) -> boolean
---   friends_playing() -> [{profile_id, match_id, soiree_id, game_id}]
---       un élément par ami accepté qui figure dans state->'players' d'une partie 'playing'
---       (la plus récente s'il est dans plusieurs).
--- Le serveur refuse déjà toute action d'un non-joueur non-hôte (game_action : not_in_match).
--- =============================================================================
-
-create or replace function public.can_watch_match(p_match_id uuid)
-returns boolean language sql stable security definer
-set search_path = public, extensions
-as $$
-  select exists (
-    select 1 from public.matches m
-     where m.id = p_match_id
-       and (
-         public.is_soiree_member(m.soiree_id)
-         or (
-           (m.status = 'playing' or m.finished_at > now() - interval '30 minutes')
-           and not exists (select 1 from public.soiree_bans b
-                            where b.soiree_id = m.soiree_id and b.profile_id = public.current_profile_id())
-           and exists (
-           select 1 from public.friendships f
-            where f.status = 'accepted'
-              and (f.requester_id = public.current_profile_id() or f.addressee_id = public.current_profile_id())
-              and (case when f.requester_id = public.current_profile_id() then f.addressee_id else f.requester_id end)::text
-                  in (select jsonb_array_elements_text(case when jsonb_typeof(m.state->'players') = 'array'
-                                                            then m.state->'players' else '[]'::jsonb end)
-                      union select s.host_id::text from public.soirees s where s.id = m.soiree_id))))
-  )
-$$;
-
--- La lecture de matches s'élargit aux amis (lecture seule, jamais de secrets).
-drop policy if exists matches_select on public.matches;
-create policy matches_select on public.matches for select to authenticated
-  using (public.is_soiree_member(soiree_id) or public.can_watch_match(id));
-
--- Mes amis acceptés qui sont dans une partie en cours (une ligne par ami, la plus récente).
-create or replace function public.friends_playing()
-returns jsonb language plpgsql stable security definer
-set search_path = public, extensions
-as $$
-declare
-  v_me uuid := public._require_profile();
-begin
-  return coalesce((
-    select jsonb_agg(jsonb_build_object('profile_id', x.friend, 'match_id', x.mid, 'soiree_id', x.sid, 'game_id', x.gid)
-                     order by x.created_at desc)
-      from (
-        select distinct on (fr.friend) fr.friend, m.id as mid, m.soiree_id as sid, m.game_id as gid, m.created_at
-          from (select case when f.requester_id = v_me then f.addressee_id else f.requester_id end as friend
-                  from public.friendships f
-                 where f.status = 'accepted' and (f.requester_id = v_me or f.addressee_id = v_me)) fr
-          join public.matches m
-            on m.status = 'playing'
-           and jsonb_typeof(m.state->'players') = 'array'
-           and (m.state->'players') ? fr.friend::text
-         order by fr.friend, m.created_at desc) x), '[]'::jsonb);
-end $$;
-
-revoke all on function public.can_watch_match(uuid) from public, anon;
-revoke all on function public.friends_playing() from public, anon;
-grant execute on function public.can_watch_match(uuid) to authenticated;
-grant execute on function public.friends_playing() to authenticated;
