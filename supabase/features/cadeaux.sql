@@ -24,6 +24,12 @@ create table if not exists public.items (
 );
 alter table public.items add column if not exists rule jsonb;
 alter table public.items add column if not exists price integer;
+-- Saisons de boutique (features/saisons.sql) : season = saison de l'article ; pass_tier non null = exclusif du
+-- passe de saison (palier 5/10/15/20, jamais vendu, price null) ; sinon article de la collection limitee (price non null).
+alter table public.items add column if not exists season text;
+alter table public.items add column if not exists pass_tier integer;
+alter table public.items drop constraint if exists items_season_check;
+alter table public.items add constraint items_season_check check (season is null or season in ('hiver', 'printemps', 'ete', 'automne'));
 alter table public.items drop constraint if exists items_slot_check;
 alter table public.items add constraint items_slot_check check (slot in ('frame', 'title', 'kart', 'golf_ball', 'bowling_ball', 'chess', 'card_back', 'dice', 'marks'));
 alter table public.items enable row level security;
@@ -125,6 +131,63 @@ insert into public.items(id, slot, label, advent_day, advent_count, rule, price)
   ('bb_ubb', 'bowling_ball', 'Boule ovale', null, null, null, 250)
 on conflict (id) do update set slot = excluded.slot, label = excluded.label,
   advent_day = excluded.advent_day, advent_count = excluded.advent_count, rule = excluded.rule, price = excluded.price;
+
+-- Saisons : collections limitees (price + season) et exclusifs du passe (season + pass_tier, sans prix).
+insert into public.items(id, slot, label, price, season, pass_tier) values
+  ('t_tout_schuss', 'title', 'Tout schuss', 100, 'hiver', null),
+  ('t_raclette', 'title', 'Team raclette', 100, 'hiver', null),
+  ('k_glacier', 'kart', 'Bleu glacier', 100, 'hiver', null),
+  ('f_bonnet', 'frame', 'Bonnet à pompon', 250, 'hiver', null),
+  ('cb_pull_moche', 'card_back', 'Pull moche', 250, 'hiver', null),
+  ('d_chocolat_chaud', 'dice', 'Dés chocolat chaud', 250, 'hiver', null),
+  ('gb_boule_neige', 'golf_ball', 'Balle boule de neige', 250, 'hiver', null),
+  ('m_givre', 'marks', 'Givre', 500, 'hiver', null),
+  ('f_blizzard', 'frame', 'Blizzard', 500, 'hiver', null),
+  ('t_poisson_avril', 'title', 'Poisson d’avril permanent', 100, 'printemps', null),
+  ('t_allergique', 'title', 'Allergique à la défaite', 100, 'printemps', null),
+  ('gb_oeuf', 'golf_ball', 'Balle œuf en chocolat', 100, 'printemps', null),
+  ('f_potager', 'frame', 'Potager du dimanche', 250, 'printemps', null),
+  ('cb_pique_nique', 'card_back', 'Nappe de pique-nique', 250, 'printemps', null),
+  ('d_poussin', 'dice', 'Dés poussin', 250, 'printemps', null),
+  ('k_coccinelle', 'kart', 'Rouge coccinelle', 250, 'printemps', null),
+  ('m_herbe', 'marks', 'Herbe fraîche', 500, 'printemps', null),
+  ('f_giboulees', 'frame', 'Giboulées', 500, 'printemps', null),
+  ('t_coup_soleil', 'title', 'Coup de soleil intégral', 100, 'ete', null),
+  ('t_tong', 'title', 'Tong gauche perdue', 100, 'ete', null),
+  ('bb_petanque', 'bowling_ball', 'Boule de pétanque', 100, 'ete', null),
+  ('cb_transat', 'card_back', 'Transat', 250, 'ete', null),
+  ('d_piscine', 'dice', 'Dés piscine', 250, 'ete', null),
+  ('k_canard', 'kart', 'Jaune bouée canard', 250, 'ete', null),
+  ('f_bouee', 'frame', 'Bouée de sauvetage', 250, 'ete', null),
+  ('m_fluo', 'marks', 'Bracelet fluo', 500, 'ete', null),
+  ('f_coucher_soleil', 'frame', 'Coucher de soleil', 500, 'ete', null),
+  ('t_cartable', 'title', 'Cartable trop lourd', 100, 'automne', null),
+  ('t_bonbon_ou_gage', 'title', 'Un bonbon ou un gage', 100, 'automne', null),
+  ('gb_citrouille', 'golf_ball', 'Balle citrouille', 100, 'automne', null),
+  ('f_feuilles', 'frame', 'Feuilles mortes', 250, 'automne', null),
+  ('cb_toile', 'card_back', 'Toile d’araignée', 250, 'automne', null),
+  ('d_potion', 'dice', 'Dés potion', 250, 'automne', null),
+  ('k_sorciere', 'kart', 'Violet balai volant', 250, 'automne', null),
+  ('m_fantome', 'marks', 'Fantôme', 500, 'automne', null),
+  ('f_pleine_lune', 'frame', 'Pleine lune', 500, 'automne', null),
+  ('bb_bucheron', 'bowling_ball', 'Boule bûcheron', null, 'hiver', 5),
+  ('f_forfait', 'frame', 'Forfait saison', null, 'hiver', 10),
+  ('cb_chalet', 'card_back', 'Nuit au chalet', null, 'hiver', 15),
+  ('t_yeti', 'title', 'Yéti de salon', null, 'hiver', 20),
+  ('d_menthe_eau', 'dice', 'Dés menthe à l’eau', null, 'printemps', 5),
+  ('f_nid', 'frame', 'Nid douillet', null, 'printemps', 10),
+  ('bb_tulipe', 'bowling_ball', 'Boule tulipe', null, 'printemps', 15),
+  ('t_jeune_pousse', 'title', 'Jeune pousse pleine d’avenir', null, 'printemps', 20),
+  ('gb_ballon_plage', 'golf_ball', 'Balle ballon de plage', null, 'ete', 5),
+  ('f_glaces', 'frame', 'Marchand de glaces', null, 'ete', 10),
+  ('cb_barbecue', 'card_back', 'Barbecue', null, 'ete', 15),
+  ('t_legende_camping', 'title', 'Légende du camping', null, 'ete', 20),
+  ('bb_chataigne', 'bowling_ball', 'Boule châtaigne', null, 'automne', 5),
+  ('f_citrouilles', 'frame', 'Champ de citrouilles', null, 'automne', 10),
+  ('d_champignon', 'dice', 'Dés champignon', null, 'automne', 15),
+  ('t_terreur_soirees', 'title', 'Terreur des soirées', null, 'automne', 20)
+on conflict (id) do update set slot = excluded.slot, label = excluded.label, price = excluded.price,
+  season = excluded.season, pass_tier = excluded.pass_tier;
 
 create table if not exists public.profile_items (
   profile_id  uuid not null references public.profiles(id) on delete cascade,
@@ -272,20 +335,23 @@ begin
        + (select coalesce(sum(delta), 0) from public.coin_ledger where profile_id = p_profile)::int;
 end $$;
 
--- Vitrine de la semaine : 6 articles (ordre md5(semaine || id)), hors articles possedes avant le lundi.
+-- Vitrine de la semaine : 6 articles permanents (hors articles de saison, qui ont leur propre rayon), ordre
+-- md5(semaine || id), hors articles possedes avant le lundi.
 create or replace function public._shop_items(p_profile uuid, p_week date)
 returns text[] language sql stable security definer
 set search_path = public, extensions
 as $$
   select coalesce(array_agg(id order by k), '{}') from (
     select i.id, md5(p_week::text || i.id) as k from public.items i
-     where i.price is not null
+     where i.price is not null and i.season is null
        and not exists (select 1 from public.profile_items pi where pi.profile_id = p_profile and pi.item_id = i.id
                          and pi.obtained_at < (p_week::timestamp at time zone 'Europe/Paris'))
      order by k limit 6) t
 $$;
 
--- {coins, week_start, ends_at, items:[ids], owned:[ids de la vitrine deja possedes]}
+-- {coins, week_start, ends_at, items:[ids], owned:[ids de la vitrine deja possedes],
+--  season (id ou null), season_key, season_ends_at, season_items:[ids de la collection en cours, par prix],
+--  season_owned:[ids de la collection deja possedes]}   (_season_at : features/saisons.sql)
 create or replace function public.shop_state()
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -294,18 +360,31 @@ declare
   v_me uuid := public._require_profile();
   v_week date := public._week_start_now();
   v_items text[] := public._shop_items(v_me, v_week);
+  v_s record;
+  v_sitems text[] := '{}';
 begin
+  select * into v_s from public._season_at(public._season_now());
+  if v_s.season_id is not null then
+    select coalesce(array_agg(i.id order by i.price, i.id), '{}') into v_sitems
+      from public.items i where i.season = v_s.season_id and i.price is not null and i.pass_tier is null;
+  end if;
   return jsonb_build_object(
     'coins', public._coins(v_me),
     'week_start', v_week,
     'ends_at', ((v_week + 7)::timestamp at time zone 'Europe/Paris'),
     'items', to_jsonb(v_items),
     'owned', coalesce((select jsonb_agg(item_id) from public.profile_items
-                        where profile_id = v_me and item_id = any(v_items)), '[]'::jsonb));
+                        where profile_id = v_me and item_id = any(v_items)), '[]'::jsonb),
+    'season', v_s.season_id,
+    'season_key', v_s.season_key,
+    'season_ends_at', case when v_s.season_id is null then null else ((v_s.ends_on + 1)::timestamp at time zone 'Europe/Paris') end,
+    'season_items', to_jsonb(v_sitems),
+    'season_owned', coalesce((select jsonb_agg(item_id) from public.profile_items
+                               where profile_id = v_me and item_id = any(v_sitems)), '[]'::jsonb));
 end $$;
 
--- Achete un article de la vitrine. Renvoie {item, coins}.
--- Erreurs : shop_not_available (pas en vitrine), item_already_owned, shop_not_enough_coins.
+-- Achete un article de la vitrine ou de la collection de la saison en cours. Renvoie {item, coins}.
+-- Erreurs : shop_not_available (ni en vitrine ni dans la collection de saison en cours), item_already_owned, shop_not_enough_coins.
 create or replace function public.buy_item(p_item text)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -313,9 +392,13 @@ as $$
 declare
   v_me uuid := public._require_profile();
   v_price integer;
+  v_season text;
 begin
   perform 1 from public.profiles where id = v_me for update;  -- serialise les achats d'un joueur
-  if p_item is null or not (p_item = any(public._shop_items(v_me, public._week_start_now()))) then
+  select season_id into v_season from public._season_at(public._season_now());
+  if p_item is null or not (p_item = any(public._shop_items(v_me, public._week_start_now()))
+       or exists (select 1 from public.items i where i.id = p_item and i.season = v_season
+                    and i.price is not null and i.pass_tier is null)) then
     raise exception 'shop_not_available';
   end if;
   if exists (select 1 from public.profile_items where profile_id = v_me and item_id = p_item) then raise exception 'item_already_owned'; end if;

@@ -11,6 +11,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { DecoTab } from '@/features/cadeaux/DecoTab'
 import { ShopTab } from '@/features/cadeaux/ShopTab'
+import { useSeasonStore } from '@/features/cadeaux/season'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
@@ -35,6 +36,7 @@ export function InventoryPage() {
   const trophyUnlocks = useSession((s) => s.trophyUnlocks)
   const stats = useSession((s) => s.stats)
   const patchProfile = useSession((s) => s.patchProfile)
+  const seasonLastWeek = useSeasonStore((s) => s.lastWeek)
   const [selected, setSelected] = useState<string | null>(null)
   const [friends, setFriends] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -152,7 +154,7 @@ export function InventoryPage() {
             { value: 'expressions', label: 'Expressions' },
             { value: 'tenues', label: 'Tenues 👕' },
             { value: 'deco', label: 'Déco 🎁' },
-            { value: 'boutique', label: 'Boutique 🪙' },
+            { value: 'boutique', label: <>Boutique 🪙{seasonLastWeek && <span aria-label="Dernière chance" className="size-2.5 rounded-full border-2 border-ink bg-tomato" />}</> },
           ]}
         />
       </StaggerItem>

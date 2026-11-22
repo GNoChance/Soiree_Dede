@@ -12,13 +12,21 @@ import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
-import { equipItem, useOwnedItems } from './api'
+import { getSeason, lastDayLabel } from '@/data/saisons'
+import { equipItem, useOwnedItems, type SeasonSync } from './api'
+import { useSeasonStore } from './season'
 
 /** Cadeaux du calendrier de l'Avent : surprise, invisibles tant qu'on ne les a pas. */
 const isAdvent = (it: ItemDef) => Boolean(it.adventDay || it.adventCount)
 
-const howToGet = (it: ItemDef) =>
-  it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : it.price ? `En boutique pour ${it.price} 🪙, quand il passe en vitrine` : (it.howTo ?? 'Bientôt…')
+const howToGet = (it: ItemDef, info: SeasonSync | null) =>
+  it.passTier && it.season
+    ? `Passe ${getSeason(it.season)?.de}, palier ${it.passTier}`
+    : it.season
+      ? info?.season === it.season && info.ends_at
+        ? `Collection ${getSeason(it.season)?.de}, en boutique jusqu’au ${lastDayLabel(info.ends_at)} pour ${it.price} 🪙`
+        : `Collection ${getSeason(it.season)?.de}, de retour l’an prochain en boutique`
+      : it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : it.price ? `En boutique pour ${it.price} 🪙, quand il passe en vitrine` : (it.howTo ?? 'Bientôt…')
 
 /** Onglet « Déco » de l'inventaire : cadres, titres et objets de jeu gagnés (calendrier de l'Avent). */
 export function DecoTab() {
@@ -26,10 +34,11 @@ export function DecoTab() {
   const { owned, loaded } = useOwnedItems(profile?.id)
   const equipped = usePlayersStore((s) => (profile ? s.byId[profile.id]?.equippedItems : undefined))
   const [busy, setBusy] = useState(false)
+  const seasonInfo = useSeasonStore((s) => s.info)
   if (!profile) return null
 
   const toggle = async (it: ItemDef) => {
-    if (!owned.has(it.id)) return void toast(`🔒 ${howToGet(it)}`)
+    if (!owned.has(it.id)) return void toast(`🔒 ${howToGet(it, seasonInfo)}`)
     const on = equipped?.[it.slot] === it.id
     setBusy(true)
     try {

@@ -85,6 +85,14 @@
   100% { opacity: 0.55; }
 }
 
+/* ---------- Bandeau de saison (boutique) : fond clair / sombre fournis en variables ---------- */
+.season-banner {
+  background: var(--season-bg-light);
+}
+.dark .season-banner {
+  background: var(--season-bg-dark);
+}
+
 /* ---------- Utilitaires sticker ---------- */
 @utility sticker {
   border: 3px solid var(--ink);
