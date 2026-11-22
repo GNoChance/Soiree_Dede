@@ -27,6 +27,9 @@ const SLOT_NAMES: Record<ItemDef['slot'], string> = {
   golf_ball: 'Pour le Mini-golf',
   bowling_ball: 'Pour le Bowling',
   chess: 'Pour les Échecs',
+  card_back: 'Dos de cartes',
+  dice: 'Dés du Menteur',
+  marks: 'Croix et ronds du Morpion',
 }
 
 /** Calendrier de l'Avent : 24 cases, une par jour du 1er au 24 décembre. */

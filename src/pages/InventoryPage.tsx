@@ -10,6 +10,7 @@ import { BottomSheet } from '@/components/ui/Modal'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TenuesTab } from '@/features/tenues/TenuesTab'
 import { DecoTab } from '@/features/cadeaux/DecoTab'
+import { ShopTab } from '@/features/cadeaux/ShopTab'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { hasTenueArt, stickerSlot, tenueExtras, tenuePalette } from '@/components/ui/tenueArt'
@@ -37,7 +38,10 @@ export function InventoryPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [friends, setFriends] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<'expressions' | 'tenues' | 'deco'>(() => (new URLSearchParams(window.location.search).get('onglet') === 'deco' ? 'deco' : 'expressions'))
+  const [tab, setTab] = useState<'expressions' | 'tenues' | 'deco' | 'boutique'>(() => {
+    const o = new URLSearchParams(window.location.search).get('onglet')
+    return o === 'deco' || o === 'boutique' ? o : 'expressions'
+  })
 
   const profileId = profile?.id
   const load = useCallback(async () => {
@@ -148,11 +152,14 @@ export function InventoryPage() {
             { value: 'expressions', label: 'Expressions' },
             { value: 'tenues', label: 'Tenues 👕' },
             { value: 'deco', label: 'Déco 🎁' },
+            { value: 'boutique', label: 'Boutique 🪙' },
           ]}
         />
       </StaggerItem>
 
-      {tab === 'deco' ? (
+      {tab === 'boutique' ? (
+        <ShopTab />
+      ) : tab === 'deco' ? (
         <DecoTab />
       ) : tab === 'tenues' ? (
         <TenuesTab />

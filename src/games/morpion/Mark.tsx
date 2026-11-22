@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/cn'
 import type { Sym } from './logic'
+import { useMyItem } from '@/features/cadeaux/useMyItem'
 
 /* Tracés « à main levée » dans un viewBox 100 × 100 (légèrement courbes, le rond déborde un peu). */
 const X1 = 'M 25 24 C 40 39, 58 59, 76 77'
@@ -26,18 +27,20 @@ export interface MarkProps {
 export const Mark = memo(function Mark({ sym, color, draw = false, delay = 0, weight = 11, className, style }: MarkProps) {
   const reduce = useReducedMotion()
   const animate = draw && !reduce
+  // Croix et ronds achetés en boutique (sur mon écran) : contour, halo, trait de craie.
+  const skin = useMyItem('marks')?.marks
   const paths = sym === 'x' ? [X1, X2] : [O]
   const dur = sym === 'x' ? 0.17 : 0.36
   const stroke = (d: string, i: number, outline: boolean) => {
     const common = {
       d,
       fill: 'none',
-      stroke: outline ? 'var(--ink)' : color,
+      stroke: outline ? (skin?.outline ?? 'var(--ink)') : color,
       strokeWidth: outline ? weight + 7 : weight,
       strokeLinecap: 'round' as const,
       strokeLinejoin: 'round' as const,
     }
-    if (!animate) return <path key={`${outline}-${i}`} {...common} />
+    if (!animate) return <path key={`${outline}-${i}`} {...common} strokeDasharray={skin?.dash && !outline ? '14 7' : undefined} />
     const at = delay + i * (dur + 0.04)
     return (
       <motion.path
@@ -50,7 +53,7 @@ export const Mark = memo(function Mark({ sym, color, draw = false, delay = 0, we
     )
   }
   return (
-    <svg viewBox="0 0 100 100" className={cn('pointer-events-none size-full overflow-visible', className)} style={style} aria-hidden>
+    <svg viewBox="0 0 100 100" className={cn('pointer-events-none size-full overflow-visible', className)} style={skin?.glow ? { filter: `drop-shadow(0 0 5px ${skin.glow})`, ...style } : style} aria-hidden>
       {paths.map((d, i) => stroke(d, i, true))}
       {paths.map((d, i) => stroke(d, i, false))}
     </svg>

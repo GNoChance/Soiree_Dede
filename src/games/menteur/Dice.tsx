@@ -1,6 +1,7 @@
 import { useId, useMemo, type CSSProperties } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/cn'
+import { useMyItem } from '@/features/cadeaux/useMyItem'
 
 /* -------------------------------------------------------------------------- */
 /* Points (SVG, repère 100×100)                                                */
@@ -17,7 +18,10 @@ const PIPS: Record<number, Array<[number, number]>> = {
 }
 
 /** Points d'une face. Le 1 (joker) est un gros point rouge. */
-export function Pips({ value, color = '#1f1b2e' }: { value: number; color?: string }) {
+export function Pips({ value, color }: { value: number; color?: string }) {
+  // Dés achetés en boutique (sur mon écran) : couleur des points.
+  const skinPip = useMyItem('dice')?.dice?.pip
+  color = color ?? skinPip ?? '#1f1b2e'
   const one = value === 1
   return (
     <>
@@ -37,7 +41,8 @@ export function Pips({ value, color = '#1f1b2e' }: { value: number; color?: stri
 /* -------------------------------------------------------------------------- */
 
 export function FaceIcon({ value, size = 32, className, tone = 'ivory' }: { value: number; size?: number; className?: string; tone?: 'ivory' | 'gold' | 'dim' }) {
-  const fill = tone === 'gold' ? '#FFD166' : tone === 'dim' ? '#d9d4c7' : '#fffaf0'
+  const skin = useMyItem('dice')?.dice
+  const fill = tone === 'gold' ? '#FFD166' : tone === 'dim' ? '#d9d4c7' : (skin?.face ?? '#fffaf0')
   return (
     <svg viewBox="0 0 100 100" width={size} height={size} className={cn('shrink-0', className)} aria-label={`dé ${value}`} role="img">
       <rect x="4" y="8" width="92" height="88" rx="22" fill="var(--ink)" />
@@ -100,8 +105,9 @@ export function Die3D({ value, size = 44, rolling, delay = 0, lit, dim, seed = 0
   const spins = useMemo(() => ({ x: 2 + Math.floor(rand(seed + 1) * 2), y: 1 + Math.floor(rand(seed + 2) * 2) }), [seed])
   const tilt = useMemo(() => ({ x: -16 - rand(seed + 3) * 8, y: 18 + rand(seed + 4) * 14, z: (rand(seed + 5) - 0.5) * 16 }), [seed])
   const animateRoll = rolling && !reduce
-  const face = lit ? '#FFD166' : '#fffaf0'
-  const edge = lit ? '#e9a800' : '#e7dcc4'
+  const skin = useMyItem('dice')?.dice
+  const face = lit ? '#FFD166' : (skin?.face ?? '#fffaf0')
+  const edge = lit ? '#e9a800' : (skin?.edge ?? '#e7dcc4')
 
   return (
     <div

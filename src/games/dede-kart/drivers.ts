@@ -8,11 +8,11 @@ import type { Driver } from './engine/Game'
 /** Forme de kart propre à chaque perso (0 classique, 1 bolide, 2 buggy). */
 export const kartOf = (slug: string) => Math.max(0, CHARACTERS.findIndex((c) => c.slug === slug)) % 3
 
-/** Variante 3 = traîneau (cadeau de l'Avent équipé), sinon la forme du perso. */
-const kartFor = (p: PlayerInfo | undefined, slug: string) => (equippedOf(p?.equippedItems, 'kart')?.id === 'k_traineau' ? 3 : kartOf(slug))
+/** Forme imposée par le kart équipé (3 = traîneau), sinon la forme du perso. */
+const kartFor = (p: PlayerInfo | undefined, slug: string) => equippedOf(p?.equippedItems, 'kart')?.kart?.variant ?? kartOf(slug)
 
-/** Carrosserie dorée (cadeau « Bolide doré » équipé). */
-const bodyFor = (p: PlayerInfo | undefined) => (equippedOf(p?.equippedItems, 'kart')?.id === 'k_dore' ? '#FFC93C' : undefined)
+/** Couleur de carrosserie du kart équipé (Bolide doré, peintures de la boutique). */
+const bodyFor = (p: PlayerInfo | undefined) => equippedOf(p?.equippedItems, 'kart')?.kart?.body
 
 /** Chibi du pilote : sa tenue équipée si elle est dessinée, sinon sa tenue de soirée. */
 function spriteOf(p: PlayerInfo) {

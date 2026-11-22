@@ -4,6 +4,7 @@ import { getCharacter } from '@/data/characters'
 import { cn } from '@/lib/cn'
 import { COLOR_META, PERSOS, cardLabel } from './rules'
 import type { PdbCard, PdbColor } from './types'
+import { useMyItem } from '@/features/cadeaux/useMyItem'
 
 /**
  * Cartes « Pas de bol ! » dessinées en CSS + SVG (aucune image externe, sauf
@@ -235,11 +236,17 @@ function ChosenDot({ color, w }: { color: PdbColor; w: number }) {
 }
 
 export function CardBack({ w }: { w: number }) {
+  // Dos de cartes acheté en boutique (sur mon écran), sinon le dos « Pas de bol » d'origine.
+  const skin = useMyItem('card_back')?.cardBack
   return (
-    <div className="relative flex size-full flex-col items-center justify-center overflow-hidden bg-grape">
-      <div className="pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fff 0 2px, transparent 2px 10px)' }} />
+    <div className={cn('relative flex size-full flex-col items-center justify-center overflow-hidden', !skin && 'bg-grape')} style={skin ? { background: skin.bg } : undefined}>
+      {!skin && <div className="pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fff 0 2px, transparent 2px 10px)' }} />}
       <div className="pointer-events-none absolute inset-[7%] rounded-[12%] border-2 border-white/70" />
-      <Bowl size={w * 0.62} upside colors={['tomate', 'soleil', 'menthe', 'ciel']} />
+      {skin ? (
+        skin.emoji && <span className="relative z-10 leading-none drop-shadow-[2px_2px_0_rgba(0,0,0,0.35)]" style={{ fontSize: w * 0.38 }}>{skin.emoji}</span>
+      ) : (
+        <Bowl size={w * 0.62} upside colors={['tomate', 'soleil', 'menthe', 'ciel']} />
+      )}
       {w >= 50 && (
         <span className="relative z-10 -mt-[4%] -rotate-6 font-display leading-none font-extrabold whitespace-nowrap" style={bigText(w, '#FFB703', 0.16)}>
           Pas de bol !

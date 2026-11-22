@@ -44,7 +44,7 @@ export interface SceneOptions {
   now: () => number
   callbacks: SceneCallbacks
   /** Ma balle (absente en télé / spectateur). */
-  ball?: { color: string; /** Balle de cadeau (gb_bonhomme : bonhomme de neige). */ style?: 'snowman' | 'disco' }
+  ball?: { color: string; /** Balle spéciale (cadeau / boutique). */ style?: 'snowman' | 'disco'; /** Couleur de la bande. */ stripe?: string }
   frame?: Frame
   /** Taille des têtes des fantômes. */
   ghostScale?: number
@@ -160,7 +160,7 @@ export class GolfScene {
     const ol = new THREE.Mesh(ballGeo, ink)
     ol.scale.setScalar(1.22)
     this.ballMesh.add(ol)
-    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#E63946' : disco ? '#FF4D9D' : '#FFFFFF' })))
+    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#E63946' : disco ? '#FF4D9D' : (opts.ball?.stripe ?? '#FFFFFF') })))
     this.ballMesh.add(stripe)
     if (snowman) {
       // nez carotte + 2 yeux charbon

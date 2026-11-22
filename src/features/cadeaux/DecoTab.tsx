@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, Lock } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
+import { ItemPreview } from './ItemPreview'
 import { PlayerTitle } from '@/components/ui/PlayerTitle'
 import { StaggerItem } from '@/components/ui/Stagger'
 import { ITEMS, SLOTS, equippedOf, type ItemDef, type ItemSlot } from '@/data/cadeaux'
@@ -14,7 +15,7 @@ import { toast } from '@/store/toast'
 import { equipItem, useOwnedItems } from './api'
 
 const howToGet = (it: ItemDef) =>
-  it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : (it.howTo ?? 'Bientôt…')
+  it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : it.price ? `En boutique pour ${it.price} 🪙, quand il passe en vitrine` : (it.howTo ?? 'Bientôt…')
 
 /** Onglet « Déco » de l'inventaire : cadres, titres et objets de jeu gagnés (calendrier de l'Avent). */
 export function DecoTab() {
@@ -66,7 +67,6 @@ function SlotSection({ slot, owned, equipped, busy, onTap }: {
   const def = SLOTS.find((s) => s.id === slot)!
   const items = ITEMS.filter((i) => i.slot === slot)
   const current = equippedOf(equipped, slot)
-  const profile = useSession((s) => s.profile)
   return (
     <StaggerItem className="flex flex-col gap-2">
       <div>
@@ -93,11 +93,7 @@ function SlotSection({ slot, owned, equipped, busy, onTap }: {
                 !have && 'opacity-55 grayscale',
               )}
             >
-              {slot === 'frame' && profile ? (
-                <span className="py-2"><Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} frame={it.id} size={44} /></span>
-              ) : (
-                <span className="text-3xl leading-none">{it.emoji}</span>
-              )}
+              <span className={cn('flex items-center justify-center', slot === 'frame' && 'py-2')}><ItemPreview it={it} size={44} /></span>
               <span className="text-xs leading-tight font-extrabold">{it.label}</span>
               {!have && <Lock className="absolute top-1 right-1 size-4" strokeWidth={3} />}
               {on && <Check className="absolute top-1 right-1 size-5" strokeWidth={3.5} />}

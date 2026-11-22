@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/cn'
 import { SUIT_GLYPH, cardSpoken, isRed, rankOf, suitOf } from './logic'
+import { useMyItem } from '@/features/cadeaux/useMyItem'
 
 const INK = '#1f1b2e'
 const RED = '#d62839'
@@ -71,11 +72,15 @@ export const KemsCard = memo(function KemsCard({
 
 /** Dos de carte (pioche). */
 export function CardBack({ className }: { className?: string }) {
+  // Dos de cartes acheté en boutique (sur mon écran), sinon les rayures d'origine.
+  const skin = useMyItem('card_back')?.cardBack
   return (
     <div
       aria-hidden
-      className={cn('aspect-[5/7] w-full rounded-md border-2 border-ink', className)}
-      style={{ background: 'repeating-linear-gradient(45deg, #ef476f 0 6px, #ffb703 6px 12px)' }}
-    />
+      className={cn('flex aspect-[5/7] w-full items-center justify-center overflow-hidden rounded-md border-2 border-ink', className)}
+      style={{ background: skin?.bg ?? 'repeating-linear-gradient(45deg, #ef476f 0 6px, #ffb703 6px 12px)', containerType: 'inline-size' }}
+    >
+      {skin?.emoji && <span className="leading-none" style={{ fontSize: '45cqw' }}>{skin.emoji}</span>}
+    </div>
   )
 }

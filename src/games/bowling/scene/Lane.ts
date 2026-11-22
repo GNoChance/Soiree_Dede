@@ -217,7 +217,7 @@ function stripeTexture(a: string, b: string): THREE.CanvasTexture {
   return t
 }
 
-export function buildLane(opts: { ballColor: string; ballStyle?: 'noel' | 'galaxie'; dark: boolean }): LaneView {
+export function buildLane(opts: { ballColor: string; ballStyle?: 'noel' | 'galaxie'; ballBand?: string; dark: boolean }): LaneView {
   const noel = opts.ballStyle === 'noel'
   const galaxie = opts.ballStyle === 'galaxie'
   const disposables: Array<{ dispose: () => void }> = []
@@ -366,7 +366,7 @@ export function buildLane(opts: { ballColor: string; ballStyle?: 'noel' | 'galax
   ball.add(new THREE.Mesh(ballGeo, outline))
   // Bande décorative + trous
   const bandGeo = keep(new THREE.TorusGeometry(BALL_R * 0.995, noel ? 0.012 : 0.007, 6, 40))
-  const band = new THREE.Mesh(bandGeo, toon({ color: noel ? '#FFC93C' : galaxie ? '#B388FF' : '#ffffff' }))
+  const band = new THREE.Mesh(bandGeo, toon({ color: noel ? '#FFC93C' : galaxie ? '#B388FF' : (opts.ballBand ?? '#ffffff') }))
   band.rotation.y = Math.PI / 2
   ball.add(band)
   if (noel) {

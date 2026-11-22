@@ -39,6 +39,8 @@ export interface SceneOptions {
   ballColor: string
   /** Boule de cadeau (bb_noel). */
   ballStyle?: 'noel' | 'galaxie'
+  /** Couleur de la bande (boutique). */
+  ballBand?: string
   dark: boolean
   callbacks: SceneCallbacks
 }
@@ -113,7 +115,7 @@ export class BowlingScene {
     this.scene.add(light, light.target)
     this.light = light
 
-    this.lane = buildLane({ ballColor: opts.ballColor, ballStyle: opts.ballStyle, dark: opts.dark })
+    this.lane = buildLane({ ballColor: opts.ballColor, ballStyle: opts.ballStyle, ballBand: opts.ballBand, dark: opts.dark })
     this.scene.add(this.lane.root)
 
     this.rig = new CameraRig(1)

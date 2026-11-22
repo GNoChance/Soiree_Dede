@@ -169,6 +169,9 @@ const MESSAGES: Record<string, string> = {
   // Cadeaux déco (supabase/features/cadeaux.sql)
   item_invalid_slot: 'Ce cadeau ne va pas à cet endroit.',
   item_not_owned: 'Tu n’as pas encore ce cadeau.',
+  item_already_owned: 'Tu l’as déjà !',
+  shop_not_available: 'Cet article n’est plus en vitrine cette semaine.',
+  shop_not_enough_coins: 'Pas assez de pièces : joue encore un peu ! 🪙',
   daily_already_done: 'Défi déjà terminé aujourd’hui.',
   invalid_answers: 'Réponses invalides.',
   // Rappels push (src/features/push)

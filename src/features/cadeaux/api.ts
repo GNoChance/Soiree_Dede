@@ -64,3 +64,26 @@ export async function equipItem(slot: ItemSlot, item: string | null) {
   await usePlayersStore.getState().load(true)
   return data as Record<string, string>
 }
+
+/** Vitrine de la semaine (shop_state). */
+export interface ShopState {
+  coins: number
+  week_start: string
+  ends_at: string
+  items: string[]
+  /** Articles de la vitrine déjà possédés. */
+  owned: string[]
+}
+
+export async function fetchShop() {
+  const { data, error } = await rpc('shop_state')
+  if (error) throw error
+  return data as ShopState
+}
+
+/** Achète un article de la vitrine (buy_item). */
+export async function buyItem(item: string) {
+  const { data, error } = await rpc('buy_item', { p_item: item })
+  if (error) throw error
+  return data as { item: string; coins: number }
+}
