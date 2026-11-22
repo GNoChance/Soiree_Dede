@@ -27,6 +27,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 - Éphémère (traits de dessin…) : broadcast Realtime `match:<matchId>`, pas de BDD.
 - Nouveau jeu en duel : copier `quatre-a-la-suite` (SQL + front), ne fournir que le plateau.
 - Nouveaux codes d'erreur → `src/features/soiree/errors.ts`.
+- Invités (`profiles.is_guest`, mode invité) : tout classement / stat de la bande filtre `not p.is_guest` (ils ont des lignes `match_players`) ; RPC réservée à la bande → `_require_member()`.
 - Design « sticker book » : contours épais, ombre décalée `box-shadow: 4px 4px 0 <ink>`, couleurs vives, thème clair + sombre, grosses animations.
 
 ## Skins (chibis)

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { chibiUrl, getCharacter } from '@/data/characters'
+import { guestAvatarOf } from '@/data/guests'
 import { cn } from '@/lib/cn'
 import { markTenueArtMissing, useTenueArt } from './tenueArt'
 
@@ -27,7 +28,8 @@ export function ChibiImage({ slug, expression = 'joie', tenue, size = 96, classN
   const art = useTenueArt(slug, tenue, expression)
   const src = chibiUrl(slug, art.expression, art.dir, thumb ?? size <= 100)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  const char = getCharacter(slug)
+  const guest = guestAvatarOf(slug)
+  const char = getCharacter(slug) ?? (guest && { nickname: guest.label, color: guest.color })
   const failed = failedSrc === src
 
   let node: React.ReactNode

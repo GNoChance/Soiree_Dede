@@ -20,6 +20,8 @@ export interface PlayerInfo {
   /** Cadeaux déco équipés {slot: item_id} (src/data/cadeaux.ts). */
   equippedItems?: Record<string, string>
   color: string
+  /** Personne de passage (mode invité, supabase/features/guest.sql) : avatar emoji, pas de chibi. */
+  isGuest?: boolean
 }
 
 /** Action envoyée à `game_action` (toujours un objet avec `type`). */

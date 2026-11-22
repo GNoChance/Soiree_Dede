@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Navigate, Outlet } from 'react-router'
+import { Navigate, Outlet, useLocation } from 'react-router'
 import { MotionConfig, motion } from 'framer-motion'
 import { AlertTriangle } from 'lucide-react'
 import { useSession } from '@/store/session'
@@ -15,6 +15,10 @@ import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
 import { useItemSync } from '@/features/cadeaux/useItemSync'
 import { NoelDecor } from '@/features/noel/NoelDecor'
+import { isGuestProfile } from '@/features/guest/api'
+
+/** Écrans ouverts aux invités (mode invité) : leur salon, ses parties, le mode télé. Le reste -> /invite. */
+const GUEST_PATHS = /^\/(soiree\/[^/]+(\/tele)?|partie\/[^/]+)\/?$/
 
 /**
  * Haut de page : zone sûre + hauteur du bandeau global « une partie commence »
@@ -51,10 +55,12 @@ export function Root() {
 export function RequireProfile() {
   const profile = useSession((s) => s.profile)
   const booted = useSession((s) => s.booted)
+  const { pathname } = useLocation()
   useSessionLifecycle()
   useItemSync()
   if (!booted) return <Splash />
   if (!profile) return <Navigate to="/onboarding" replace />
+  if (isGuestProfile(profile) && !GUEST_PATHS.test(pathname)) return <Navigate to="/invite" replace />
   return <Outlet />
 }
 

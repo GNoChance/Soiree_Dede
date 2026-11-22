@@ -10,7 +10,7 @@ import { useSession } from '@/store/session'
 import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
 import { useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
-import { mood, playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
+import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
 import { TvContext, TV_VIEWER_ID, readOnlyAct } from '@/features/tv/tv'
 import { isDuelState } from '@/features/duel/tv'
 import { useWakeLock } from '@/lib/wakeLock'
@@ -56,6 +56,7 @@ export function TvPage() {
   const { data: soireeData, notFound } = useSoiree(soireeId)
   const { match: current, loaded } = useCurrentMatch(soireeId)
   const { byId } = usePlayers()
+  useEnsurePlayers(soireeData?.playerIds)
   const fs = useFullscreen()
 
   // On garde la dernière partie affichée quand elle se termine (résumé), jusqu'à la suivante.

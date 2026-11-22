@@ -1,4 +1,4 @@
-import { CHARACTERS, TENUE_ART_VERSION } from '@/data/characters'
+import { CHARACTERS, chibiUrl, TENUE_ART_VERSION } from '@/data/characters'
 import { DEFAULT_TENUE } from '@/data/tenues'
 import { hasTenueArt, tenueArtDir } from '@/components/ui/tenueArt'
 import type { PlayerInfo } from '../types'
@@ -18,7 +18,7 @@ const bodyFor = (p: PlayerInfo | undefined) => equippedOf(p?.equippedItems, 'kar
 function spriteOf(p: PlayerInfo) {
   const t = p.equippedTenue
   if (t && t !== DEFAULT_TENUE && hasTenueArt(p.slug, t)) return `/chibis/${p.slug}/${tenueArtDir(t, p.slug)}/joie.webp?v=${TENUE_ART_VERSION}`
-  return `/chibis/${p.slug}/default/joie.webp`
+  return chibiUrl(p.slug) // invité : emoji de son avatar
 }
 
 /**

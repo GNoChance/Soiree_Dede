@@ -112,6 +112,7 @@ as $$
   select p.id, p.slug, p.first_name, p.nickname, p.equipped_expression, p.equipped_tenue, p.expressions,
          exists (select 1 from public.profile_credentials c where c.profile_id = p.id)
   from public.profiles p
+  where not p.is_guest  -- écran de connexion : la bande seulement
   order by p.sort_order, p.slug
 $$;
 revoke all on function public.list_profiles_public() from public;
@@ -127,7 +128,8 @@ select p.id as profile_id, p.slug, p.first_name, p.nickname, p.equipped_expressi
        coalesce(s.games_played, 0) as games_played,
        rank() over (order by coalesce(s.wins, 0) desc) as rank
 from public.profiles p
-left join public.player_stats s on s.profile_id = p.id;
+left join public.player_stats s on s.profile_id = p.id
+where not p.is_guest;  -- invités hors classements (features/guest.sql)
 
 drop view if exists public.leaderboard_by_game;
 create view public.leaderboard_by_game with (security_invoker = true) as
@@ -138,7 +140,7 @@ select mp.game_id, p.id as profile_id, p.slug, p.first_name, p.nickname, p.equip
        rank() over (partition by mp.game_id
                     order by count(*) filter (where mp.won) desc, coalesce(sum(mp.points), 0) desc) as rank
 from public.match_players mp
-join public.profiles p on p.id = mp.profile_id
+join public.profiles p on p.id = mp.profile_id and not p.is_guest
 group by mp.game_id, p.id;
 
 revoke all on table public.leaderboard_general, public.leaderboard_by_game from anon, authenticated;

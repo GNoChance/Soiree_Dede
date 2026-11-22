@@ -18,6 +18,7 @@ import { SoloRoute } from '@/features/solo/SoloRoute'
 import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
 import { RouteError } from '@/pages/RouteError'
 import { onPushOpen } from '@/features/push/push'
+import { GuestJoinPage } from '@/features/guest/GuestJoinPage'
 
 const router = createBrowserRouter([
   {
@@ -25,6 +26,9 @@ const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       { path: '/onboarding', element: <OnboardingPage /> },
+      // Mode invité : lien du QR code (/invite/<jeton>) ou code tapé à la main (/invite).
+      { path: '/invite', element: <GuestJoinPage /> },
+      { path: '/invite/:token', element: <GuestJoinPage /> },
       {
         element: <RequireProfile />,
         children: [

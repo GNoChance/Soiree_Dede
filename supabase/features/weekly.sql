@@ -28,6 +28,7 @@ as $$
            x.profile_id, count(*)::int as wins
       from public.match_players x
       join public.matches m on m.id = x.match_id and m.status = 'finished' and m.finished_at is not null
+      join public.profiles gp on gp.id = x.profile_id and not gp.is_guest  -- invités exclus (guest.sql)
      where x.won
      group by 1, 2
   ), top as (
@@ -80,6 +81,7 @@ begin
                    where m.status = 'finished' and m.finished_at >= v_from and m.finished_at < v_to
                      and (p_game is null or x.game_id = p_game)
                 ) mp on mp.profile_id = p.id
+               where not p.is_guest  -- invités exclus (guest.sql)
                group by p.id
             ) a
         ) r), '[]'::jsonb),

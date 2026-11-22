@@ -1,4 +1,5 @@
 import type { ExpressionId } from './expressions'
+import { guestSpriteUrl, isGuestSlug } from './guests'
 
 export type CharacterSlug =
   | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini'
@@ -55,5 +56,8 @@ export const getCharacter = (slug: string): Character | undefined =>
 export const TENUE_ART_VERSION = 3
 export const artVersion = (tenue: string) => (tenue === 'default' ? '' : `?v=${TENUE_ART_VERSION}`)
 
+/** Invité (slug `g-…`, src/data/guests.ts) : emoji de son avatar en SVG, quelle que soit l'expression. */
 export const chibiUrl = (slug: string, expression: string = 'joie', tenue: string = 'default', thumb = false) =>
-  `/chibis/${slug}/${tenue}/${expression}${thumb ? '@thumb' : ''}.webp${artVersion(tenue)}`
+  isGuestSlug(slug)
+    ? guestSpriteUrl(slug)
+    : `/chibis/${slug}/${tenue}/${expression}${thumb ? '@thumb' : ''}.webp${artVersion(tenue)}`
