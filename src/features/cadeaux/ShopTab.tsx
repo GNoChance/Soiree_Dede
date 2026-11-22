@@ -6,12 +6,18 @@ import { Modal } from '@/components/ui/Modal'
 import { StaggerItem } from '@/components/ui/Stagger'
 import { burst } from '@/components/ui/confetti'
 import { SLOTS, getItem, type ItemDef } from '@/data/cadeaux'
+import { getSeason } from '@/data/saisons'
 import { toastError } from '@/features/soiree/errors'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { toast } from '@/store/toast'
 import { buyItem, equipItem, fetchShop, type ShopState } from './api'
 import { ItemPreview } from './ItemPreview'
+import { CollectionHeader, SeasonBanner, SeasonPass } from './SeasonSection'
+import { syncSeason, useSeasonStore } from './season'
+
+/** Lancement des saisons de boutique : avant cette date, un simple teaser sous le solde. */
+const SEASONS_LAUNCH = new Date('2026-12-01T00:00:00+01:00').getTime()
 
 function untilLabel(iso: string) {
   const ms = new Date(iso).getTime() - Date.now()
@@ -20,13 +26,60 @@ function untilLabel(iso: string) {
   return h >= 24 ? `${Math.floor(h / 24)} j ${h % 24} h` : `${h} h ${Math.floor((ms % 3_600_000) / 60_000)} min`
 }
 
-/** Onglet « Boutique » de l'inventaire : 6 articles par semaine, achetés avec les pièces 🪙. */
+/** Carte d'un article : vitrine de la semaine ou collection de saison (pastille « Limité »). */
+function ShopCard({ it, owned, coins, limited, onTap }: {
+  it: ItemDef
+  owned: boolean
+  coins: number
+  /** Couleur de la pastille « Limité » (accent secondaire de la saison) : présent = article de saison. */
+  limited?: string
+  onTap: (it: ItemDef, owned: boolean) => void
+}) {
+  const tooExpensive = !owned && (it.price ?? 0) > coins
+  return (
+    <StaggerItem>
+      <motion.button
+        type="button"
+        whileTap={{ scale: 0.94 }}
+        onClick={() => onTap(it, owned)}
+        className={cn(
+          'sticker-sm relative flex w-full flex-col items-center gap-2 rounded-card border-[3px] border-ink bg-surface p-3 text-center',
+          owned && 'opacity-60',
+        )}
+      >
+        {limited && (
+          <span
+            className="absolute -top-2 -left-1 -rotate-6 rounded-chip border-2 border-ink px-1.5 text-xs font-extrabold text-[#1f1b2e]"
+            style={{ background: limited }}
+          >
+            Limité
+          </span>
+        )}
+        <span className="flex h-16 items-center justify-center"><ItemPreview it={it} size={56} /></span>
+        <span className="text-sm leading-tight font-extrabold">{it.label}</span>
+        <span className="text-xs font-bold text-muted">{SLOTS.find((s) => s.id === it.slot)?.label}</span>
+        {owned ? (
+          <span className="flex items-center gap-1 rounded-chip border-2 border-ink bg-mint px-2 py-0.5 text-sm font-extrabold text-[#1f1b2e]">
+            <Check className="size-4" strokeWidth={3.5} /> À toi
+          </span>
+        ) : (
+          <span className={cn('rounded-chip border-2 border-ink px-2 py-0.5 font-display font-extrabold text-[#1f1b2e]', tooExpensive ? 'bg-sunk' : 'bg-sun')}>
+            {it.price} 🪙
+          </span>
+        )}
+      </motion.button>
+    </StaggerItem>
+  )
+}
+
+/** Onglet « Boutique » de l'inventaire : collection + passe de la saison, puis 6 articles par semaine, achetés avec les pièces 🪙. */
 export function ShopTab() {
   const [shop, setShop] = useState<ShopState | null>(null)
   const [error, setError] = useState(false)
   const [pick, setPick] = useState<ItemDef | null>(null)
   const [bought, setBought] = useState<ItemDef | null>(null)
   const [busy, setBusy] = useState(false)
+  const seasonInfo = useSeasonStore((s) => s.info)
 
   const load = useCallback(async () => {
     try {
@@ -37,7 +90,8 @@ export function ShopTab() {
     }
   }, [])
   useEffect(() => {
-    void load()
+    // Attribue d'abord les paliers du passe (pièces / cadeaux), puis charge la boutique avec le solde à jour.
+    void syncSeason(true).finally(() => void load())
   }, [load])
 
   const buy = async (it: ItemDef) => {
@@ -51,6 +105,7 @@ export function ShopTab() {
       await load()
     } catch (e) {
       toastError(e)
+      await load()
     } finally {
       setBusy(false)
     }
@@ -67,9 +122,14 @@ export function ShopTab() {
     }
   }
 
+  const tapItem = (it: ItemDef, owned: boolean) => (owned ? toast('Déjà à toi ! Équipe-le dans l’onglet Déco.') : setPick(it))
+
   if (error) return <p className="text-center font-bold text-muted">La boutique est fermée pour le moment. Réessaie plus tard !</p>
   if (!shop) return <p className="text-center font-bold text-muted">Ouverture de la boutique…</p>
   const items = shop.items.map(getItem).filter(Boolean) as ItemDef[]
+  const seasonDef = getSeason(shop.season)
+  const seasonItems = (shop.season_items ?? []).map(getItem).filter(Boolean) as ItemDef[]
+  const pickSeason = pick?.season ? getSeason(pick.season) : undefined
 
   return (
     <div className="flex flex-col gap-4">
@@ -82,40 +142,36 @@ export function ShopTab() {
           +5 par partie · +15 par victoire · +10 défi du jour · +20 trophée
         </p>
       </StaggerItem>
+
+      {!seasonDef && Date.now() < SEASONS_LAUNCH && (
+        <StaggerItem>
+          <p className="text-center text-sm font-extrabold">⛷️ Le 1er décembre, la boutique part au chalet. Garde quelques pièces !</p>
+        </StaggerItem>
+      )}
+
+      {seasonDef && shop.season_ends_at && (
+        <>
+          <SeasonBanner def={seasonDef} endsAt={shop.season_ends_at} />
+          <SeasonPass def={seasonDef} info={seasonInfo} />
+          <CollectionHeader def={seasonDef} endsAt={shop.season_ends_at} ownedCount={shop.season_owned.length} />
+          <div className="grid grid-cols-2 gap-3">
+            {seasonItems.map((it) => (
+              <ShopCard key={it.id} it={it} owned={shop.season_owned.includes(it.id)} coins={shop.coins} limited={seasonDef.accent2} onTap={tapItem} />
+            ))}
+          </div>
+          <StaggerItem>
+            <h3 className="text-xl font-extrabold">Vitrine de la semaine</h3>
+          </StaggerItem>
+        </>
+      )}
+
       <StaggerItem>
         <p className="text-center text-sm font-bold text-muted">Nouvelle vitrine dans {untilLabel(shop.ends_at)} 🛍️</p>
       </StaggerItem>
       <div className="grid grid-cols-2 gap-3">
-        {items.map((it) => {
-          const owned = shop.owned.includes(it.id)
-          const tooExpensive = !owned && (it.price ?? 0) > shop.coins
-          return (
-            <StaggerItem key={it.id}>
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.94 }}
-                onClick={() => (owned ? toast('Déjà à toi ! Équipe-le dans l’onglet Déco.') : setPick(it))}
-                className={cn(
-                  'sticker-sm relative flex w-full flex-col items-center gap-2 rounded-card border-[3px] border-ink bg-surface p-3 text-center',
-                  owned && 'opacity-60',
-                )}
-              >
-                <span className="flex h-16 items-center justify-center"><ItemPreview it={it} size={56} /></span>
-                <span className="text-sm leading-tight font-extrabold">{it.label}</span>
-                <span className="text-xs font-bold text-muted">{SLOTS.find((s) => s.id === it.slot)?.label}</span>
-                {owned ? (
-                  <span className="flex items-center gap-1 rounded-chip border-2 border-ink bg-mint px-2 py-0.5 text-sm font-extrabold text-[#1f1b2e]">
-                    <Check className="size-4" strokeWidth={3.5} /> À toi
-                  </span>
-                ) : (
-                  <span className={cn('rounded-chip border-2 border-ink px-2 py-0.5 font-display font-extrabold text-[#1f1b2e]', tooExpensive ? 'bg-sunk' : 'bg-sun')}>
-                    {it.price} 🪙
-                  </span>
-                )}
-              </motion.button>
-            </StaggerItem>
-          )
-        })}
+        {items.map((it) => (
+          <ShopCard key={it.id} it={it} owned={shop.owned.includes(it.id)} coins={shop.coins} onTap={tapItem} />
+        ))}
       </div>
 
       <Modal open={Boolean(pick)} onClose={() => setPick(null)} title={pick?.label}>
@@ -127,7 +183,12 @@ export function ShopTab() {
             {(pick.price ?? 0) > shop.coins ? (
               <p className="font-bold text-muted">Il te manque {(pick.price ?? 0) - shop.coins} 🪙. Encore quelques parties !</p>
             ) : (
-              <Button fullWidth loading={busy} onClick={() => void buy(pick)}>
+              <Button
+                fullWidth
+                loading={busy}
+                onClick={() => void buy(pick)}
+                style={pickSeason ? { background: pickSeason.accent, color: pickSeason.onAccent } : undefined}
+              >
                 Acheter
               </Button>
             )}

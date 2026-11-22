@@ -19,7 +19,7 @@ const call = async (q, p = []) => {
 const state = async () => (await call(`select public.shop_state() r`)).r
 const buy = (id) => call(`select public.buy_item($1) r`, [id])
 
-const n = Number((await db.query(`select count(*) c from public.items where price is not null`)).rows[0].c)
+const n = Number((await db.query(`select count(*) c from public.items where price is not null and season is null`)).rows[0].c)
 ok('catalogue boutique : 38 articles', n === 38, String(n))
 const s0 = await state()
 ok('vitrine de 6 articles, 0 pièce', s0.items.length === 6 && s0.coins === 0, JSON.stringify(s0))

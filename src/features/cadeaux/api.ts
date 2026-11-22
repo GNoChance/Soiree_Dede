@@ -73,6 +73,12 @@ export interface ShopState {
   items: string[]
   /** Articles de la vitrine déjà possédés. */
   owned: string[]
+  /** Saison en cours (null avant le lancement), clé d'édition, fermeture, collection (par prix) et articles déjà possédés. */
+  season: string | null
+  season_key: string | null
+  season_ends_at: string | null
+  season_items: string[]
+  season_owned: string[]
 }
 
 export async function fetchShop() {
@@ -86,4 +92,33 @@ export async function buyItem(item: string) {
   const { data, error } = await rpc('buy_item', { p_item: item })
   if (error) throw error
   return data as { item: string; coins: number }
+}
+
+/** Un palier du passe de saison attribué par season_sync. */
+export interface SeasonClaim {
+  season_key: string
+  tier: number
+  coins: number
+  /** Article gagné (null : palier à pièces, ou article déjà possédé -> `compensated`). */
+  item_id: string | null
+  compensated: boolean
+}
+
+/** Réponse de season_sync (supabase/features/saisons.sql). `season` est null hors saison (avant le 1er déc. 2026). */
+export interface SeasonSync {
+  season: string | null
+  season_key?: string
+  starts_at?: string
+  ends_at?: string
+  points?: number
+  tier?: number
+  new_claims: SeasonClaim[]
+  /** Saison précédente à résumer (si le joueur y a gagné des points). */
+  ended: { season: string; season_key: string; tier: number; coins_total: number; collection_owned: number } | null
+}
+
+export async function fetchSeasonSync() {
+  const { data, error } = await rpc('season_sync')
+  if (error) throw error
+  return data as SeasonSync
 }

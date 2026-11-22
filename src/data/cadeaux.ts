@@ -23,6 +23,9 @@ export interface FrameStyle {
   spin?: boolean
 }
 
+/** Saisons de boutique (calendrier : src/data/saisons.ts, SQL : supabase/features/saisons.sql). */
+export type SeasonId = 'hiver' | 'printemps' | 'ete' | 'automne'
+
 export interface ItemDef {
   id: string
   slot: ItemSlot
@@ -34,6 +37,10 @@ export interface ItemDef {
   howTo?: string
   /** Prix en pièces : article de la boutique (jamais un cadeau gagné). */
   price?: number
+  /** Saison de l'article : collection limitée (avec `price`) ou exclusif du passe de saison (avec `passTier`, sans prix). */
+  season?: SeasonId
+  /** Palier du passe de saison (5, 10, 15 ou 20) qui offre cet article (jamais vendu). */
+  passTier?: number
   frame?: FrameStyle
   /** Dédé Kart : forme (3 = traîneau) et / ou couleur de carrosserie. */
   kart?: { variant?: number; body?: string }
@@ -167,6 +174,59 @@ export const ITEMS: ItemDef[] = [
   { id: 't_tout_ou_rien', slot: 'title', label: 'Tout ou rien', emoji: '🎰', price: 250 },
   { id: 't_chance_insolente', slot: 'title', label: 'Chance insolente', emoji: '🍀', price: 250 },
   { id: 't_legende_vivante', slot: 'title', label: 'Légende vivante', emoji: '🏆', price: 500 },
+  // saisons : collections limitées (price) et exclusifs du passe (passTier), cf. docs/superpowers/specs/2026-11-22-saisons-boutique-design.md
+  { id: 't_tout_schuss', slot: 'title', label: 'Tout schuss', emoji: '⛷️', price: 100, season: 'hiver' },
+  { id: 't_raclette', slot: 'title', label: 'Team raclette', emoji: '🧀', price: 100, season: 'hiver' },
+  { id: 'k_glacier', slot: 'kart', label: 'Bleu glacier', emoji: '🧊', price: 100, season: 'hiver', kart: { body: '#7FD6F2' } },
+  { id: 'f_bonnet', slot: 'frame', label: 'Bonnet à pompon', emoji: '🧶', price: 250, season: 'hiver', frame: { ring: '#E63946', dots: ['#FFFFFF'], count: 12, dotScale: 0.6, top: '🧶' } },
+  { id: 'cb_pull_moche', slot: 'card_back', label: 'Pull moche', emoji: '🦌', price: 250, season: 'hiver', cardBack: { bg: 'repeating-linear-gradient(0deg, #C1121F 0 10px, #FFFFFF 10px 12px, #2D6A4F 12px 22px, #FFFFFF 22px 24px)', emoji: '🦌' } },
+  { id: 'd_chocolat_chaud', slot: 'dice', label: 'Dés chocolat chaud', emoji: '☕', price: 250, season: 'hiver', dice: { face: '#6B3E26', edge: '#3E2214', pip: '#FFF3E0' } },
+  { id: 'gb_boule_neige', slot: 'golf_ball', label: 'Balle boule de neige', emoji: '❄️', price: 250, season: 'hiver', golf: { color: '#F4FBFF', stripe: '#8ECAE6' } },
+  { id: 'm_givre', slot: 'marks', label: 'Givre', emoji: '🧊', price: 500, season: 'hiver', marks: { outline: '#BDE8FF', glow: '#4CC9F0' } },
+  { id: 'f_blizzard', slot: 'frame', label: 'Blizzard', emoji: '🏔️', price: 500, season: 'hiver', frame: { ring: 'conic-gradient(#FFFFFF, #8ECAE6, #1D6FA3, #8ECAE6, #FFFFFF)', spin: true, emojis: ['❄️'], count: 4, top: '🏔️' } },
+  { id: 't_poisson_avril', slot: 'title', label: 'Poisson d’avril permanent', emoji: '🐟', price: 100, season: 'printemps' },
+  { id: 't_allergique', slot: 'title', label: 'Allergique à la défaite', emoji: '🤧', price: 100, season: 'printemps' },
+  { id: 'gb_oeuf', slot: 'golf_ball', label: 'Balle œuf en chocolat', emoji: '🥚', price: 100, season: 'printemps', golf: { color: '#6B3E26', stripe: '#FFD166' } },
+  { id: 'f_potager', slot: 'frame', label: 'Potager du dimanche', emoji: '🪴', price: 250, season: 'printemps', frame: { ring: '#8D5A2B', emojis: ['🌱', '🥕', '🐛'], count: 6, top: '🪴' } },
+  { id: 'cb_pique_nique', slot: 'card_back', label: 'Nappe de pique-nique', emoji: '🧺', price: 250, season: 'printemps', cardBack: { bg: 'linear-gradient(90deg, rgba(230,57,70,0.5) 50%, transparent 50%) 0 0 / 16px 16px, linear-gradient(rgba(230,57,70,0.5) 50%, transparent 50%) 0 0 / 16px 16px, #FFFFFF', emoji: '🧺' } },
+  { id: 'd_poussin', slot: 'dice', label: 'Dés poussin', emoji: '🐥', price: 250, season: 'printemps', dice: { face: '#FFE066', edge: '#F4B400', pip: '#FF7B00' } },
+  { id: 'k_coccinelle', slot: 'kart', label: 'Rouge coccinelle', emoji: '🐞', price: 250, season: 'printemps', kart: { body: '#E01E37' } },
+  { id: 'm_herbe', slot: 'marks', label: 'Herbe fraîche', emoji: '🌱', price: 500, season: 'printemps', marks: { outline: '#2DC653', glow: '#B5E48C' } },
+  { id: 'f_giboulees', slot: 'frame', label: 'Giboulées', emoji: '🌦️', price: 500, season: 'printemps', frame: { ring: 'conic-gradient(#8ECAE6, #FFE066, #B5E48C, #FF8FAB, #8ECAE6)', spin: true, emojis: ['💧', '🌸'], count: 6, top: '🌦️' } },
+  { id: 't_coup_soleil', slot: 'title', label: 'Coup de soleil intégral', emoji: '🥵', price: 100, season: 'ete' },
+  { id: 't_tong', slot: 'title', label: 'Tong gauche perdue', emoji: '🩴', price: 100, season: 'ete' },
+  { id: 'bb_petanque', slot: 'bowling_ball', label: 'Boule de pétanque', emoji: '⚪', price: 100, season: 'ete', bowling: { color: '#9AA3AD', band: '#5C6670' } },
+  { id: 'cb_transat', slot: 'card_back', label: 'Transat', emoji: '⛱️', price: 250, season: 'ete', cardBack: { bg: 'repeating-linear-gradient(90deg, #00A6D6 0 12px, #FFFFFF 12px 24px)', emoji: '⛱️' } },
+  { id: 'd_piscine', slot: 'dice', label: 'Dés piscine', emoji: '💦', price: 250, season: 'ete', dice: { face: '#48CAE4', edge: '#0096C7', pip: '#FFFFFF' } },
+  { id: 'k_canard', slot: 'kart', label: 'Jaune bouée canard', emoji: '🦆', price: 250, season: 'ete', kart: { body: '#FFD60A' } },
+  { id: 'f_bouee', slot: 'frame', label: 'Bouée de sauvetage', emoji: '🛟', price: 250, season: 'ete', frame: { ring: 'repeating-conic-gradient(#E63946 0 45deg, #FFFFFF 45deg 90deg)', top: '🛟' } },
+  { id: 'm_fluo', slot: 'marks', label: 'Bracelet fluo', emoji: '🟢', price: 500, season: 'ete', marks: { outline: '#39FF14', glow: '#CCFF00' } },
+  { id: 'f_coucher_soleil', slot: 'frame', label: 'Coucher de soleil', emoji: '🌅', price: 500, season: 'ete', frame: { ring: 'conic-gradient(#FF7B00, #FF4D6D, #7B2CBF, #FFD166, #FF7B00)', spin: true, top: '🌅' } },
+  { id: 't_cartable', slot: 'title', label: 'Cartable trop lourd', emoji: '🎒', price: 100, season: 'automne' },
+  { id: 't_bonbon_ou_gage', slot: 'title', label: 'Un bonbon ou un gage', emoji: '🍬', price: 100, season: 'automne' },
+  { id: 'gb_citrouille', slot: 'golf_ball', label: 'Balle citrouille', emoji: '🎃', price: 100, season: 'automne', golf: { color: '#F77F00', stripe: '#2D6A4F' } },
+  { id: 'f_feuilles', slot: 'frame', label: 'Feuilles mortes', emoji: '🍂', price: 250, season: 'automne', frame: { ring: '#8C4A1F', emojis: ['🍂', '🍁'], count: 6 } },
+  { id: 'cb_toile', slot: 'card_back', label: 'Toile d’araignée', emoji: '🕸️', price: 250, season: 'automne', cardBack: { bg: 'repeating-radial-gradient(circle at 50% 50%, transparent 0 9px, rgba(255,255,255,0.35) 9px 10px), repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,255,255,0.35) 0 2deg, transparent 2deg 45deg), #2B1B3D', emoji: '🕷️' } },
+  { id: 'd_potion', slot: 'dice', label: 'Dés potion', emoji: '🧪', price: 250, season: 'automne', dice: { face: '#7B2CBF', edge: '#3C096C', pip: '#B5FF3D' } },
+  { id: 'k_sorciere', slot: 'kart', label: 'Violet balai volant', emoji: '🧹', price: 250, season: 'automne', kart: { body: '#6A0DAD' } },
+  { id: 'm_fantome', slot: 'marks', label: 'Fantôme', emoji: '👻', price: 500, season: 'automne', marks: { outline: '#F4F1EA', glow: '#B388FF', dash: true } },
+  { id: 'f_pleine_lune', slot: 'frame', label: 'Pleine lune', emoji: '🌕', price: 500, season: 'automne', frame: { ring: 'conic-gradient(#2B1B3D, #7B2CBF, #F77F00, #7B2CBF, #2B1B3D)', spin: true, emojis: ['🦇'], count: 4, top: '🌕' } },
+  { id: 'bb_bucheron', slot: 'bowling_ball', label: 'Boule bûcheron', emoji: '🪓', season: 'hiver', passTier: 5, bowling: { color: '#C1121F', band: '#1B4332' } },
+  { id: 'f_forfait', slot: 'frame', label: 'Forfait saison', emoji: '🎿', season: 'hiver', passTier: 10, frame: { ring: 'repeating-linear-gradient(45deg, #1D6FA3 0 6px, #FFFFFF 6px 10px, #E63946 10px 16px, #FFFFFF 16px 20px)', top: '🎿' } },
+  { id: 'cb_chalet', slot: 'card_back', label: 'Nuit au chalet', emoji: '🏔️', season: 'hiver', passTier: 15, cardBack: { bg: 'radial-gradient(#FFFFFF 1.5px, transparent 2px) 0 0 / 14px 14px, linear-gradient(180deg, #14213D, #3A5A8C)', emoji: '🏔️' } },
+  { id: 't_yeti', slot: 'title', label: 'Yéti de salon', emoji: '🥶', season: 'hiver', passTier: 20 },
+  { id: 'd_menthe_eau', slot: 'dice', label: 'Dés menthe à l’eau', emoji: '🥤', season: 'printemps', passTier: 5, dice: { face: '#B8F2D0', edge: '#52B788', pip: '#1B4332' } },
+  { id: 'f_nid', slot: 'frame', label: 'Nid douillet', emoji: '🐣', season: 'printemps', passTier: 10, frame: { ring: 'repeating-conic-gradient(#A0703C 0 8deg, #C89B5E 8deg 16deg)', emojis: ['🥚'], count: 5, top: '🐣' } },
+  { id: 'bb_tulipe', slot: 'bowling_ball', label: 'Boule tulipe', emoji: '🌷', season: 'printemps', passTier: 15, bowling: { color: '#FF5D8F', band: '#2DC653' } },
+  { id: 't_jeune_pousse', slot: 'title', label: 'Jeune pousse pleine d’avenir', emoji: '🌱', season: 'printemps', passTier: 20 },
+  { id: 'gb_ballon_plage', slot: 'golf_ball', label: 'Balle ballon de plage', emoji: '🏐', season: 'ete', passTier: 5, golf: { color: '#FFD60A', stripe: '#00A6D6' } },
+  { id: 'f_glaces', slot: 'frame', label: 'Marchand de glaces', emoji: '🍦', season: 'ete', passTier: 10, frame: { ring: 'linear-gradient(135deg, #FFC2D4, #FFF6E5 50%, #B8F2D0)', emojis: ['🍦', '🍧', '🍉'], count: 6, top: '🍨' } },
+  { id: 'cb_barbecue', slot: 'card_back', label: 'Barbecue', emoji: '🌭', season: 'ete', passTier: 15, cardBack: { bg: 'repeating-linear-gradient(0deg, #1F1B2E 0 4px, transparent 4px 14px), linear-gradient(180deg, #FF5A1F, #FFB703)', emoji: '🌭' } },
+  { id: 't_legende_camping', slot: 'title', label: 'Légende du camping', emoji: '🏕️', season: 'ete', passTier: 20 },
+  { id: 'bb_chataigne', slot: 'bowling_ball', label: 'Boule châtaigne', emoji: '🌰', season: 'automne', passTier: 5, bowling: { color: '#5C3317', band: '#C89B5E' } },
+  { id: 'f_citrouilles', slot: 'frame', label: 'Champ de citrouilles', emoji: '🎃', season: 'automne', passTier: 10, frame: { ring: 'linear-gradient(135deg, #F77F00, #FFB703 50%, #D65A00)', emojis: ['🎃', '👻'], count: 6, top: '🕯️' } },
+  { id: 'd_champignon', slot: 'dice', label: 'Dés champignon', emoji: '🍄', season: 'automne', passTier: 15, dice: { face: '#E63946', edge: '#9D0208', pip: '#FFFFFF' } },
+  { id: 't_terreur_soirees', slot: 'title', label: 'Terreur des soirées', emoji: '🧛', season: 'automne', passTier: 20 },
 ]
 
 const BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]))

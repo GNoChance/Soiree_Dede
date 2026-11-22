@@ -15,6 +15,7 @@ import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
 import { useItemSync } from '@/features/cadeaux/useItemSync'
+import { SeasonCelebrations } from '@/features/cadeaux/SeasonCelebrations'
 import { NoelDecor } from '@/features/noel/NoelDecor'
 import { isGuestProfile } from '@/features/guest/api'
 
@@ -63,7 +64,12 @@ export function RequireProfile() {
   if (!booted) return <Splash />
   if (!profile) return <Navigate to="/onboarding" replace />
   if (isGuestProfile(profile) && !GUEST_PATHS.test(pathname)) return <Navigate to="/invite" replace />
-  return <Outlet />
+  return (
+    <>
+      <Outlet />
+      <SeasonCelebrations />
+    </>
+  )
 }
 
 function Splash() {
