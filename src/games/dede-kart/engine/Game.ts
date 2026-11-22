@@ -11,8 +11,10 @@ export interface Driver {
   id: string
   name: string
   color: string
-  /** Forme du kart (0 classique, 1 bolide, 2 buggy). */
+  /** Forme du kart (0 classique, 1 bolide, 2 buggy, 3 traîneau). */
   kart?: number
+  /** Couleur de carrosserie imposée par un cadeau (Bolide doré), sinon `color`. */
+  body?: string
   /** Image du pilote (chibi). */
   sprite: string
 }
@@ -855,7 +857,7 @@ export class Game {
   }
 
   private makeKart(d: Driver, loader: THREE.TextureLoader) {
-    const k = buildKart(d.color, d.sprite, d.kart ?? 0, loader)
+    const k = buildKart(d.body ?? d.color, d.sprite, d.kart ?? 0, loader)
     return {
       mesh: k.root, chassis: k.chassis, wheels: k.wheels, steerPivots: k.steer, shadow: k.shadow,
       sparks: k.sparks, flame: k.flame, body: k.bodyMat, bubbleMesh: k.bubbleMesh, cloudMesh: k.cloudMesh,

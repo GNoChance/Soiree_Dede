@@ -314,7 +314,7 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
         try {
           scene = new Scene(host.current, {
             ballColor: me.color,
-            ballStyle: equippedOf(me.equippedItems, 'bowling_ball')?.id === 'bb_noel' ? 'noel' : undefined,
+            ballStyle: ({ bb_noel: 'noel', bb_galaxie: 'galaxie' } as const)[equippedOf(me.equippedItems, 'bowling_ball')?.id as 'bb_noel' | 'bb_galaxie'],
             dark: document.documentElement.classList.contains('dark'),
             callbacks: {
               onThrow: () => {

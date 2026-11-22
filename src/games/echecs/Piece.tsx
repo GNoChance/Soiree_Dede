@@ -20,7 +20,14 @@ const GINGER = {
   detail: { w: '#FFFFFF', b: '#FFFFFF' },
 }
 const ICING = 'M 25 81 Q 31 77 37 81 T 49 81 T 61 81 T 73 81'
-export type PieceTheme = 'gingerbread'
+/** Thème « marbre » (cadeau c_marbre) : marbre blanc / marbre noir veiné. */
+const MARBLE = {
+  fill: { w: '#F4F1EA', b: '#2F3A45' },
+  shine: { w: '#FFFFFF', b: '#6B7A88' },
+  detail: { w: '#B9B2A5', b: '#9AA7B3' },
+}
+const VEIN = 'M 42 72 Q 47 64 43 58 Q 40 53 46 48'
+export type PieceTheme = 'gingerbread' | 'marble'
 
 const BASE = 'M 22 74 L 78 74 Q 82 74 82 79 L 82 84 Q 82 89 77 89 L 23 89 Q 18 89 18 84 L 18 79 Q 18 74 22 74 Z'
 
@@ -89,9 +96,10 @@ export const Piece = memo(function Piece({ piece, className, flat, theme }: Piec
   const shape = SHAPES[piece.toLowerCase()]
   if (!shape) return null
   const ginger = theme === 'gingerbread'
-  const fill = ginger ? GINGER.fill[side] : FILL[side]
-  const shine = ginger ? GINGER.shine[side] : SHINE[side]
-  const detail = ginger ? GINGER.detail[side] : DETAIL[side]
+  const pal = ginger ? GINGER : theme === 'marble' ? MARBLE : null
+  const fill = pal ? pal.fill[side] : FILL[side]
+  const shine = pal ? pal.shine[side] : SHINE[side]
+  const detail = pal ? pal.detail[side] : DETAIL[side]
   const sw = flat ? 6 : 5
   const all = (
     <>
@@ -119,6 +127,7 @@ export const Piece = memo(function Piece({ piece, className, flat, theme }: Piec
         <path key={`l${i}`} d={d} stroke={detail} strokeWidth="4" strokeLinecap="round" fill="none" />
       ))}
       {ginger && !flat && <path d={ICING} stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" fill="none" />}
+      {theme === 'marble' && !flat && <path d={VEIN} stroke={detail} strokeWidth="2.5" strokeLinecap="round" fill="none" />}
       {shape.eye && <circle cx={shape.eye[0]} cy={shape.eye[1]} r="4.5" fill={INK} />}
     </svg>
   )

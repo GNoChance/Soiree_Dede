@@ -44,7 +44,7 @@ export interface SceneOptions {
   now: () => number
   callbacks: SceneCallbacks
   /** Ma balle (absente en télé / spectateur). */
-  ball?: { color: string; /** Balle de cadeau (gb_bonhomme : bonhomme de neige). */ style?: 'snowman' }
+  ball?: { color: string; /** Balle de cadeau (gb_bonhomme : bonhomme de neige). */ style?: 'snowman' | 'disco' }
   frame?: Frame
   /** Taille des têtes des fantômes. */
   ghostScale?: number
@@ -150,16 +150,17 @@ export class GolfScene {
     this.rig = new CameraRig(!!opts.landscape)
 
     // Ma balle
-    const ballGeo = this.geo(new THREE.SphereGeometry(BALL_R, 20, 14))
+    const disco = opts.ball?.style === 'disco'
+    const ballGeo = this.geo(disco ? new THREE.IcosahedronGeometry(BALL_R, 1) : new THREE.SphereGeometry(BALL_R, 20, 14))
     const snowman = opts.ball?.style === 'snowman'
-    const ballMat = this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#F7FBFF' : (opts.ball?.color ?? '#ffffff') }))
+    const ballMat = this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#F7FBFF' : disco ? '#D9DEE8' : (opts.ball?.color ?? '#ffffff') }))
     this.ballMesh = new THREE.Mesh(ballGeo, ballMat)
     this.ballMesh.castShadow = true
     const ink = this.mat(new THREE.MeshBasicMaterial({ color: '#1F1B2E', side: THREE.BackSide }))
     const ol = new THREE.Mesh(ballGeo, ink)
     ol.scale.setScalar(1.22)
     this.ballMesh.add(ol)
-    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#E63946' : '#FFFFFF' })))
+    const stripe = new THREE.Mesh(this.geo(new THREE.TorusGeometry(BALL_R * 0.98, BALL_R * 0.16, 6, 20)), this.mat(new THREE.MeshToonMaterial({ color: snowman ? '#E63946' : disco ? '#FF4D9D' : '#FFFFFF' })))
     this.ballMesh.add(stripe)
     if (snowman) {
       // nez carotte + 2 yeux charbon

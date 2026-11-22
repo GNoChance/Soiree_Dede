@@ -217,8 +217,9 @@ function stripeTexture(a: string, b: string): THREE.CanvasTexture {
   return t
 }
 
-export function buildLane(opts: { ballColor: string; ballStyle?: 'noel'; dark: boolean }): LaneView {
+export function buildLane(opts: { ballColor: string; ballStyle?: 'noel' | 'galaxie'; dark: boolean }): LaneView {
   const noel = opts.ballStyle === 'noel'
+  const galaxie = opts.ballStyle === 'galaxie'
   const disposables: Array<{ dispose: () => void }> = []
   const keep = <T extends { dispose: () => void }>(x: T) => {
     disposables.push(x)
@@ -359,19 +360,33 @@ export function buildLane(opts: { ballColor: string; ballStyle?: 'noel'; dark: b
   // ---------------------------------------------------------------- boule
   const ball = new THREE.Group()
   const ballGeo = keep(new THREE.SphereGeometry(BALL_R, 28, 18))
-  const ballMesh = new THREE.Mesh(ballGeo, toon({ color: noel ? '#C1121F' : opts.ballColor }))
+  const ballMesh = new THREE.Mesh(ballGeo, toon({ color: noel ? '#C1121F' : galaxie ? '#2B1B5A' : opts.ballColor }))
   ballMesh.castShadow = true
   ball.add(ballMesh)
   ball.add(new THREE.Mesh(ballGeo, outline))
   // Bande décorative + trous
   const bandGeo = keep(new THREE.TorusGeometry(BALL_R * 0.995, noel ? 0.012 : 0.007, 6, 40))
-  const band = new THREE.Mesh(bandGeo, toon({ color: noel ? '#FFC93C' : '#ffffff' }))
+  const band = new THREE.Mesh(bandGeo, toon({ color: noel ? '#FFC93C' : galaxie ? '#B388FF' : '#ffffff' }))
   band.rotation.y = Math.PI / 2
   ball.add(band)
   if (noel) {
     // boule de Noël (cadeau de l'Avent) : 2e bande dorée croisée
     const band2 = new THREE.Mesh(bandGeo, toon({ color: '#FFC93C' }))
     ball.add(band2)
+  }
+  if (galaxie) {
+    // boule galaxie (cadeau) : petites étoiles
+    const starGeo = keep(new THREE.CircleGeometry(0.006, 6))
+    const starMat = keep(new THREE.MeshBasicMaterial({ color: '#FFFFFF' }))
+    for (let k = 0; k < 14; k++) {
+      const a = k * 2.399, y = 1 - (2 * (k + 0.5)) / 14, rr = Math.sqrt(1 - y * y)
+      const dir = new THREE.Vector3(Math.cos(a) * rr, y, Math.sin(a) * rr)
+      const st = new THREE.Mesh(starGeo, starMat)
+      st.position.copy(dir).multiplyScalar(BALL_R * 1.003)
+      st.lookAt(dir.clone().multiplyScalar(2))
+      st.scale.setScalar(k % 3 === 0 ? 1.6 : 1)
+      ball.add(st)
+    }
   }
   const holeGeo = keep(new THREE.CircleGeometry(0.013, 12))
   const holeMat = keep(new THREE.MeshBasicMaterial({ color: INK }))

@@ -303,7 +303,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
             dark: document.documentElement.classList.contains('dark'),
             now: serverNow,
             ball: isPlayer
-              ? { color: playerOrPlaceholder(players, meId).color, style: equippedOf(playerOrPlaceholder(players, meId).equippedItems, 'golf_ball')?.id === 'gb_bonhomme' ? 'snowman' : undefined }
+              ? { color: playerOrPlaceholder(players, meId).color, style: equippedOf(playerOrPlaceholder(players, meId).equippedItems, 'golf_ball')?.id === 'gb_bonhomme' ? 'snowman' : equippedOf(playerOrPlaceholder(players, meId).equippedItems, 'golf_ball')?.id === 'gb_disco' ? 'disco' : undefined }
               : undefined,
             callbacks: {
               onShot: () => setRolling(true),

@@ -60,7 +60,10 @@ interface BarProps {
 
 /** Thème des pièces de chaque camp (cadeau « Échecs en pain d’épice » équipé par le joueur de ce camp). */
 function themesOf(board: ChessBoard, get: BarProps['get']): Record<'w' | 'b', PieceTheme | undefined> {
-  const t = (side: 'w' | 'b') => (equippedOf(get(playerOfSide(board, side))?.equippedItems, 'chess')?.id === 'c_pain_epice' ? 'gingerbread' : undefined)
+  const t = (side: 'w' | 'b'): PieceTheme | undefined => {
+    const id = equippedOf(get(playerOfSide(board, side))?.equippedItems, 'chess')?.id
+    return id === 'c_pain_epice' ? 'gingerbread' : id === 'c_marbre' ? 'marble' : undefined
+  }
   return { w: t('w'), b: t('b') }
 }
 

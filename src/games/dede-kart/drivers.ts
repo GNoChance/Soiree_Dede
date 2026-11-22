@@ -11,6 +11,9 @@ export const kartOf = (slug: string) => Math.max(0, CHARACTERS.findIndex((c) => 
 /** Variante 3 = traîneau (cadeau de l'Avent équipé), sinon la forme du perso. */
 const kartFor = (p: PlayerInfo | undefined, slug: string) => (equippedOf(p?.equippedItems, 'kart')?.id === 'k_traineau' ? 3 : kartOf(slug))
 
+/** Carrosserie dorée (cadeau « Bolide doré » équipé). */
+const bodyFor = (p: PlayerInfo | undefined) => (equippedOf(p?.equippedItems, 'kart')?.id === 'k_dore' ? '#FFC93C' : undefined)
+
 /** Chibi du pilote : sa tenue équipée si elle est dessinée, sinon sa tenue de soirée. */
 function spriteOf(p: PlayerInfo) {
   const t = p.equippedTenue
@@ -26,7 +29,7 @@ export function buildDrivers(playerIds: string[], botIds: string[], players: Rec
   const humans = playerIds.map((id) => {
     const p = players[id]
     const c = CHARACTERS.find((x) => x.slug === p?.slug) ?? CHARACTERS[0]
-    return { id, name: p?.nickname ?? '…', color: p?.color ?? c.color, sprite: p ? spriteOf(p) : `/chibis/${c.slug}/default/joie.webp`, kart: kartFor(p, c.slug) }
+    return { id, name: p?.nickname ?? '…', color: p?.color ?? c.color, sprite: p ? spriteOf(p) : `/chibis/${c.slug}/default/joie.webp`, kart: kartFor(p, c.slug), body: bodyFor(p) }
   })
   const taken = new Set(playerIds.map((id) => players[id]?.slug))
   const free = CHARACTERS.filter((c) => !taken.has(c.slug))

@@ -1,7 +1,8 @@
 /**
  * Catalogue des cadeaux « déco » (miroir de la table `items` de supabase/features/cadeaux.sql) :
  * cadres d'avatar, titres sous le pseudo, objets de jeu. Purement décoratifs, aucun avantage.
- * Source : calendrier de l'Avent (`adventDay` = cadeau de cette case, `adventCount` = palier en cases ouvertes).
+ * Sources : calendrier de l'Avent (`adventDay` = cadeau de cette case, `adventCount` = palier en cases ouvertes),
+ * ou une règle serveur (items.rule : trophée, niveau, champion de la semaine, victoires) décrite par `howTo`.
  */
 export type ItemSlot = 'frame' | 'title' | 'kart' | 'golf_ball' | 'bowling_ball' | 'chess'
 
@@ -29,6 +30,8 @@ export interface ItemDef {
   emoji: string
   adventDay?: number
   adventCount?: number
+  /** Comment l'obtenir (cadeaux hors Avent). */
+  howTo?: string
   frame?: FrameStyle
 }
 
@@ -74,6 +77,31 @@ export const ITEMS: ItemDef[] = [
   { id: 'k_traineau', slot: 'kart', label: 'Traîneau', emoji: '🛷', adventCount: 18 },
   { id: 'c_pain_epice', slot: 'chess', label: 'Échecs en pain d’épice', emoji: '♟️', adventCount: 24 },
   { id: 't_esprit_noel', slot: 'title', label: 'Esprit de Noël incarné', emoji: '🎅', adventCount: 24 },
+  // trophées généraux
+  { id: 'f_arc_en_ciel', slot: 'frame', label: 'Arc-en-ciel', emoji: '🌈', howTo: 'Trophée « Touche-à-tout » : jouer à 10 jeux différents', frame: { ring: 'conic-gradient(#FF4D6D, #FFB703, #FFE066, #2EC4B6, #4CC9F0, #B388FF, #FF4D6D)' } },
+  { id: 't_couteau_suisse', slot: 'title', label: 'Couteau suisse', emoji: '🛠️', howTo: 'Trophée « Polyvalent » : gagner dans 5 jeux différents' },
+  { id: 't_pilier', slot: 'title', label: 'Pilier de soirée', emoji: '🏛️', howTo: 'Trophée « Pilier de soirée » : participer à 20 soirées' },
+  { id: 'f_nuit_blanche', slot: 'frame', label: 'Nuit blanche', emoji: '🌙', howTo: 'Trophée « Noctambule » : finir 3 soirées après 2 h du matin', frame: { ring: 'linear-gradient(160deg, #0B1340, #2A2F6B)', dots: ['#FFFFFF', '#FFE066'], count: 10, dotScale: 0.55, top: '🌙' } },
+  { id: 't_increvable', slot: 'title', label: 'Increvable', emoji: '🔋', howTo: 'Trophée « Marathonien » : 8 parties dans une même soirée' },
+  { id: 'f_tapis_rouge', slot: 'frame', label: 'Tapis rouge', emoji: '🏠', howTo: 'Trophée « Hôte de la maison » : organiser 5 soirées', frame: { ring: 'repeating-conic-gradient(#C1121F 0 10deg, #E63946 10deg 20deg)', dots: ['#FFC93C'], count: 8, dotScale: 0.7, top: '🏠' } },
+  { id: 't_grande_tablee', slot: 'title', label: 'Grande tablée', emoji: '🍽️', howTo: 'Trophée « Grande tablée » : une soirée à 6 joueurs ou plus' },
+  { id: 'f_bulles', slot: 'frame', label: 'Bulles de BD', emoji: '💬', howTo: 'Trophée « Pipelette » : envoyer 50 stickers dans le chat', frame: { ring: 'linear-gradient(135deg, #8ECAE6, #D7F0FF)', emojis: ['💬'], count: 4 } },
+  { id: 't_fashion_week', slot: 'title', label: 'Fashion week', emoji: '👗', howTo: 'Trophée « Garde-robe » : débloquer 5 tenues' },
+  { id: 'f_medaillon', slot: 'frame', label: 'Médaillon', emoji: '🏅', howTo: 'Trophée « Collectionneur » : compléter une planche de tenue', frame: { ring: 'conic-gradient(#B08D57, #F3E5AB, #B08D57, #F3E5AB, #B08D57)', top: '🏅' } },
+  { id: 't_boule_cristal', slot: 'title', label: 'Boule de cristal', emoji: '🔮', howTo: 'Trophée « Madame Irma » : 3 bons pronostics d’affilée' },
+  // niveaux
+  { id: 'f_bronze', slot: 'frame', label: 'Bronze', emoji: '🥉', howTo: 'Atteindre le niveau 5', frame: { ring: 'linear-gradient(135deg, #8C5A2B, #E0A96D 50%, #8C5A2B)' } },
+  { id: 'f_argent', slot: 'frame', label: 'Argent', emoji: '🥈', howTo: 'Atteindre le niveau 10', frame: { ring: 'linear-gradient(135deg, #8E9AAF, #F1F3F8 50%, #8E9AAF)' } },
+  { id: 'f_or', slot: 'frame', label: 'Or', emoji: '🥇', howTo: 'Atteindre le niveau 15', frame: { ring: 'linear-gradient(135deg, #B8860B, #FFE38A 50%, #B8860B)', emojis: ['✨'], count: 3 } },
+  { id: 'f_diamant', slot: 'frame', label: 'Diamant', emoji: '💎', howTo: 'Atteindre le niveau 20', frame: { ring: 'conic-gradient(#A0E7FF, #FFFFFF, #C3B1FF, #FFFFFF, #A0E7FF)', spin: true, top: '💎' } },
+  // champion de la semaine
+  { id: 't_patron_semaine', slot: 'title', label: 'Patron de la semaine', emoji: '🥇', howTo: 'Finir champion de la semaine (le plus de victoires)' },
+  { id: 'f_couronne', slot: 'frame', label: 'Couronne', emoji: '👑', howTo: 'Finir 3 fois champion de la semaine', frame: { ring: 'linear-gradient(135deg, #B8860B, #FFD166 50%, #B8860B)', dots: ['#E63946', '#4CC9F0'], count: 6, top: '👑' } },
+  // victoires par jeu
+  { id: 'k_dore', slot: 'kart', label: 'Bolide doré', emoji: '🏆', howTo: 'Gagner 10 courses de Dédé Kart' },
+  { id: 'gb_disco', slot: 'golf_ball', label: 'Balle disco', emoji: '🪩', howTo: 'Gagner 10 parties de Mini-golf' },
+  { id: 'bb_galaxie', slot: 'bowling_ball', label: 'Boule galaxie', emoji: '🌌', howTo: 'Gagner 10 parties de Bowling' },
+  { id: 'c_marbre', slot: 'chess', label: 'Pièces en marbre', emoji: '🗿', howTo: 'Gagner 10 parties d’Échecs' },
 ]
 
 const BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]))

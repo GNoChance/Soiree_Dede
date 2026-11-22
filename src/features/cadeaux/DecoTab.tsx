@@ -14,7 +14,7 @@ import { toast } from '@/store/toast'
 import { equipItem, useOwnedItems } from './api'
 
 const howToGet = (it: ItemDef) =>
-  it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : 'Bientôt…'
+  it.adventDay ? `Case n° ${it.adventDay} du calendrier de l’Avent` : it.adventCount ? `${it.adventCount} cases ouvertes dans le calendrier de l’Avent` : (it.howTo ?? 'Bientôt…')
 
 /** Onglet « Déco » de l'inventaire : cadres, titres et objets de jeu gagnés (calendrier de l'Avent). */
 export function DecoTab() {
@@ -46,7 +46,7 @@ export function DecoTab() {
         <p className="mt-2 font-display text-xl font-extrabold">{profile.nickname}</p>
         <PlayerTitle slug={profile.slug} className="text-sm" />
         <p className="text-sm font-bold text-muted">
-          {loaded ? `${ownedCount}/${ITEMS.length} cadeaux` : 'Chargement…'} · gagnés dans le calendrier de l’Avent 🎄
+          {loaded ? `${ownedCount}/${ITEMS.length} cadeaux` : 'Chargement…'} · touche un cadeau verrouillé pour savoir comment l’avoir
         </p>
       </StaggerItem>
       {SLOTS.map((slot) => (

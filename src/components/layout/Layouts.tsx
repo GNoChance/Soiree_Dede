@@ -13,6 +13,7 @@ import { WheelWatcher } from '@/features/soiree/WheelWatcher'
 import { AnimatedOutlet } from './AnimatedOutlet'
 import { BottomNav } from './BottomNav'
 import { UpdatePrompt } from './UpdatePrompt'
+import { useItemSync } from '@/features/cadeaux/useItemSync'
 import { NoelDecor } from '@/features/noel/NoelDecor'
 
 /**
@@ -51,6 +52,7 @@ export function RequireProfile() {
   const profile = useSession((s) => s.profile)
   const booted = useSession((s) => s.booted)
   useSessionLifecycle()
+  useItemSync()
   if (!booted) return <Splash />
   if (!profile) return <Navigate to="/onboarding" replace />
   return <Outlet />

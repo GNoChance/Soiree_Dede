@@ -38,7 +38,7 @@ export interface SceneCallbacks {
 export interface SceneOptions {
   ballColor: string
   /** Boule de cadeau (bb_noel). */
-  ballStyle?: 'noel'
+  ballStyle?: 'noel' | 'galaxie'
   dark: boolean
   callbacks: SceneCallbacks
 }
