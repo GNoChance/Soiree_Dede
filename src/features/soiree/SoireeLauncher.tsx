@@ -7,7 +7,7 @@ import { BottomSheet } from '@/components/ui/Modal'
 import { Avatar } from '@/components/ui/Avatar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { burst } from '@/components/ui/confetti'
-import { getCharacter } from '@/data/characters'
+import { accentColorOf } from '@/data/characters'
 import { supabase } from '@/lib/supabase'
 import { fx } from '@/lib/feedback'
 import { useSession } from '@/store/session'
@@ -115,7 +115,7 @@ function SoireeCard({ soiree, meId, index }: { soiree: ActiveSoireeJson; meId: s
   const host = byId[soiree.host_id]
   const hostSlug = host?.slug ?? soiree.host?.slug ?? 'dede'
   const isHost = soiree.host_id === meId
-  const color = getCharacter(hostSlug)?.color ?? '#FFB703'
+  const color = accentColorOf(hostSlug)
   const match = soiree.current_match
   const game = match ? getGame(match.game_id) : undefined
   const inMatch = Boolean(match && match.player_ids.includes(meId))

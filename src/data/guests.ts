@@ -27,13 +27,23 @@ export const GUEST_AVATARS: GuestAvatar[] = [
 
 const BY_ID = Object.fromEntries(GUEST_AVATARS.map((a) => [a.id, a])) as Record<string, GuestAvatar>
 
+/** Invité de passage (slug `g-…`). */
 export const isGuestSlug = (slug: string | null | undefined): boolean => !!slug && slug.startsWith('g-')
 
-/** Avatar d'un invité d'après son slug (repli : renard), ou undefined si ce n'est pas un invité. */
-export function guestAvatarOf(slug: string | null | undefined): GuestAvatar | undefined {
-  if (!isGuestSlug(slug)) return undefined
+/** Membre de la bande sans chibi (slug `m-<avatar>-<6 car.>`, supabase/features/membres.sql) : avatar emoji. */
+export const isEmojiMemberSlug = (slug: string | null | undefined): boolean => !!slug && slug.startsWith('m-')
+
+/** Rendu emoji (invité ou membre sans chibi). */
+export const isEmojiSlug = (slug: string | null | undefined): boolean => isGuestSlug(slug) || isEmojiMemberSlug(slug)
+
+/** Avatar emoji d'après le slug (repli : renard), ou undefined si le slug a un vrai chibi. */
+export function emojiAvatarOf(slug: string | null | undefined): GuestAvatar | undefined {
+  if (!isEmojiSlug(slug)) return undefined
   return BY_ID[slug!.split('-')[1] ?? ''] ?? GUEST_AVATARS[0]
 }
+
+/** Alias historique (écran invité, Avatar, ChibiImage). */
+export const guestAvatarOf = emojiAvatarOf
 
 const spriteCache = new Map<string, string>()
 
@@ -45,7 +55,7 @@ export function guestSpriteUrl(slug: string, disc = false): string {
   const key = `${slug}|${disc}`
   const hit = spriteCache.get(key)
   if (hit) return hit
-  const a = guestAvatarOf(slug) ?? GUEST_AVATARS[0]
+  const a = emojiAvatarOf(slug) ??GUEST_AVATARS[0]
   const bg = disc ? `<circle cx="64" cy="64" r="60" fill="${a.color}" stroke="#1f1b2e" stroke-width="6"/>` : ''
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">${bg}` +

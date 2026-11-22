@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Button } from '@/components/ui/Button'
 import { victoryConfetti } from '@/components/ui/confetti'
-import { getCharacter } from '@/data/characters'
+import { accentColorOf, getCharacter } from '@/data/characters'
 import { ConfirmModal } from '@/features/soiree/components'
 import { ScoreCard } from '@/games/mini-golf/ScoreCard'
 import { ScoreSheet } from '@/games/bowling/ScoreSheet'
@@ -38,7 +38,7 @@ export default function TrainingPage() {
             expressions: profile.expressions?.length ? profile.expressions : (getCharacter(profile.slug)?.expressions ?? ['joie']),
             equipped: profile.equipped_expression ?? 'joie',
             equippedTenue: profile.equipped_tenue ?? 'default',
-            color: getCharacter(profile.slug)?.color ?? '#FFB703',
+            color: accentColorOf(profile.slug),
           }
         : null,
     [profile],

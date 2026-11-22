@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
-import { CHARACTERS } from '@/data/characters'
+import { AdminMembres } from '@/features/admin/AdminMembres'
+import { usePlayers } from '@/features/soiree/players'
 import { AdminSoirees } from '@/features/admin/AdminSoirees'
 import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { Avatar } from '@/components/ui/Avatar'
@@ -28,6 +29,7 @@ export function SettingsPage() {
   const profile = useSession((s) => s.profile)
   const patchProfile = useSession((s) => s.patchProfile)
   const navigate = useNavigate()
+  const band = usePlayers().list
   const { needRefresh, applyUpdate } = usePWAUpdate()
   const [nick, setNick] = useState<string | null>(null)
   const [savingNick, setSavingNick] = useState(false)
@@ -65,7 +67,7 @@ export function SettingsPage() {
     }
   }
 
-  const resetTarget = CHARACTERS.find((c) => c.slug === resetSlug)
+  const resetTarget = band.find((c) => c.slug === resetSlug)
 
   return (
     <StaggerList className="flex flex-col gap-4">
@@ -146,7 +148,7 @@ export function SettingsPage() {
               <KeyRound className="size-5" /> Admin : réinitialiser le code d'un joueur
             </p>
             <div className="grid grid-cols-4 gap-2">
-              {CHARACTERS.filter((c) => c.slug !== profile.slug).map((c) => (
+              {band.filter((c) => c.slug !== profile.slug).map((c) => (
                 <button
                   key={c.slug}
                   onClick={() => setResetSlug(c.slug)}
@@ -158,6 +160,11 @@ export function SettingsPage() {
               ))}
             </div>
           </Card>
+        </StaggerItem>
+      )}
+      {profile?.is_admin && (
+        <StaggerItem>
+          <AdminMembres />
         </StaggerItem>
       )}
       {profile?.is_admin && (

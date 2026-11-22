@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
-import { CHARACTERS, getCharacter } from '@/data/characters'
-import { guestAvatarOf } from '@/data/guests'
+import { accentColorOf, CHARACTERS, getCharacter } from '@/data/characters'
 import type { PlayerInfo } from '@/games/types'
 
 /**
@@ -63,7 +62,7 @@ export const usePlayersStore = create<PlayersState>((set, get) => ({
       equipped: p.equipped_expression ?? 'joie',
       equippedTenue: p.equipped_tenue ?? 'default',
       equippedItems: p.equipped_items ?? {},
-      color: getCharacter(p.slug)?.color ?? guestAvatarOf(p.slug)?.color ?? '#FFB703',
+      color: accentColorOf(p.slug),
       isGuest: !!p.is_guest,
     }))
     set({

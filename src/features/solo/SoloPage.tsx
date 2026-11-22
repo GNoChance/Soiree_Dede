@@ -5,7 +5,7 @@ import { Navigate, useNavigate, useParams } from 'react-router'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { burst, victoryConfetti } from '@/components/ui/confetti'
-import { CHARACTERS, getCharacter, type Character, type CharacterSlug } from '@/data/characters'
+import { accentColorOf, CHARACTERS, getCharacter, type Character, type CharacterSlug } from '@/data/characters'
 import { pickSideColors } from '@/features/duel/logic'
 import { pickExpression } from '@/features/soiree/players'
 import { BnMatchContext } from '@/games/bataille-navale/context'
@@ -92,7 +92,7 @@ export default function SoloPage() {
             expressions: profile.expressions?.length ? profile.expressions : (getCharacter(profile.slug)?.expressions ?? ['joie']),
             equipped: profile.equipped_expression ?? 'joie',
             equippedTenue: profile.equipped_tenue ?? 'default',
-            color: getCharacter(profile.slug)?.color ?? '#FFB703',
+            color: accentColorOf(profile.slug),
           }
         : null,
     [profile],

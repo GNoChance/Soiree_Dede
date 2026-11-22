@@ -1,4 +1,4 @@
-import { chibiUrl, getCharacter } from '@/data/characters'
+import { accentColorOf, chibiUrl } from '@/data/characters'
 import { hasTenueArt, tenueArtDir } from '@/components/ui/tenueArt'
 import { DEFAULT_TENUE } from '@/data/tenues'
 
@@ -88,7 +88,7 @@ export function avatarDisc(ctx: CanvasRenderingContext2D, img: HTMLImageElement 
   ctx.save()
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  ctx.fillStyle = img ? bg : (getCharacter(slug)?.color ?? '#ffb703')
+  ctx.fillStyle = img ? bg : accentColorOf(slug, '#ffb703')
   ctx.fill()
   ctx.clip()
   if (img) {

@@ -220,6 +220,8 @@ const MESSAGES: Record<string, string> = {
   too_many_guests: 'Il y a déjà 8 personnes de passage dans cette soirée.',
   invalid_avatar: 'Choisis un avatar.',
   invalid_nickname: 'Ton prénom doit faire entre 1 et 20 caractères.',
+  invalid_first_name: 'Le prénom doit faire entre 1 et 30 caractères.',
+  nickname_taken: 'Ce surnom est déjà pris dans la bande : choisis-en un autre.',
 }
 
 function raw(err: unknown): string {

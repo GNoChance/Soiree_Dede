@@ -4,6 +4,7 @@ import { Check, Lock } from 'lucide-react'
 import { EXPRESSIONS, type ExpressionDef } from '@/data/expressions'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Avatar } from '@/components/ui/Avatar'
+import { isEmojiSlug } from '@/data/guests'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { BottomSheet } from '@/components/ui/Modal'
@@ -72,6 +73,8 @@ export function InventoryPage() {
 
   if (!profile) return null
 
+  const emoji = isEmojiSlug(profile.slug) // membre sans chibi : ni expressions ni tenues
+  const shownTab = emoji && (tab === 'expressions' || tab === 'tenues') ? 'deco' : tab
   const tenue = profile.equipped_tenue ?? 'default'
   const tenueDef = wornTenue ? getTenue(tenue) : undefined
   const trophyOf = (id: string) => (tenueDef ? trophyForSlot(tenue, stickerSlot(profile.slug, tenue, id)) : undefined)
@@ -128,9 +131,13 @@ export function InventoryPage() {
       <StaggerItem className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-4xl">Inventaire</h1>
-          <Badge tone="mint" className="mt-1">
-            <AnimatedNumber value={unlockedCount} />/{all.length} débloqués
-          </Badge>
+          {emoji ? (
+            <p className="mt-1 text-sm font-bold text-muted">Ton perso dessiné arrive bientôt ! 🎨</p>
+          ) : (
+            <Badge tone="mint" className="mt-1">
+              <AnimatedNumber value={unlockedCount} />/{all.length} débloqués
+            </Badge>
+          )}
         </div>
         <AnimatePresence mode="popLayout">
           <motion.div
@@ -148,22 +155,24 @@ export function InventoryPage() {
       <StaggerItem>
         <SegmentedControl
           ariaLabel="Inventaire"
-          value={tab}
+          value={shownTab}
           onChange={setTab}
           options={[
-            { value: 'expressions', label: 'Expressions' },
-            { value: 'tenues', label: 'Tenues 👕' },
+            ...(emoji ? [] : [
+              { value: 'expressions' as const, label: 'Expressions' },
+              { value: 'tenues' as const, label: 'Tenues 👕' },
+            ]),
             { value: 'deco', label: 'Déco 🎁' },
             { value: 'boutique', label: <>Boutique 🪙{seasonLastWeek && <span aria-label="Dernière chance" className="size-2.5 rounded-full border-2 border-ink bg-tomato" />}</> },
           ]}
         />
       </StaggerItem>
 
-      {tab === 'boutique' ? (
+      {shownTab === 'boutique' ? (
         <ShopTab />
-      ) : tab === 'deco' ? (
+      ) : shownTab === 'deco' ? (
         <DecoTab />
-      ) : tab === 'tenues' ? (
+      ) : shownTab === 'tenues' ? (
         <TenuesTab />
       ) : (
       <>

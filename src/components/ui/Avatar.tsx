@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion'
-import { getCharacter } from '@/data/characters'
-import { guestAvatarOf } from '@/data/guests'
+import { accentColorOf } from '@/data/characters'
 import { cn } from '@/lib/cn'
 import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from './ChibiImage'
@@ -33,7 +32,7 @@ export interface AvatarProps {
 
 /** Disque sticker (couleur d'accent du perso) + chibi dedans. */
 export function Avatar({ slug, expression = 'joie', tenue, frame, size = 56, badge, bounce, selected, className }: AvatarProps) {
-  const color = getCharacter(slug)?.color ?? guestAvatarOf(slug)?.color ?? '#FFB703'
+  const color = accentColorOf(slug)
   const directoryTenue = usePlayersStore((s) => (tenue === undefined ? s.list.find((p) => p.slug === slug)?.equippedTenue : undefined))
   const wanted = tenue ?? directoryTenue ?? 'default'
   const art = useTenueArt(slug, wanted)

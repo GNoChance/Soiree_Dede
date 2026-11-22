@@ -300,7 +300,7 @@ function Welcome({ slug }: { slug: string }) {
         <Avatar slug={slug} expression="joie" size={160} bounce />
       </motion.div>
       <h1 className="text-4xl text-tangerine [text-shadow:2px_2px_0_var(--ink)]">
-        Bienvenue {char?.firstName ?? ''} !
+        Bienvenue {char?.firstName ?? profile?.first_name ?? ''} !
       </h1>
       <p className="text-muted">Ton code est enregistré. Tu peux personnaliser ton pseudo, il sera visible par tous.</p>
       <label className="w-full text-left">
