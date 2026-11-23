@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Minus, Plus, Smartphone, Target, Vibrate } from 'lucide-react'
+import { CircleHelp, Minus, Plus, Smartphone, Target, Vibrate } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { ChibiImage } from '@/components/ui/ChibiImage'
+import { BottomSheet } from '@/components/ui/Modal'
 import { burst } from '@/components/ui/confetti'
 import { supabase } from '@/lib/supabase'
 import { fx, vibrate } from '@/lib/feedback'
@@ -56,6 +57,52 @@ function useMyDice(matchId: string, propSecret: unknown, round: number, enabled:
   return best ? best.dice : null
 }
 
+const AIDE_KEY = 'dede:aide:menteur:regles'
+function aideVue(): boolean {
+  try {
+    return localStorage.getItem(AIDE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function aideMarquer() {
+  try {
+    localStorage.setItem(AIDE_KEY, '1')
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
+/** Petite feuille d'aide : s'ouvre seule à la 1re partie, puis sur demande (bouton « ? »). */
+function HelpSheet({ open, onClose, pile }: { open: boolean; onClose: () => void; pile: boolean }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title="Comment annoncer ?">
+      <div className="flex flex-col gap-3 pb-2 text-base leading-snug">
+        <p className="sticker-sm bg-sun p-3 font-bold text-[#1f1b2e]">
+          <span className="font-display text-xl font-extrabold">« 3 × 5 »</span> = il y a au moins 3 dés qui montrent 5 sur TOUTE la table (pas seulement chez toi), en comptant les 1 : ce sont des jokers.
+        </p>
+        <p>
+          <b>Surenchérir</b> : annonce plus que le joueur d’avant (plus de dés, ou une valeur plus haute).
+        </p>
+        <p>
+          <b>Paco</b> (les 1) : quand on annonce des 1, seuls les vrais 1 comptent, pas de jokers. Pour repasser aux autres valeurs, il faut doubler le nombre de dés et en ajouter un.
+        </p>
+        <p>
+          <b>« Menteur ! »</b> = tu penses que l’enchère est fausse. Tout le monde montre ses dés : si elle est fausse, l’annonceur perd un dé ; si elle est vraie, c’est toi.
+        </p>
+        {pile && (
+          <p>
+            <b>« Pile ! »</b> = tu penses qu’il y a exactement ce nombre de dés. Bon pour gagner un dé, mauvais pour en perdre un.
+          </p>
+        )}
+        <Button fullWidth onClick={onClose}>
+          Compris !
+        </Button>
+      </div>
+    </BottomSheet>
+  )
+}
+
 const rolledKey = (matchId: string) => `menteur:${matchId}:rolled`
 function readRolled(matchId: string): number {
   try {
@@ -89,6 +136,14 @@ export default function MenteurPlay({ matchId, state, secret, meId, isHost, play
   const left = useCountdown(s.phase === 'bidding' || s.phase === 'reveal' ? s.deadline : null)
   const total = (s.turn_seconds || 45) * 1000
   const [busy, setBusy] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  // 1re partie : l'aide s'ouvre seule au premier tour de parole du joueur.
+  useEffect(() => {
+    if (myTurn && !aideVue()) {
+      aideMarquer()
+      setHelpOpen(true)
+    }
+  }, [myTurn])
 
   const send = useCallback(
     async (a: MtrAction) => {
@@ -149,7 +204,8 @@ export default function MenteurPlay({ matchId, state, secret, meId, isHost, play
         <MyDicePanel key={`${matchId}-${s.round}`} matchId={matchId} round={s.round} dice={dice} highlight={s.bid?.face ?? null} />
       )}
 
-      {myTurn && <BidPicker key={s.turn_seq} s={s} dice={dice} busy={busy} left={left} total={total} onSend={(a) => void send(a)} />}
+      {myTurn && <BidPicker key={s.turn_seq} s={s} dice={dice} busy={busy} left={left} total={total} onSend={(a) => void send(a)} onHelp={() => setHelpOpen(true)} />}
+      <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} pile={!!s.pile_enabled} />
 
       {bidding && !myTurn && turnPlayer && (
         <motion.div
@@ -475,7 +531,7 @@ function MyDicePanel({ matchId, round, dice, highlight }: { matchId: string; rou
 /* Sélecteur d'enchère                                                         */
 /* -------------------------------------------------------------------------- */
 
-function BidPicker({ s, dice, busy, left, total, onSend }: { s: MtrState; dice: DieFace[] | null; busy: boolean; left: number; total: number; onSend: (a: MtrAction) => void }) {
+function BidPicker({ s, dice, busy, left, total, onSend, onHelp }: { onHelp: () => void; s: MtrState; dice: DieFace[] | null; busy: boolean; left: number; total: number; onSend: (a: MtrAction) => void }) {
   const reduce = useReducedMotion()
   const bid = s.bid
   const tot = s.total_dice
@@ -499,7 +555,17 @@ function BidPicker({ s, dice, busy, left, total, onSend }: { s: MtrState; dice: 
     <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="sticker flex flex-col gap-3 bg-surface p-3">
       <div className="flex items-center justify-between">
         <span className="font-display text-xl font-extrabold">À toi ! {bid ? 'Surenchéris…' : 'Ouvre les enchères'}</span>
-        <span className={cn('font-display text-xl font-extrabold tabular-nums', frac < 0.2 && 'text-tomato')}>{Math.ceil(left / 1000)} s</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onHelp}
+            aria-label="Aide : comment annoncer ?"
+            className="flex size-10 items-center justify-center rounded-full border-[3px] border-ink bg-sky text-[#1f1b2e] shadow-sticker-sm active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+          >
+            <CircleHelp className="size-6" strokeWidth={2.8} />
+          </button>
+          <span className={cn('font-display text-xl font-extrabold tabular-nums', frac < 0.2 && 'text-tomato')}>{Math.ceil(left / 1000)} s</span>
+        </div>
       </div>
       <div className="h-2 overflow-hidden rounded-full border-2 border-ink bg-sunk">
         <div

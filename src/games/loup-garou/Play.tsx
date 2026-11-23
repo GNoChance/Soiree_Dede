@@ -248,18 +248,44 @@ function VoiceToggle({ dark }: { dark?: boolean }) {
 /* ========================================================================== */
 
 function CompositionChips({ s, dark }: { s: LgState; dark?: boolean }) {
+  const [open, setOpen] = useState<LgRole | null>(null)
+  const info = open ? ROLE_INFO[open] : null
   return (
     <>
       {ROLE_ORDER.filter((r) => s.composition[r] > 0).map((r) => (
-        <span
+        <button
+          type="button"
           key={r}
-          className={cn('flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-xs font-extrabold', dark ? 'border-white/30 bg-white/10 text-white' : 'border-ink text-[#1f1b2e]')}
+          onClick={() => setOpen(r)}
+          aria-label={`Que fait ${roleWithArticle(r)} ?`}
+          className={cn(
+            'flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-xs font-extrabold active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-grape',
+            dark ? 'border-white/30 bg-white/10 text-white' : 'border-ink text-[#1f1b2e]',
+          )}
           style={dark ? undefined : { backgroundColor: ROLE_INFO[r].color }}
         >
           {ROLE_INFO[r].emoji} {s.composition[r] > 1 ? `${s.composition[r]} ` : ''}
           {s.composition[r] > 1 ? ROLE_INFO[r].plural : ROLE_INFO[r].label}
-        </span>
+          <span aria-hidden className="opacity-60">?</span>
+        </button>
       ))}
+      <BottomSheet open={open !== null} onClose={() => setOpen(null)} title={open ? `Que fait ${roleWithArticle(open)} ?` : ''}>
+        {info && (
+          <div className="flex flex-col gap-3 pb-2">
+            <div className="flex items-center gap-3">
+              <span className="flex size-14 items-center justify-center rounded-full border-[3px] border-ink text-3xl" style={{ backgroundColor: info.color }}>
+                {info.emoji}
+              </span>
+              <p className="font-display text-2xl font-extrabold">{info.label}</p>
+            </div>
+            <p className="text-lg leading-snug font-bold">{info.power}</p>
+            <p className="text-base leading-snug text-muted">Son but : {info.goal}</p>
+            <Button fullWidth onClick={() => setOpen(null)}>
+              Compris !
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
     </>
   )
 }

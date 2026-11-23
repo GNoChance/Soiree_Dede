@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ArrowRight, Fingerprint, Gavel, Mic, Send, Skull, Vote } from 'lucide-react'
+import { ArrowRight, Check, CircleHelp, Fingerprint, Gavel, Mic, Send, Skull, Vote } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -18,7 +18,7 @@ import { ROLE_INFO, ucActions } from './setup'
 import { NextIn, useDeadlineTick } from '../qui-de-nous/autoTick'
 
 /** Champs ajoutés par le serveur (absents des vieilles parties). */
-type UcS = UndercoverState & { deadline?: string | null; vote_unlock?: string | null }
+type UcS = UndercoverState & { deadline?: string | null; vote_unlock?: string | null; spoken?: string[] }
 
 type Get = (id: string) => PlayerInfo
 type ActFn = GamePlayProps['act']
@@ -145,50 +145,103 @@ function speakingOrder(s: UndercoverState): string[] {
   return [...alive.slice(i), ...alive.slice(0, i)]
 }
 
+const AIDE_KEY = 'dede:aide:undercover:regles'
+function aideVue(): boolean {
+  try {
+    return localStorage.getItem(AIDE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function aideMarquer() {
+  try {
+    localStorage.setItem(AIDE_KEY, '1')
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
+/** Aide repliable « Comment jouer ? » : ouverte les premières fois, refermable. */
+function HowTo() {
+  const [open] = useState(() => !aideVue())
+  useEffect(() => {
+    if (open) aideMarquer()
+  }, [open])
+  return (
+    <details open={open} className="sticker-sm bg-surface p-3">
+      <summary className="flex cursor-pointer items-center gap-2 font-display text-lg font-extrabold">
+        <CircleHelp className="size-5" /> Comment jouer ?
+      </summary>
+      <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 font-bold">
+        <li>Dis un mot en rapport avec ton mot secret, sans jamais le citer.</li>
+        <li>L’infiltré a un mot voisin du vôtre : il fait semblant de ressembler aux autres.</li>
+        <li>Mister White n’a pas de mot : il écoute et doit deviner.</li>
+      </ul>
+    </details>
+  )
+}
+
 function Describe({ s, get, meId, isHost, act, pending }: { s: UcS; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
   const order = speakingOrder(s)
   const reduce = useReducedMotion()
   const unlockLeft = useCountdown(s.vote_unlock)
-  const canStart = isHost || (s.alive.includes(meId) && unlockLeft <= 0)
+  const spoken = s.spoken ?? []
+  const speaker = order.find((id) => !spoken.includes(id)) ?? null
+  const allSpoke = speaker === null
+  const canStart = isHost || (s.alive.includes(meId) && (allSpoke || unlockLeft <= 0))
+  const mine = speaker === meId
+  const sp = speaker ? get(speaker) : null
   return (
     <>
-      <div className="sticker flex items-center gap-3 bg-sky p-3 text-[#1f1b2e]">
+      <HowTo />
+      {s.round === 1 && (
+        <p className="text-center font-bold text-muted">Pour commencer : dis un seul mot en rapport avec le tien. Exemple : pour « pizza », dis « fromage ».</p>
+      )}
+      <div className={cn('sticker flex items-center gap-3 p-3 text-[#1f1b2e]', allSpoke ? 'bg-mint' : mine ? 'bg-sun' : 'bg-sky')}>
         <Mic className="size-8 shrink-0" />
-        <p className="font-display text-lg leading-tight font-extrabold">Chacun son tour, décrivez votre mot à l’oral en un mot ou une courte phrase.</p>
+        <p className="font-display text-lg leading-tight font-extrabold">
+          {allSpoke ? 'Tout le monde a parlé → on vote !' : mine ? '🎤 À toi de décrire ton mot !' : `🎤 C’est à ${sp?.nickname}`}
+        </p>
       </div>
+      {speaker && (mine || isHost) && (
+        <Button size="lg" fullWidth loading={pending} icon={<Check className="size-6" />} onClick={() => void act(ucActions.spoke(speaker))}>
+          {mine ? 'J’ai parlé ✅' : `${sp?.nickname} a parlé ✅`}
+        </Button>
+      )}
       <ol className="flex flex-col gap-2">
         {order.map((id, i) => {
           const p = get(id)
-          const first = i === 0
+          const done = spoken.includes(id)
+          const cur = id === speaker
           return (
             <motion.li
               key={id}
               initial={{ x: i % 2 ? 80 : -80, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
+              animate={{ x: 0, opacity: done ? 0.55 : 1 }}
               transition={{ delay: i * 0.08, type: 'spring', stiffness: 300, damping: 20 }}
-              className={cn('sticker flex items-center gap-3 p-2 pr-3', first ? 'bg-sun text-[#1f1b2e]' : 'bg-surface', id === meId && !first && 'ring-2 ring-grape')}
+              className={cn('sticker flex items-center gap-3 p-2 pr-3', cur ? 'bg-sun text-[#1f1b2e]' : 'bg-surface', !cur && !done && 'opacity-60 grayscale-[0.4]', id === meId && !cur && 'ring-2 ring-grape')}
             >
-              <span className="w-7 text-center font-display text-2xl font-extrabold">{i + 1}</span>
-              <motion.div animate={first && !reduce ? { scale: [1, 1.12, 1], rotate: [0, -4, 4, 0] } : undefined} transition={{ repeat: Infinity, duration: 1.2 }}>
-                <Avatar slug={p.slug} expression={first ? mood(p, 'think') : p.equipped} size={first ? 56 : 44} />
+              <span className="w-7 text-center font-display text-2xl font-extrabold">{done ? '✅' : i + 1}</span>
+              <motion.div animate={cur && !reduce ? { scale: [1, 1.12, 1], rotate: [0, -4, 4, 0] } : undefined} transition={{ repeat: Infinity, duration: 1.2 }}>
+                <Avatar slug={p.slug} expression={cur ? mood(p, 'think') : p.equipped} size={cur ? 56 : 44} />
               </motion.div>
               <span className="flex-1 font-display text-lg font-extrabold">
                 {p.nickname}
                 {id === meId && ' (toi)'}
               </span>
-              {first && <Badge tone="tomato">Commence !</Badge>}
+              {cur && <Badge tone="tomato">{'🎤 Il parle'}</Badge>}
             </motion.li>
           )
         })}
       </ol>
       {canStart ? (
-        <Button size="lg" fullWidth loading={pending} icon={<Vote className="size-6" />} onClick={() => void act(ucActions.startVote())}>
-          Tout le monde a parlé : au vote !
+        <Button size="lg" variant={allSpoke ? 'primary' : 'secondary'} fullWidth loading={pending} icon={<Vote className="size-6" />} onClick={() => void act(ucActions.startVote())}>
+          {allSpoke ? 'Tout le monde a parlé : on vote !' : 'Passer au vote maintenant'}
         </Button>
       ) : (
         <p className="text-center font-bold text-muted">
-          L’hôte lancera le vote quand tout le monde aura parlé.
-          {s.vote_unlock && unlockLeft > 0 && <> Sinon, tu pourras le lancer dans {Math.ceil(unlockLeft / 1000)} s.</>}
+          {allSpoke ? 'Le vote va s’ouvrir.' : 'Le vote s’ouvrira quand tout le monde aura parlé.'}
+          {!allSpoke && s.vote_unlock && unlockLeft > 0 && <> Sinon, tu pourras le lancer dans {Math.ceil(unlockLeft / 1000)} s.</>}
         </p>
       )}
     </>

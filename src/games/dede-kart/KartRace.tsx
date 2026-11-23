@@ -35,6 +35,17 @@ interface Props {
 export const fmtTime = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 const DRIFT_COLORS = ['#4CC9F0', '#FF8C42', '#B388FF']
 
+const AIDE_KEY = 'dede:aide:dede-kart:courses'
+const AIDE_MAX = 2
+/** Nombre de courses déjà lancées sur cet appareil (0 si stockage indisponible). */
+function lireCourses(): number {
+  try {
+    return Number(localStorage.getItem(AIDE_KEY)) || 0
+  } catch {
+    return 0
+  }
+}
+
 /** Une course : scène 3D plein écran + HUD (place, tour, chrono) + bouton Drift tactile. */
 export default function KartRace(p: Props) {
   const { track, laps, drivers, meId, localBots, goAt, now, autopilot, autoCut, showResults = true, children } = p
@@ -43,6 +54,18 @@ export default function KartRace(p: Props) {
   const [hud, setHud] = useState<Hud | null>(null)
   const done = useRef(false)
   const [muted, setMuted] = useState(false)
+  // aide aux commandes : seulement les 2 premières courses jouées sur cet appareil
+  const [aide] = useState(() => !!p.meId && !p.autopilot && lireCourses() < AIDE_MAX)
+  const aideCompte = useRef(false)
+  useEffect(() => {
+    if (!aide || aideCompte.current) return
+    aideCompte.current = true
+    try {
+      localStorage.setItem(AIDE_KEY, String(lireCourses() + 1))
+    } catch {
+      /* sans stockage : l'aide reste affichée, sans gêne */
+    }
+  }, [aide])
   // callbacks dans une ref : un nouveau rendu du parent ne recrée pas la scène
   const cb = useRef(p)
   cb.current = p
@@ -145,6 +168,23 @@ export default function KartRace(p: Props) {
                 <div className="font-display text-6xl font-extrabold text-sun [text-shadow:5px_5px_0_#1B1B2F]">PARTEZ !</div>
               )}
             </div>
+          )}
+          {aide && hud.phase === 'countdown' && (
+            <>
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex w-1/2 items-center justify-center border-r-4 border-dashed border-white/60 bg-white/15 p-4 text-center">
+                <span className="font-display text-2xl font-extrabold text-white [text-shadow:3px_3px_0_#1B1B2F]">
+                  <span className="block text-6xl">←</span>Touche ici pour tourner à gauche
+                </span>
+              </div>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex w-1/2 items-center justify-center bg-white/15 p-4 text-center">
+                <span className="font-display text-2xl font-extrabold text-white [text-shadow:3px_3px_0_#1B1B2F]">
+                  <span className="block text-6xl">→</span>Touche ici pour tourner à droite
+                </span>
+              </div>
+              <div className="pointer-events-none absolute bottom-[8.5rem] left-4 animate-bounce rounded-chip border-[3px] border-ink bg-sun px-3 py-1 font-display text-lg font-extrabold text-ink shadow-sticker-sm">
+                Ton bonus ! ↓
+              </div>
+            </>
           )}
           {hud.wrongWay && (
             <div className="pointer-events-none absolute inset-x-0 top-1/3 text-center font-display text-4xl font-extrabold text-tomato [text-shadow:3px_3px_0_#1B1B2F]">

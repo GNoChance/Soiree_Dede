@@ -457,10 +457,22 @@ function Lane({ s, meId, me, serverSheet, act, onBusy }: { s: BowlingState; meId
               <span className="sticker-sm bg-surface/90 px-2 py-0.5 text-center text-sm font-extrabold">
                 {throws < 2 ? 'Glisse vers le haut pour lancer · courbe = effet' : 'Glisse vers le haut !'}
               </span>
-              {throws < 2 && <span className="sticker-sm bg-surface/80 px-2 py-0.5 text-xs font-bold">↔ fais glisser la boule pour te placer</span>}
+              {throws < 2 && <span className="sticker-sm bg-surface/80 px-2 py-0.5 text-xs font-bold">↔️ Glisse la boule sur le côté pour te placer</span>}
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Démo du geste au 1er lancer : la main glisse vers le haut en courbe (= effet) */}
+        {flow === 'aim' && throws === 0 && (
+          <motion.span
+            aria-hidden
+            className="pointer-events-none absolute bottom-24 left-1/2 z-10 -ml-5 text-5xl drop-shadow-[2px_2px_0_white]"
+            animate={{ y: [0, -40, -90, -140, -140], x: [0, 4, 16, 30, 30], opacity: [0, 1, 1, 1, 0] }}
+            transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut', times: [0, 0.1, 0.5, 0.85, 1], repeatDelay: 0.5 }}
+          >
+            👆
+          </motion.span>
+        )}
 
         {flow === 'replay' && (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">

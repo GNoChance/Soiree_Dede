@@ -21,6 +21,7 @@ export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId
   const isActiveGuesser = role.team === s.turn && !role.spy
   const guessers = guessersOf(s, s.turn)
   const need = majority(guessers.length)
+  const [aideDev, closeAideDev] = useAide('devineurs')
 
   return (
     <div className="flex flex-col gap-2">
@@ -44,6 +45,14 @@ export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId
             {active.emoji} Les {active.short} devinent · {s.guesses_left} essai{s.guesses_left > 1 ? 's' : ''} restant{s.guesses_left > 1 ? 's' : ''}
           </p>
         </motion.div>
+      )}
+
+      {s.phase === 'guess' && isActiveGuesser && aideDev && (
+        <div className="rounded-chip border-[3px] border-ink bg-sun/30 p-2 text-sm leading-snug font-bold">
+          <p>Touche un mot pour y poser ta tête. Quand la majorité de l’équipe est d’accord sur le même mot, il se retourne.</p>
+          <p>Plus d’idée ? Appuie sur « Stop, on passe ».</p>
+          <button type="button" onClick={closeAideDev} className="mt-1 font-display font-extrabold underline">J’ai compris</button>
+        </div>
       )}
 
       {s.phase === 'guess' && isActiveGuesser && (
@@ -75,9 +84,31 @@ export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId
   )
 }
 
+/** Aide « premières fois » : visible tant que l'aide n'a pas été fermée (clé dede:aide:nom-de-code:<aide>). */
+function useAide(name: string): [boolean, () => void] {
+  const key = 'dede:aide:nom-de-code:' + name
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) !== 'ok'
+    } catch {
+      return true
+    }
+  })
+  const close = () => {
+    setOpen(false)
+    try {
+      localStorage.setItem(key, 'ok')
+    } catch {
+      /* sans stockage : l'aide reste refermable pour la session */
+    }
+  }
+  return [open, close]
+}
+
 function ClueForm({ s, act, pending }: { s: NdcState; act: GamePlayProps['act']; pending: boolean }) {
   const [word, setWord] = useState('')
   const [n, setN] = useState<number | null>(null)
+  const [aide, closeAide] = useAide('indice')
   const problem = word.trim() ? clueProblem(word, n ?? 1, s) : null
   const send = async () => {
     if (n === null || problem) return
@@ -90,6 +121,14 @@ function ClueForm({ s, act, pending }: { s: NdcState; act: GamePlayProps['act'];
   return (
     <div className="sticker flex flex-col gap-2 rounded-card bg-surface p-3">
       <p className="font-display text-lg font-extrabold">🕵️ À toi ! Un mot pour relier plusieurs mots de ton équipe</p>
+      {aide && (
+        <div className="rounded-chip border-[3px] border-ink bg-sun/30 p-2 text-sm leading-snug font-bold">
+          <p>Exemple : la grille a POMME, BANANE, CERISE → écris « FRUIT » et choisis 3.</p>
+          <p>Autre exemple : LUNE et SOLEIL → « CIEL », 2.</p>
+          <p>Interdit : un mot qui est écrit sur la grille.</p>
+          <button type="button" onClick={closeAide} className="mt-1 font-display font-extrabold underline">J’ai compris</button>
+        </div>
+      )}
       <input
         value={word}
         onChange={(e) => setWord(e.target.value)}

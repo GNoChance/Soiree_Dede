@@ -10,7 +10,7 @@ import { ChibiImage } from '@/components/ui/ChibiImage'
 import { burst } from '@/components/ui/confetti'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
-import { DropCard } from '@/features/soiree/components'
+import { ConfirmModal, DropCard } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import { useTv } from '@/features/tv/tv'
@@ -219,6 +219,7 @@ function QuestionPhase({ s, meId, isHost, get, act }: { s: CefState; meId: strin
   const done = !!myFound || iPassed || iMissed
   const zoneRef = useRef<HTMLDivElement>(null)
   const [passing, setPassing] = useState(false)
+  const [confirmReveal, setConfirmReveal] = useState(false)
 
   // Célébration quand je trouve (réponse RPC ou Realtime, une seule fois).
   const celebrated = useRef(false)
@@ -266,12 +267,35 @@ function QuestionPhase({ s, meId, isHost, get, act }: { s: CefState; meId: strin
             Je passe 🏳️
           </Button>
         )}
-        {isHost && (
-          <Button variant="ghost" className={cn(isPlayer && !done ? '' : 'flex-1')} icon={<SkipForward className="size-5" />} onClick={() => void act(cefActions.skip(s.round))}>
+      </div>
+      {isHost && (
+        <div className="mt-4 flex items-center justify-between gap-2 border-t-2 border-dashed border-ink/30 pt-2">
+          <span className="text-xs font-bold text-muted">Hôte</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<SkipForward className="size-4" />}
+            onClick={() => {
+              if (isPlayer && !done) setConfirmReveal(true)
+              else void act(cefActions.skip(s.round))
+            }}
+          >
             ⏭ Révéler la réponse
           </Button>
-        )}
-      </div>
+        </div>
+      )}
+      <ConfirmModal
+        open={confirmReveal}
+        onClose={() => setConfirmReveal(false)}
+        title="Révéler la réponse ?"
+        confirmLabel="Révéler"
+        onConfirm={() => {
+          setConfirmReveal(false)
+          void act(cefActions.skip(s.round))
+        }}
+      >
+        La question s’arrête pour tout le monde, toi compris.
+      </ConfirmModal>
     </>
   )
 }

@@ -201,6 +201,47 @@ function SignsScreen({ s, meId, sec, players, act }: { s: KemsState; meId: strin
 
 type Sel = { zone: 'hand' | 'center'; id: string } | null
 
+const AIDE_KEY = 'dede:aide:kems:tour'
+const AIDE_ETAPES = [
+  '1. Touche une carte de ta main, puis une carte du milieu pour les échanger.',
+  '2. Plus personne ne veut échanger ? Appuie sur « 🧹 Suivantes ».',
+  '3. Tu as 4 cartes pareilles ? Fais ton signe à ton coéquipier… et crie KEMS ! (Maintiens le bouton KEMS un instant.)',
+]
+
+/** Aide en 3 bulles successives, aux premières parties seulement (refermable). */
+function AideKems() {
+  const [step, setStep] = useState(() => {
+    try {
+      return localStorage.getItem(AIDE_KEY) ? -1 : 0
+    } catch {
+      return 0
+    }
+  })
+  if (step < 0) return null
+  const close = () => {
+    try {
+      localStorage.setItem(AIDE_KEY, '1')
+    } catch {
+      /* rendu correct sans stockage */
+    }
+    setStep(-1)
+  }
+  const last = step >= AIDE_ETAPES.length - 1
+  return (
+    <div className="sticker flex items-center gap-2 rounded-card bg-sun p-2.5 text-[#1f1b2e]" role="note">
+      <p className="min-w-0 flex-1 text-sm font-extrabold">💡 {AIDE_ETAPES[step]}</p>
+      <button type="button" onClick={last ? close : () => setStep(step + 1)} className="sticker-sm shrink-0 rounded-chip bg-white px-3 py-1.5 text-sm font-extrabold">
+        {last ? 'Compris !' : 'Suivant →'}
+      </button>
+      {!last && (
+        <button type="button" onClick={close} aria-label="Fermer l’aide" className="shrink-0 px-1 text-lg font-extrabold">
+          ✕
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** `above` / `signSlot` : ajouts du mode solo (bots + bouton « Faire le signe »), absents en soirée. */
 export function PlayingScreen({ s, meId, sec, players, act, above, signSlot }: { s: KemsState; meId: string; sec: KemsSecret | null; players: Record<string, PlayerInfo>; act: GamePlayProps['act']; above?: ReactNode; signSlot?: ReactNode }) {
   const team = teamOf(s, meId)
@@ -280,6 +321,7 @@ export function PlayingScreen({ s, meId, sec, players, act, above, signSlot }: {
     <div className="flex flex-col gap-2.5">
       {above}
       <ScorePills s={s} meTeam={team?.id} />
+      {team && <AideKems />}
 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">

@@ -150,6 +150,24 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
 
   const meOut = s.out.includes(meId)
   const myLastCard = s.last_card?.[meId]
+  const [lcSeen, setLcSeen] = useState(() => {
+    try {
+      return Number(localStorage.getItem('dede:aide:pas-de-bol:derniere-carte') ?? '0')
+    } catch {
+      return 0
+    }
+  })
+  const showLcHelp = isPlayer && !meOut && myTurn && s.turn_phase === 'play' && hand.length === 2 && lcSeen < 3
+  useEffect(() => {
+    if (!showLcHelp) return
+    try {
+      localStorage.setItem('dede:aide:pas-de-bol:derniere-carte', String(lcSeen + 1))
+    } catch {
+      /* sans stockage : aide toujours affichée */
+    }
+    // compte une fois par apparition
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLcHelp])
   const openOthers = Object.entries(s.last_card ?? {})
     .filter(([id, st]) => st === 'open' && id !== meId)
     .map(([id]) => id)
@@ -199,7 +217,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
               className="sticker flex items-center gap-3 bg-tomato p-2 pr-4 text-left text-white"
             >
               <Avatar slug={get(id).slug} expression={mood(get(id), 'sly')} size={44} />
-              <span className="flex-1 font-display text-lg leading-tight font-extrabold">{get(id).nickname} n’a pas dit « Dernière carte ! »</span>
+              <span className="flex-1 font-display text-lg leading-tight font-extrabold">🚨 {get(id).nickname} a oublié ! Dénonce-le !</span>
               <span className="flex items-center gap-1 rounded-full border-2 border-ink bg-sun px-3 py-1 font-display font-extrabold text-[#1f1b2e]">
                 <Siren className="size-4" /> Dénoncer !
               </span>
@@ -223,6 +241,13 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
             Dernière carte !
           </Button>
         </motion.div>
+      )}
+
+      {showLcHelp && (
+        <div className="sticker bg-sun p-2 text-center text-sm leading-snug font-bold text-[#1f1b2e]">
+          Quand tu poses ton avant-dernière carte, appuie aussitôt sur « Dernière carte ! » sinon on peut te dénoncer (+2 cartes).
+          <button type="button" onClick={() => setLcSeen(99)} className="ml-2 font-display font-extrabold underline">OK</button>
+        </div>
       )}
 
       {isPlayer && !meOut && (

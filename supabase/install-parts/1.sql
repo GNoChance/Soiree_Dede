@@ -1446,6 +1446,7 @@ begin
       'order', to_jsonb(v_order),
       'alive', to_jsonb(v_order),
       'starter', v_order[1],
+      'spoken', '[]'::jsonb,
       'setup', jsonb_build_object('civils', v_n - v_n_uc - (case when v_mw then 1 else 0 end),
                                   'undercovers', v_n_uc, 'mister_white', v_mw),
       'voters', '[]'::jsonb,
@@ -1645,6 +1646,7 @@ begin
     'phase', 'describe',
     'round', (p_state->>'round')::integer + 1,
     'starter', v_starter,
+    'spoken', '[]'::jsonb,
     'current_elimination', null,
     'mrwhite_guess', null,
     'voters', '[]'::jsonb,
@@ -1654,6 +1656,27 @@ begin
     'vote_unlock', to_jsonb(now() + interval '90 seconds'));
   p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
   return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Orateur courant : premier joueur vivant, dans l'ordre de parole (à partir du starter), absent de 'spoken'.
+create or replace function public._uc_speaker(p_state jsonb)
+returns text language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_order text[] := array(select jsonb_array_elements_text(p_state->'order'));
+  v_n     integer := cardinality(v_order);
+  v_idx   integer := coalesce(array_position(v_order, p_state->>'starter'), 1);
+  v_id    text;
+  j       integer;
+begin
+  for j in 0 .. v_n - 1 loop
+    v_id := v_order[((v_idx - 1 + j) % v_n) + 1];
+    if (p_state->'alive') ? v_id and not (coalesce(p_state->'spoken', '[]'::jsonb) ? v_id) then
+      return v_id;
+    end if;
+  end loop;
+  return null;
 end $$;
 
 -- Ouvre le vote (host, ou joueur vivant après le délai de description).
@@ -1721,9 +1744,23 @@ begin
     -- L'hôte à tout moment ; un joueur vivant seulement une fois le délai de description écoulé.
     if not p_is_host then
       if not ((p_state->'alive') ? v_actor) then raise exception 'not_host'; end if;
-      if v_unlock is not null and now() < v_unlock then raise exception 'not_host'; end if;
+      -- Tout le monde a parlé (ordre de parole terminé) : plus besoin d'attendre.
+      if not (p_state ? 'spoken' and public._uc_speaker(p_state) is null)
+         and v_unlock is not null and now() < v_unlock then raise exception 'not_host'; end if;
     end if;
     return public._uc_open_vote(p_state, p_server);
+
+  elsif v_type = 'spoke' then
+    -- « J'ai parlé » : l'orateur courant (ou l'hôte à sa place) passe au suivant. Idempotent.
+    if v_phase <> 'describe' then raise exception 'wrong_phase'; end if;
+    v_target := coalesce(nullif(p_action->>'player', ''), public._uc_speaker(p_state));
+    if v_target is null or not ((p_state->'alive') ? v_target)
+       or (coalesce(p_state->'spoken', '[]'::jsonb) ? v_target) then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    if v_target <> v_actor and not p_is_host then raise exception 'not_host'; end if;
+    p_state := jsonb_set(p_state, '{spoken}', coalesce(p_state->'spoken', '[]'::jsonb) || to_jsonb(v_target), true);
+    return jsonb_build_object('state', p_state, 'server', p_server);
 
   elsif v_type = 'vote' then
     if v_phase <> 'vote' then raise exception 'wrong_phase'; end if;
@@ -2066,6 +2103,7 @@ revoke all on function public._uc_finish(jsonb, jsonb, text) from public, anon, 
 revoke all on function public._uc_tally(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._uc_next(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._uc_open_vote(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._uc_speaker(jsonb) from public, anon, authenticated;
 revoke all on function public._uc_guess_failed(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_undercover_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 revoke all on function public._game_fn(text, text, text) from public, anon, authenticated;
@@ -4884,78 +4922,3 @@ grant execute on function public.submit_idea(text, boolean) to authenticated;
 grant execute on function public.admin_list_ideas() to authenticated;
 grant execute on function public.admin_set_idea_status(uuid, text) to authenticated;
 grant execute on function public.admin_delete_idea(uuid) to authenticated;
-
-
--- ===== features\membres.sql =====
--- =============================================================================
--- NOUVEAUX MEMBRES DE LA BANDE — idempotent, exécuté APRÈS guest.sql (ordre alphabétique : _guest_avatars).
--- L'admin ajoute une vraie personne à la bande (pas un invité : is_guest = false, donc classements,
--- stats, trophées, boutique… comme les 9 autres). Pas encore de chibi : avatar emoji (mêmes ids que
--- les invités, cf. src/data/guests.ts), slug « m-<avatar>-<6 car.> ».
--- Pas de PIN : à sa première connexion (login_profile), le code saisi devient son code.
--- Passer en chibi plus tard : voir docs/ARCHITECTURE.md (renommer le slug + catalogue des persos).
--- Erreurs : forbidden, invalid_first_name, invalid_nickname, invalid_avatar, nickname_taken, unknown_profile.
--- =============================================================================
-
-create or replace function public.admin_create_member(p_first_name text, p_nickname text, p_avatar text)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_first text := btrim(regexp_replace(coalesce(p_first_name, ''), '\s+', ' ', 'g'));
-  v_nick  text := btrim(regexp_replace(coalesce(p_nickname, ''), '\s+', ' ', 'g'));
-  v_av    text := lower(btrim(coalesce(p_avatar, '')));
-  v_alpha constant text := 'abcdefghjkmnpqrstuvwxyz23456789';
-  v_slug  text;
-  v_id    uuid;
-begin
-  perform public._require_admin();
-  if char_length(v_first) < 1 or char_length(v_first) > 30 then raise exception 'invalid_first_name'; end if;
-  if char_length(v_nick) < 1 or char_length(v_nick) > 20 then raise exception 'invalid_nickname'; end if;
-  if not (v_av = any(public._guest_avatars())) then raise exception 'invalid_avatar'; end if;
-
-  perform pg_advisory_xact_lock(hashtext('admin_create_member'));
-  if exists (select 1 from public.profiles where not is_guest and lower(nickname) = lower(v_nick)) then
-    raise exception 'nickname_taken';
-  end if;
-
-  loop
-    select 'm-' || v_av || '-' || string_agg(substr(v_alpha, 1 + floor(random() * length(v_alpha))::integer, 1), '')
-      into v_slug from generate_series(1, 6);
-    exit when not exists (select 1 from public.profiles where slug = v_slug);
-  end loop;
-
-  insert into public.profiles(slug, first_name, nickname, expressions, sort_order)
-  values (v_slug, v_first, v_nick,
-          array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','amoureux','cool','gamer'],
-          coalesce((select max(sort_order) from public.profiles where not is_guest), 0) + 1)
-  returning id into v_id;
-  return public._profile_json(v_id);
-end $$;
-
--- Change l'emoji d'un membre « m-… » (le slug porte l'avatar ; le suffixe aléatoire est conservé).
-create or replace function public.admin_update_member_avatar(p_profile uuid, p_avatar text)
-returns jsonb language plpgsql security definer
-set search_path = public, extensions
-as $$
-declare
-  v_av   text := lower(btrim(coalesce(p_avatar, '')));
-  v_p    public.profiles%rowtype;
-  v_slug text;
-begin
-  perform public._require_admin();
-  if not (v_av = any(public._guest_avatars())) then raise exception 'invalid_avatar'; end if;
-  select * into v_p from public.profiles where id = p_profile and slug like 'm-%' and not is_guest;
-  if not found then raise exception 'unknown_profile'; end if;
-  v_slug := 'm-' || v_av || '-' || split_part(v_p.slug, '-', 3);
-  if v_slug <> v_p.slug then
-    update public.profiles set slug = v_slug where id = v_p.id;
-    update public.login_attempts set slug = v_slug where slug = v_p.slug;
-  end if;
-  return public._profile_json(v_p.id);
-end $$;
-
-revoke all on function public.admin_create_member(text, text, text) from public, anon;
-revoke all on function public.admin_update_member_avatar(uuid, text) from public, anon;
-grant execute on function public.admin_create_member(text, text, text) to authenticated;
-grant execute on function public.admin_update_member_avatar(uuid, text) to authenticated;

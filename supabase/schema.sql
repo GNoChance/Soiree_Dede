@@ -1443,6 +1443,7 @@ begin
       'order', to_jsonb(v_order),
       'alive', to_jsonb(v_order),
       'starter', v_order[1],
+      'spoken', '[]'::jsonb,
       'setup', jsonb_build_object('civils', v_n - v_n_uc - (case when v_mw then 1 else 0 end),
                                   'undercovers', v_n_uc, 'mister_white', v_mw),
       'voters', '[]'::jsonb,
@@ -1642,6 +1643,7 @@ begin
     'phase', 'describe',
     'round', (p_state->>'round')::integer + 1,
     'starter', v_starter,
+    'spoken', '[]'::jsonb,
     'current_elimination', null,
     'mrwhite_guess', null,
     'voters', '[]'::jsonb,
@@ -1651,6 +1653,27 @@ begin
     'vote_unlock', to_jsonb(now() + interval '90 seconds'));
   p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
   return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Orateur courant : premier joueur vivant, dans l'ordre de parole (à partir du starter), absent de 'spoken'.
+create or replace function public._uc_speaker(p_state jsonb)
+returns text language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_order text[] := array(select jsonb_array_elements_text(p_state->'order'));
+  v_n     integer := cardinality(v_order);
+  v_idx   integer := coalesce(array_position(v_order, p_state->>'starter'), 1);
+  v_id    text;
+  j       integer;
+begin
+  for j in 0 .. v_n - 1 loop
+    v_id := v_order[((v_idx - 1 + j) % v_n) + 1];
+    if (p_state->'alive') ? v_id and not (coalesce(p_state->'spoken', '[]'::jsonb) ? v_id) then
+      return v_id;
+    end if;
+  end loop;
+  return null;
 end $$;
 
 -- Ouvre le vote (host, ou joueur vivant après le délai de description).
@@ -1718,9 +1741,23 @@ begin
     -- L'hôte à tout moment ; un joueur vivant seulement une fois le délai de description écoulé.
     if not p_is_host then
       if not ((p_state->'alive') ? v_actor) then raise exception 'not_host'; end if;
-      if v_unlock is not null and now() < v_unlock then raise exception 'not_host'; end if;
+      -- Tout le monde a parlé (ordre de parole terminé) : plus besoin d'attendre.
+      if not (p_state ? 'spoken' and public._uc_speaker(p_state) is null)
+         and v_unlock is not null and now() < v_unlock then raise exception 'not_host'; end if;
     end if;
     return public._uc_open_vote(p_state, p_server);
+
+  elsif v_type = 'spoke' then
+    -- « J'ai parlé » : l'orateur courant (ou l'hôte à sa place) passe au suivant. Idempotent.
+    if v_phase <> 'describe' then raise exception 'wrong_phase'; end if;
+    v_target := coalesce(nullif(p_action->>'player', ''), public._uc_speaker(p_state));
+    if v_target is null or not ((p_state->'alive') ? v_target)
+       or (coalesce(p_state->'spoken', '[]'::jsonb) ? v_target) then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    if v_target <> v_actor and not p_is_host then raise exception 'not_host'; end if;
+    p_state := jsonb_set(p_state, '{spoken}', coalesce(p_state->'spoken', '[]'::jsonb) || to_jsonb(v_target), true);
+    return jsonb_build_object('state', p_state, 'server', p_server);
 
   elsif v_type = 'vote' then
     if v_phase <> 'vote' then raise exception 'wrong_phase'; end if;
@@ -2063,6 +2100,7 @@ revoke all on function public._uc_finish(jsonb, jsonb, text) from public, anon, 
 revoke all on function public._uc_tally(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._uc_next(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._uc_open_vote(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._uc_speaker(jsonb) from public, anon, authenticated;
 revoke all on function public._uc_guess_failed(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_undercover_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 revoke all on function public._game_fn(text, text, text) from public, anon, authenticated;

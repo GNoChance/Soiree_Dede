@@ -6,6 +6,8 @@
 
 export const ucActions = {
   startVote: () => ({ type: 'start_vote' }),
+  /** « J'ai parlé » : passe l'orateur au suivant (player = l'orateur visé, pour l'idempotence). */
+  spoke: (player: string) => ({ type: 'spoke', player }),
   vote: (target: string) => ({ type: 'vote', target }),
   closeVote: () => ({ type: 'close_vote' }),
   guess: (word: string) => ({ type: 'guess', word: word.trim().slice(0, 60) }),

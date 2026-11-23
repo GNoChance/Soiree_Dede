@@ -13,6 +13,7 @@ import { fmtSec } from './minigames/common'
 import { eventLabel, introLine, mechChip, type BoardView, type EpiView } from './anim'
 import { boardOf, SIZE_LABEL, type BoardDef } from './board'
 import { MgClip } from './MgClip'
+import { RulesCarousel } from './RulesCarousel'
 import { DedeHost, Die, type Get } from './Parts'
 import { RITON_DIE_MS, WASH_AT_MS, type DedePartyState, type DpMech, type DpMg, type DpMgResult } from './types'
 
@@ -64,6 +65,7 @@ export function IntroScreen({ s, get, big }: { s: DedePartyState; get: Get; big?
           )
         })}
       </div>
+      {!big && <RulesCarousel />}
       <p className={cn('font-bold text-muted', big ? 'text-2xl' : 'text-sm')}>
         {s.rounds} tours · le plus d’étoiles ⭐ gagne · 30 🪙 = 1 étoile (la 1re à 15 !)
       </p>
