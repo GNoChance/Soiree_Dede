@@ -14,6 +14,8 @@ import { PronosResult } from '@/features/pronos/PronosResult'
 import { TrophyUnlockReveal } from '@/features/trophees/TrophyReveal'
 import { TenueUnlockReveal, UnlockReveal } from './components'
 import { mood, playerOrPlaceholder } from './players'
+import type { SoireeData } from './hooks'
+import { RematchButton } from './RematchButton'
 
 function CountUp({ to, delay = 0 }: { to: number; delay?: number }) {
   const ref = useRef<HTMLSpanElement>(null)
@@ -35,7 +37,7 @@ function CountUp({ to, delay = 0 }: { to: number; delay?: number }) {
 const PODIUM_H = { 1: 'h-28', 2: 'h-20', 3: 'h-14' } as const
 const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' } as const
 
-export function ResultsScreen({ matchId, state, meId, players, game, onBack }: { matchId: string; state: BaseGameState; meId: string; players: Record<string, PlayerInfo>; game: GameDefinition | undefined; onBack: () => void }) {
+export function ResultsScreen({ matchId, state, meId, players, game, onBack, rematch }: { matchId: string; state: BaseGameState; meId: string; players: Record<string, PlayerInfo>; game: GameDefinition | undefined; onBack: () => void; rematch?: { soireeData: SoireeData | null; onStarted: (matchId: string, game: string) => void } }) {
   const results = [...(state.results ?? [])].sort((a, b) => a.placement - b.placement)
   const me = results.find((r) => r.profile_id === meId)
   const xp = state.xp_gained?.[meId] ?? 0
@@ -164,7 +166,9 @@ export function ResultsScreen({ matchId, state, meId, players, game, onBack }: {
         </Suspense>
       )}
 
-      <Button size="lg" fullWidth icon={<Home className="size-6" />} onClick={onBack}>
+      {rematch && <RematchButton matchId={matchId} game={game} meId={meId} soireeData={rematch.soireeData} resultIds={results.map((r) => r.profile_id)} onStarted={rematch.onStarted} />}
+
+      <Button size="lg" fullWidth variant={rematch ? 'secondary' : undefined} icon={<Home className="size-6" />} onClick={onBack}>
         Retour au salon
       </Button>
 

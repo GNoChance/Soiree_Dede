@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { saveLaunch, type LauncherPreset } from '@/features/soiree/rematch'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -40,6 +41,8 @@ import { ChallengeLaunchCard } from '@/features/mises/ChallengeLaunchCard'
 export function SoireePage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  /** Revanche impossible en un clic : lanceur pré-rempli sur le jeu de la partie finie. */
+  const preset = (useLocation().state as { preset?: LauncherPreset } | null)?.preset
   const meId = useSession((s) => s.profile?.id) ?? ''
   const { data, loading, notFound } = useSoiree(id)
   const { match, loaded: matchLoaded } = useCurrentMatch(id)
@@ -227,6 +230,7 @@ export function SoireePage() {
             meId={meId}
             busy={Boolean(match) || Boolean(launching)}
             launchReq={launchReq}
+            preset={preset}
             onSpin={async (ids) => {
               const { spin, error } = await spinWheel(soiree.id, ids)
               if (error || !spin) return toastError(error)
@@ -507,7 +511,7 @@ function WaitingCard({ hostName, meSlug }: { hostName: string; meSlug?: string }
 
 const LAST_GAME_KEY = 'dede:last-game'
 
-function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, idleDeadline, onBarHeight, onStarted }: { launchReq: { id: string; n: number } | null; onSpin: (gameIds: string[]) => Promise<void>; soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; idleDeadline: string | null; onBarHeight: (h: number) => void; onStarted: (matchId: string, game: string) => void }) {
+function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, preset, onSpin, idleDeadline, onBarHeight, onStarted }: { preset?: LauncherPreset; launchReq: { id: string; n: number } | null; onSpin: (gameIds: string[]) => Promise<void>; soireeId: string; playerIds: string[]; byId: ReturnType<typeof usePlayers>['byId']; meId: string; busy: boolean; idleDeadline: string | null; onBarHeight: (h: number) => void; onStarted: (matchId: string, game: string) => void }) {
   // Hauteur réelle de la barre fixée (police agrandie, compte à rebours, message d'erreur…).
   const barRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -523,6 +527,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
     }
   }, [onBarHeight])
   const [gameId, setGameId] = useState<string>(() => {
+    if (preset && getGame(preset.gameId)) return preset.gameId
     try {
       return getGame(localStorage.getItem(LAST_GAME_KEY) ?? '')?.id ?? GAMES[0].id
     } catch {
@@ -530,7 +535,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
     }
   })
   const game = getGame(gameId) as GameDefinition
-  const [optionsByGame, setOptionsByGame] = useState<Record<string, Record<string, unknown>>>({})
+  const [optionsByGame, setOptionsByGame] = useState<Record<string, Record<string, unknown>>>(() => (preset?.options && getGame(preset.gameId) ? { [preset.gameId]: preset.options } : {}))
   const options = optionsByGame[gameId] ?? game.defaultOptions ?? {}
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
   const [starting, setStarting] = useState(false)
@@ -579,6 +584,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, onSpin, i
         /* ignore */
       }
       pronosOpenRef.current = false
+      saveLaunch(data as string, { gameId: game.id, options, playerIds: playing })
       onStarted(data as string, game.id)
     } catch (e) {
       toastError(e)

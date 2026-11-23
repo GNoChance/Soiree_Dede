@@ -15,6 +15,7 @@ import { soireeEndCopy, useCurrentMatch, useGameAction, useMatch, useSoiree, use
 import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
 import { ConfirmModal, LaunchCountdown } from '@/features/soiree/components'
 import { ResultsScreen } from '@/features/soiree/ResultsScreen'
+import { Reactions } from '@/features/reactions/Reactions'
 import { SpectatorBanner } from '@/features/spectate/SpectatorBanner'
 import { WagerCard } from '@/features/mises/WagerCard'
 import { readOnlyAct, useSpectator } from '@/features/spectate/useSpectator'
@@ -155,7 +156,7 @@ export function MatchPage() {
           </Button>
         </Card>
       ) : finished ? (
-        <ResultsScreen key={match.id} matchId={match.id} state={state} meId={meId} players={byId} game={game} onBack={backToSalon} />
+        <ResultsScreen key={match.id} matchId={match.id} state={state} meId={meId} players={byId} game={game} onBack={backToSalon} rematch={outsider || next ? undefined : { soireeData, onStarted: (id, g) => setNext((n) => n ?? { id, game: g }) }} />
       ) : Play && soireeId ? (
         <Suspense fallback={<PlaySkeleton />}>
           <Play
@@ -174,6 +175,8 @@ export function MatchPage() {
       ) : (
         <p className="text-center text-muted">Ce jeu n’est pas disponible dans cette version de l’app.</p>
       )}
+
+      {!finished && !aborted && meId && <Reactions matchId={match.id} meId={meId} />}
 
       <ConfirmModal
         open={confirmAbort}

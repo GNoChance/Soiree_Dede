@@ -13,6 +13,7 @@ import { useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree }
 import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
 import { TvContext, TV_VIEWER_ID, readOnlyAct } from '@/features/tv/tv'
 import { isDuelState } from '@/features/duel/tv'
+import { Reactions } from '@/features/reactions/Reactions'
 import { useWakeLock } from '@/lib/wakeLock'
 import { cn } from '@/lib/cn'
 
@@ -211,6 +212,7 @@ export function TvPage() {
         </button>
       </header>
       <main className={cn('relative min-h-0 flex-1')}>{body}</main>
+      {shownId && !finished && <Reactions matchId={shownId} meId={TV_VIEWER_ID} interactive={false} big />}
       {!fs.on && !shownId && loaded && !notFound && !soireeEnded && (
         <div className="shrink-0 p-3 text-center">
           <Button variant="ghost" size="sm" onClick={exit}>
