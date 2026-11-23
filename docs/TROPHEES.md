@@ -534,7 +534,7 @@ Tenue débloquée à **5 victoires** (partie longue). Compteurs posés par le se
 | 7 | `party_chouchou` | Chouchou de Dédé | Ouvrir 10 enveloppes surprise (cumul) | `envelopes` (somme ≥ 10) ✅ |
 | 8 | `party_pile_dessus` | Pile dessus | Acheter une étoile en s'arrêtant exactement sur sa case | `star_exact` (somme ≥ 1) ✅ |
 | 9 | `party_triple` | Le triplé | Gagner 3 mini-jeux d'affilée | `mg_streak` (max ≥ 3) ✅ |
-| 10 | `party_constellation` | Constellation | Finir une partie avec 4 étoiles ou plus | `stars` (max ≥ 4) ✅ |
+| 10 | `party_constellation` | Constellation | Finir avec plein d’étoiles : 3 ★ en 6 tours, 4 ★ en 9, 5 ★ en 12 (à 5 joueurs et plus : 3, 3 et 4 ★) | `constellation` (seuil selon durée et table, ~10-25 % des joueurs) ✅ |
 | 11 | `party_carton_plein` | Carton plein | Gagner la partie en étant aussi Roi des mini-jeux | `win_mvp` (somme ≥ 1) ✅ |
 | 12 | `party_star_ecran` | Star du petit écran | Gagner 10 parties (cumul) | `won` (somme ≥ 10) ✅ |
 

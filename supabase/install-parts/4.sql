@@ -1232,9 +1232,16 @@ declare
   s     jsonb := coalesce(p_state->'stats'->p_pid, '{}'::jsonb);
   v_st  integer := coalesce((p_state->'stars'->>p_pid)::integer, 0);
   v_king boolean := coalesce((s->>'king')::integer, 0) = 1;
+  -- Constellation : seuil d'étoiles selon la durée et la table (~10-25 % des joueurs partout, cf. simulation) :
+  -- 2-4 joueurs : 3 / 4 / 5 ★ en 6 / 9 / 12 tours ; 5-8 joueurs : 3 / 3 / 4 ★.
+  v_rounds integer := coalesce((p_state->>'rounds')::integer, 9);
+  v_n      integer := (select count(*)::integer from jsonb_object_keys(coalesce(p_state->'stars', '{}'::jsonb)));
+  v_need   integer := case when v_n <= 4 then case when v_rounds <= 6 then 3 when v_rounds <= 9 then 4 else 5 end
+                           else case when v_rounds <= 9 then 3 else 4 end end;
 begin
   return jsonb_build_object(
     'stars', v_st,
+    'constellation', case when v_st >= v_need then 1 else 0 end,
     'coins', coalesce((p_state->'coins'->>p_pid)::integer, 0),
     'rounds', coalesce((p_state->>'round')::integer, 0),
     'pubs', coalesce((s->>'pubs')::integer, 0),

@@ -1008,6 +1008,17 @@ const fr = (id) => fin.results.find((x) => x.profile_id === id)
 ok('fin de la cérémonie → finished + results', fin.state.phase === 'finished' && fin.results.length === 4 && fin.state.results.length === 4)
 ok('placement = rang, points = n − rang + 1, won = rang 1', fr(C).placement === 1 && fr(C).points === 4 && fr(C).won && fr(D).placement === 4 && fr(D).points === 1 && !fr(B).won)
 ok('stats : Carton plein (vainqueur + Roi), Constellation, Ciel couvert', fr(C).stats.win_mvp === 1 && fr(A).stats.win_mvp === 0 && fr(C).stats.stars === 3 && fr(D).stats.no_star === 1 && fr(C).stats.no_star === 0)
+// Constellation : seuil selon la durée et le nombre de joueurs (2-4 j : 3/4/5 ★ en 6/9/12 tours ; 5-8 j : 3/3/4 ★).
+const cst = async (n, rounds, stars) => {
+  const ids = Array.from({ length: n }, (_, i) => `p${i}`)
+  const st = { rounds, round: rounds, stars: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? stars : 0])) }
+  return (await db.query(`select public._dp_tstats($1::jsonb, 'p0', false)->>'constellation' c`, [JSON.stringify(st)])).rows[0].c
+}
+ok('Constellation 4 j : 3★/6 t oui, 2★/6 t non', (await cst(4, 6, 3)) === '1' && (await cst(4, 6, 2)) === '0')
+ok('Constellation 4 j : 4★/9 t oui, 3★/9 t non', (await cst(4, 9, 4)) === '1' && (await cst(4, 9, 3)) === '0')
+ok('Constellation 2 j : 5★/12 t oui, 4★/12 t non', (await cst(2, 12, 5)) === '1' && (await cst(2, 12, 4)) === '0')
+ok('Constellation 6 j : 3★/9 t oui, 2★/9 t non', (await cst(6, 9, 3)) === '1' && (await cst(6, 9, 2)) === '0')
+ok('Constellation 8 j : 4★/12 t oui, 3★/12 t non ; 3★/6 t oui', (await cst(8, 12, 4)) === '1' && (await cst(8, 12, 3)) === '0' && (await cst(8, 6, 3)) === '1')
 const tieW = patch(W, { stars: map([A, B, C, D], [1, 1, 0, 0]), coins: map([A, B, C, D], [10, 10, 5, 5]), stats: map([A, B, C, D], { mg_wins: 0, pubs: 0 }) })
 const tie = must(await act(late(must(await act(late(tieW), A, tick), 'tieA')), A, tick), 'tieF')
 ok('égalité parfaite : victoire partagée (rang 1 ×2, rang 3 ×2), pas d’étoile bonus sans mini-jeu gagné ni pub', tie.results.filter((x) => x.won).length === 2 && tie.results.find((x) => x.profile_id === C).placement === 3 && tie.state.awards.every((x) => x.ids.length === 0))

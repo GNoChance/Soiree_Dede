@@ -293,7 +293,7 @@ export const TROPHIES: TrophyDef[] = [
   { id: "party_chouchou", tenue: "host", slot: 7, name: "Chouchou de Dédé", condition: "Ouvrir 10 enveloppes surprise (cumul)", game: "dede-party", active: true, target: 10 },
   { id: "party_pile_dessus", tenue: "host", slot: 8, name: "Pile dessus", condition: "Acheter une étoile en s'arrêtant exactement sur sa case", game: "dede-party", active: true, target: 1 },
   { id: "party_triple", tenue: "host", slot: 9, name: "Le triplé", condition: "Gagner 3 mini-jeux d'affilée", game: "dede-party", active: true, target: 3 },
-  { id: "party_constellation", tenue: "host", slot: 10, name: "Constellation", condition: "Finir une partie avec 4 étoiles ou plus", game: "dede-party", active: true, target: 4 },
+  { id: "party_constellation", tenue: "host", slot: 10, name: "Constellation", condition: "Finir avec plein d’étoiles : 3 ★ en 6 tours, 4 ★ en 9, 5 ★ en 12 (à 5 joueurs et plus : 3, 3 et 4 ★)", game: "dede-party", active: true, target: 1 },
   { id: "party_carton_plein", tenue: "host", slot: 11, name: "Carton plein", condition: "Gagner la partie en étant aussi Roi des mini-jeux", game: "dede-party", active: true, target: 1 },
   { id: "party_star_ecran", tenue: "host", slot: 12, name: "Star du petit écran", condition: "Gagner 10 parties (cumul)", game: "dede-party", active: true, target: 10 },
   { id: "gen_touche_a_tout", tenue: null, slot: null, name: "Touche-à-tout", condition: "Jouer à 10 jeux différents", game: null, active: true, target: 10 },

@@ -612,7 +612,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('party_chouchou', 'host', 7, 'Chouchou de Dédé', 'Ouvrir 10 enveloppes surprise (cumul)', 'dede-party', '{"agg":"sum","stat":"envelopes","threshold":10}'::jsonb, true, 2505),
   ('party_pile_dessus', 'host', 8, 'Pile dessus', 'Acheter une étoile en s''arrêtant exactement sur sa case', 'dede-party', '{"agg":"sum","stat":"star_exact","threshold":1}'::jsonb, true, 2506),
   ('party_triple', 'host', 9, 'Le triplé', 'Gagner 3 mini-jeux d''affilée', 'dede-party', '{"agg":"max","stat":"mg_streak","threshold":3}'::jsonb, true, 2507),
-  ('party_constellation', 'host', 10, 'Constellation', 'Finir une partie avec 4 étoiles ou plus', 'dede-party', '{"agg":"max","stat":"stars","threshold":4}'::jsonb, true, 2508),
+  ('party_constellation', 'host', 10, 'Constellation', 'Finir avec plein d''étoiles : 3 ★ en 6 tours, 4 ★ en 9, 5 ★ en 12 (à 5 joueurs et plus : 3, 3 et 4 ★)', 'dede-party', '{"agg":"max","stat":"constellation","threshold":1}'::jsonb, true, 2508),
   ('party_carton_plein', 'host', 11, 'Carton plein', 'Gagner la partie en étant aussi Roi des mini-jeux', 'dede-party', '{"agg":"sum","stat":"win_mvp","threshold":1}'::jsonb, true, 2509),
   ('party_star_ecran', 'host', 12, 'Star du petit écran', 'Gagner 10 parties (cumul)', 'dede-party', '{"agg":"sum","stat":"won","threshold":10}'::jsonb, true, 2510),
   ('gen_touche_a_tout', null, null, 'Touche-à-tout', 'Jouer à 10 jeux différents', null, '{"agg":"special","name":"distinct_games","threshold":10}'::jsonb, true, 221),

@@ -8427,7 +8427,7 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('party_chouchou', 'host', 7, 'Chouchou de Dédé', 'Ouvrir 10 enveloppes surprise (cumul)', 'dede-party', '{"agg":"sum","stat":"envelopes","threshold":10}'::jsonb, true, 2505),
   ('party_pile_dessus', 'host', 8, 'Pile dessus', 'Acheter une étoile en s''arrêtant exactement sur sa case', 'dede-party', '{"agg":"sum","stat":"star_exact","threshold":1}'::jsonb, true, 2506),
   ('party_triple', 'host', 9, 'Le triplé', 'Gagner 3 mini-jeux d''affilée', 'dede-party', '{"agg":"max","stat":"mg_streak","threshold":3}'::jsonb, true, 2507),
-  ('party_constellation', 'host', 10, 'Constellation', 'Finir une partie avec 4 étoiles ou plus', 'dede-party', '{"agg":"max","stat":"stars","threshold":4}'::jsonb, true, 2508),
+  ('party_constellation', 'host', 10, 'Constellation', 'Finir avec plein d''étoiles : 3 ★ en 6 tours, 4 ★ en 9, 5 ★ en 12 (à 5 joueurs et plus : 3, 3 et 4 ★)', 'dede-party', '{"agg":"max","stat":"constellation","threshold":1}'::jsonb, true, 2508),
   ('party_carton_plein', 'host', 11, 'Carton plein', 'Gagner la partie en étant aussi Roi des mini-jeux', 'dede-party', '{"agg":"sum","stat":"win_mvp","threshold":1}'::jsonb, true, 2509),
   ('party_star_ecran', 'host', 12, 'Star du petit écran', 'Gagner 10 parties (cumul)', 'dede-party', '{"agg":"sum","stat":"won","threshold":10}'::jsonb, true, 2510),
   ('gen_touche_a_tout', null, null, 'Touche-à-tout', 'Jouer à 10 jeux différents', null, '{"agg":"special","name":"distinct_games","threshold":10}'::jsonb, true, 221),
@@ -12823,9 +12823,16 @@ declare
   s     jsonb := coalesce(p_state->'stats'->p_pid, '{}'::jsonb);
   v_st  integer := coalesce((p_state->'stars'->>p_pid)::integer, 0);
   v_king boolean := coalesce((s->>'king')::integer, 0) = 1;
+  -- Constellation : seuil d'étoiles selon la durée et la table (~10-25 % des joueurs partout, cf. simulation) :
+  -- 2-4 joueurs : 3 / 4 / 5 ★ en 6 / 9 / 12 tours ; 5-8 joueurs : 3 / 3 / 4 ★.
+  v_rounds integer := coalesce((p_state->>'rounds')::integer, 9);
+  v_n      integer := (select count(*)::integer from jsonb_object_keys(coalesce(p_state->'stars', '{}'::jsonb)));
+  v_need   integer := case when v_n <= 4 then case when v_rounds <= 6 then 3 when v_rounds <= 9 then 4 else 5 end
+                           else case when v_rounds <= 9 then 3 else 4 end end;
 begin
   return jsonb_build_object(
     'stars', v_st,
+    'constellation', case when v_st >= v_need then 1 else 0 end,
     'coins', coalesce((p_state->'coins'->>p_pid)::integer, 0),
     'rounds', coalesce((p_state->>'round')::integer, 0),
     'pubs', coalesce((s->>'pubs')::integer, 0),
