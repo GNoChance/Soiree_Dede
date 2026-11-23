@@ -40,7 +40,7 @@ PWA de mini-jeux multijoueurs pour soirées en famille / entre amis (joueurs peu
 - Piège : tenue blanche sur fond blanc sans contour noir épais → découpe ratée, faire régénérer la planche (contour noir épais ou fond coloré).
 - Portraits de tenue : images générées à part par l'utilisateur (une image par tenue) → `<slug>-<dossier>-portrait.png` dans le dossier v3, entrée `portraits` de la config (`cutout: true` si sticker sur fond noir → noir rendu transparent), ajout à `portraits` du manifest, `free-sheet.mjs <config> portraits`, puis `gen-art.mjs`.
 - **Seul le style V3 compte** (4×3, fond noir, ordre : joie colère pleurs boude / réflexion dodo bisou clin d'œil / surprise amoureux cool champion=gamer ; Karo : charmée au lieu d'amoureux). V3 complet pour les 9 persos (20 planches + 20 portraits chacun). Pas besoin de pouces/timide/déterminé : cases comblées par `TENUE_ART_FILL` (gen-art).
-- 21 dossiers d'art par perso (star/cinema et teacher/student sont distincts, racer et hacker inclus ; hacker = tenue de Nom de Code, planches de Dédé et Karo encore à recevoir). Inventaire des manques : comparer `TENUE_ART` / `TENUE_PORTRAITS` de `tenues-art.generated.ts` à cette liste.
+- 21 dossiers d'art par perso (star/cinema et teacher/student sont distincts, racer et hacker inclus ; hacker = tenue de Nom de Code, complet pour les 9 persos). Inventaire des manques : comparer `TENUE_ART` / `TENUE_PORTRAITS` de `tenues-art.generated.ts` à cette liste.
 - L'utilisateur fournit les planches, Claude les intègre (découpe, génération, commit).
 - Détails : [tools/slice-chibis/README.md](tools/slice-chibis/README.md).
 
