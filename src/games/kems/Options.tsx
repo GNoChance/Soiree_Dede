@@ -7,12 +7,13 @@ import { distributeTeams } from '@/features/teams/teams'
 import type { GameOptionsProps } from '../types'
 import { KEMS_TEAM_SIZE, feasibleTeamCount, readKemsOptions } from './setup'
 
-export function KemsOptionsPanel({ options, onChange, playerCount }: GameOptionsProps) {
+export function KemsOptionsPanel({ options, onChange, playerCount, playingIds }: GameOptionsProps) {
   const o = readKemsOptions(options)
   const set = (patch: Record<string, unknown>) => onChange({ ...options, ...patch })
   const { id: soireeId } = useParams()
-  const { data } = useSoiree(soireeId)
-  const ids = useMemo(() => data?.playerIds ?? [], [data?.playerIds])
+  // Seuls les joueurs retenus (cochés dans « Qui joue ? ») sont proposés ; sans cette info, tous ceux de la soirée.
+  const { data } = useSoiree(playingIds ? undefined : soireeId)
+  const ids = useMemo(() => playingIds ?? data?.playerIds ?? [], [playingIds, data?.playerIds])
 
   // Première ouverture : équipes de 2 tirées au hasard (le plus d'équipes possible), puis composables à la main.
   useEffect(() => {
@@ -48,7 +49,6 @@ export function KemsOptionsPanel({ options, onChange, playerCount }: GameOptions
           teamSize={KEMS_TEAM_SIZE}
           onChange={(teams, teamCount) => onChange({ ...options, teams, teamCount })}
         />
-        {playerCount < ids.length && <p className="text-sm text-muted">Les joueurs décochés plus haut ne joueront pas (équipes refaites si besoin).</p>}
         {playerCount < 4 && <p className="text-sm font-bold text-tomato">Il faut au moins 4 joueurs (2 équipes de 2).</p>}
       </div>
     </div>
