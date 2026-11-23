@@ -3,7 +3,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { useTv } from '@/features/tv/tv'
-import type { GameSummaryProps } from '../types'
+import { Moments, names, topOf, type Moment } from '@/features/duel/Moments'
+import type { GameSummaryProps, PlayerInfo } from '../types'
 import { holeById, pickedUp } from './holes'
 import { MARK_DOT, courseLabel, markOf, ranking, vsPar } from './logic'
 import { ScoreCard } from './ScoreCard'
@@ -30,6 +31,8 @@ export default function MiniGolfSummary({ state, meId, players }: GameSummaryPro
     }
     return bi < 0 ? null : { i: bi, score: card[bi], par: s.pars[bi] }
   }
+
+  const moments = golfMoments(s, get)
 
   return (
     <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="sticker flex flex-col gap-3 bg-surface p-4">
@@ -71,6 +74,43 @@ export default function MiniGolfSummary({ state, meId, players }: GameSummaryPro
           )
         })}
       </div>
+      <Moments moments={moments} get={get} tv={tv} />
     </motion.div>
   )
 }
+/** Moments drôles : trou maudit, plongeons, trou en un, moulin (masqués si la donnée manque). */
+function golfMoments(s: MiniGolfState, get: (id: string) => PlayerInfo): Moment[] {
+  const out: Moment[] = []
+  const stat = (id: string, k: string) => s.results?.find((r) => r.profile_id === id)?.stats?.[k]
+  const ids = s.players ?? Object.keys(s.cards)
+
+  // Le trou maudit : le plus gros score sur un seul trou.
+  let w: { id: string; i: number; n: number } | null = null
+  for (const id of ids) {
+    ;(s.cards[id] ?? []).forEach((n, i) => {
+      if (n >= s.pars[i] + 3 && (!w || n > w.n)) w = { id, i, n }
+    })
+  }
+  const cursed = w as { id: string; i: number; n: number } | null
+  if (cursed) {
+    out.push({
+      key: 'cursed',
+      emoji: '⛳',
+      title: 'Le trou maudit',
+      ids: [cursed.id],
+      text: `${get(cursed.id).nickname} a lutté ${cursed.n >= pickedUp(s.pars[cursed.i]) ? 'jusqu’à ramasser sa balle' : `${cursed.n} coups`} sur « ${holeById(s.holes[cursed.i]).name} » (par ${s.pars[cursed.i]}). Courage !`,
+    })
+  }
+
+  const ace = topOf(ids, (id) => stat(id, 'aces'))
+  if (ace) out.push({ key: 'ace', emoji: '🎯', title: 'Trou en un !', ids: ace.ids, text: `${names(ace.ids, get)} ${ace.ids.length > 1 ? 'ont' : 'a'} envoyé la balle directement au fond${ace.value > 1 ? ` (${ace.value} fois)` : ''}.` })
+
+  const water = topOf(ids, (id) => stat(id, 'water'))
+  if (water) out.push({ key: 'water', emoji: '🌊', title: 'Balles à l’eau', ids: water.ids, text: `${names(water.ids, get)} ${water.ids.length > 1 ? 'ont' : 'a'} piqué ${water.value > 1 ? `${water.value} têtes` : 'une tête'} dans l’eau. Belle nage !` })
+
+  const mill = topOf(ids, (id) => stat(id, 'mill_hits'))
+  if (mill && mill.value >= 3) out.push({ key: 'mill', emoji: '🌀', title: 'Le moulin a du caractère', ids: mill.ids, text: `${names(mill.ids, get)} ${mill.ids.length > 1 ? 'ont' : 'a'} pris ${mill.value} coups de pale. Rien de personnel !` })
+
+  return out.slice(0, 4)
+}
+

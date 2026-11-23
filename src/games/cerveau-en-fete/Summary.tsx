@@ -39,6 +39,35 @@ export default function CerveauSummary({ state, meId, players }: GameSummaryProp
     .flatMap((h) => h.found.map((f) => ({ ...f, h })))
     .sort((a, b) => a.ms - b.ms)[0]
 
+  // Moments drôles (masqués quand la donnée manque).
+  const pearls: Array<{ id: string; text: string; prompt: string }> = []
+  const seen = new Set<string>()
+  for (const h of [...history].reverse()) {
+    for (const [id, list] of Object.entries(h.wrong ?? {})) {
+      const text = list?.[list.length - 1]
+      if (!text || seen.has(id) || h.found.some((f) => f.profile_id === id)) continue
+      seen.add(id)
+      pearls.push({ id, text, prompt: h.prompt })
+    }
+    if (pearls.length >= 3) break
+  }
+  const flop = history
+    .filter((h) => h.found.length === 0)
+    .sort((a, b) => Object.keys(b.wrong ?? {}).length - Object.keys(a.wrong ?? {}).length)[0]
+  const streaks = s.players
+    .map((id) => {
+      let run = 0
+      let max = 0
+      for (const h of history) {
+        if (h.found.some((f) => f.profile_id === id)) max = Math.max(max, ++run)
+        else run = 0
+      }
+      return { id, n: max }
+    })
+    .sort((a, b) => b.n - a.n)
+  const streak = streaks[0] && streaks[0].n >= 3 ? streaks[0] : null
+  const hasMoments = pearls.length > 0 || !!flop || !!streak
+
   return (
     <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="flex flex-col gap-3">
       <div className="sticker flex flex-col gap-1.5 bg-surface p-3">
@@ -80,6 +109,34 @@ export default function CerveauSummary({ state, meId, players }: GameSummaryProp
             </p>
             <p className="truncate text-sm">« {fastest.h.answer} »</p>
           </div>
+        </div>
+      )}
+
+      {hasMoments && (
+        <div className="sticker flex flex-col gap-2 bg-surface p-3">
+          <p className="font-display text-lg font-extrabold">Les moments de la partie 🎬</p>
+          {streak && (
+            <div className="flex items-center gap-2 rounded-chip bg-sunk p-2">
+              <Avatar slug={get(streak.id).slug} expression={mood(get(streak.id), 'proud')} size={40} />
+              <p className="text-sm leading-snug">
+                🔥 <b>Meilleure série</b> : {get(streak.id).nickname}, {streak.n} bonnes réponses d’affilée
+              </p>
+            </div>
+          )}
+          {flop && (
+            <div className="rounded-chip bg-sunk p-2 text-sm leading-snug">
+              🤦 <b>La question qui a tout fait rater</b> : {flop.prompt} — c’était <b>« {flop.answer} »</b>
+            </div>
+          )}
+          {pearls.map((x) => (
+            <div key={x.id} className="flex items-center gap-2 rounded-chip bg-sunk p-2">
+              <Avatar slug={get(x.id).slug} expression={mood(get(x.id), 'shy')} size={36} />
+              <p className="min-w-0 text-sm leading-snug">
+                ✍️ <b>{get(x.id).nickname}</b> a tapé « {x.text} »
+                <span className="block truncate text-xs text-muted">{x.prompt}</span>
+              </p>
+            </div>
+          ))}
         </div>
       )}
 

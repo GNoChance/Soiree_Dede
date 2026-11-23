@@ -2058,7 +2058,7 @@ begin
     'deadline', to_jsonb(v_now + make_interval(secs => (p_state->>'duration')::integer)),
     'question', v_q - 'answer' - 'accept' - 'correct',
     'found', '[]'::jsonb, 'passed', '[]'::jsonb, 'missed', '[]'::jsonb);
-  p_server := p_server || jsonb_build_object('picks', '{}'::jsonb, 'tries', '{}'::jsonb);
+  p_server := p_server || jsonb_build_object('picks', '{}'::jsonb, 'tries', '{}'::jsonb, 'wrong', '{}'::jsonb);
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -2198,6 +2198,8 @@ begin
       'missed', p_state->'missed',
       'picks', coalesce(p_server->'picks', '{}'::jsonb),
       'tries', coalesce(p_server->'tries', '{}'::jsonb),
+      -- mauvaises propositions tapées (2 dernières par joueur) : {profile_id: [texte, ...]}
+      'wrong', coalesce(p_server->'wrong', '{}'::jsonb),
       'points', v_points),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'round', v_round,
@@ -2206,7 +2208,8 @@ begin
       'prompt', v_q->'prompt',
       'answer', v_q->'answer',
       'mode', v_q->'mode',
-      'found', p_state->'found')));
+      'found', p_state->'found',
+      'wrong', coalesce(p_server->'wrong', '{}'::jsonb))));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -2364,6 +2367,12 @@ begin
                           to_jsonb(coalesce((p_server->'tries'->>v_me)::integer, 0) + 1), true);
     v_ok := public._cef_match(p_action->>'text', v_q->'accept');
     if not v_ok then
+      -- garde les 2 dernières mauvaises propositions (révélation / fin de partie)
+      p_server := jsonb_set(p_server, array['wrong', v_me],
+        (select coalesce(jsonb_agg(x order by o), '[]'::jsonb) from (
+           select x, o from jsonb_array_elements(
+             coalesce(p_server->'wrong'->v_me, '[]'::jsonb) || to_jsonb(left(btrim(p_action->>'text'), 30))
+           ) with ordinality as t(x, o) order by o desc limit 2) z), true);
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
   else -- choose

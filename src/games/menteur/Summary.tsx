@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn'
 import type { GameSummaryProps } from '../types'
 import { FaceIcon } from './Dice'
 import type { MtrState } from './types'
+import { MtrMoments } from './Moments'
 
 const MEDALS = ['🏆', '🥈', '🥉']
 
@@ -80,6 +81,8 @@ export default function MenteurSummary({ state, players, meId }: GameSummaryProp
         })}
         <p className="mt-1 text-xs text-muted">Points = joueurs − place. Seul le dernier à garder des dés gagne.</p>
       </div>
+
+      <MtrMoments s={s} players={players} />
 
       {(detective || bluffer || piles > 0) && (
         <div className="grid grid-cols-2 gap-2">

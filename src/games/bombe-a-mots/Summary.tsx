@@ -6,6 +6,7 @@ import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GameSummaryProps } from '../types'
 import type { BamState } from './types'
 import { longestWord } from './setup'
+import { BamMoments } from './Moments'
 
 const RECORD_KEY = 'dede:bam-record'
 const MEDALS = ['🥇', '🥈', '🥉']
@@ -119,6 +120,8 @@ export default function BombeSummary({ state, meId, players }: GameSummaryProps)
           </div>
         </div>
       )}
+
+      <BamMoments state={state} players={players} />
 
       {s.players?.includes(meId) && (
         <div className={cn('sticker p-3', record.beaten ? 'bg-bubblegum text-[#1f1b2e]' : 'bg-surface')}>

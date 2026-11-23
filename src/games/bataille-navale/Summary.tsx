@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Avatar } from '@/components/ui/Avatar'
 import { DuelSummary } from '@/features/duel/DuelSummary'
+import { Moments, names, topOf, type Moment } from '@/features/duel/Moments'
 import { mood, pickExpression, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GameSummaryProps } from '../types'
 import { Sea, type SeaShip } from './Sea'
@@ -27,6 +28,7 @@ export default function BatailleNavaleSummary(props: GameSummaryProps) {
     board || hero ? (
       <div className="flex flex-col gap-2">
         {board && <LastBattle board={board} meId={props.meId} get={get} />}
+        {board && <BattleMoments board={board} get={get} />}
         <div className="grid grid-cols-2 gap-2">
           {hero && shortest && (
             <div className="sticker flex flex-col items-center gap-1 bg-sky p-2 text-center text-[#1f1b2e]">
@@ -94,6 +96,28 @@ function FinalSea({ board, owner, name }: { board: BnBoard; owner: string; name:
     <div className="flex min-w-0 flex-col gap-0.5">
       <span className="truncate text-center text-xs font-extrabold">Flotte : {name}</span>
       <Sea shots={w?.shots ?? []} ships={ships} size="sm" label={`Flotte finale : ${name}`} />
+    </div>
+  )
+}
+
+/** Moments drôles de la dernière bataille : plouf (tirs dans l'eau), victoire large (bateaux survivants). */
+function BattleMoments({ board, get }: { board: BnBoard; get: (id: string) => ReturnType<typeof playerOrPlaceholder> }) {
+  const ids = [board.a, board.b]
+  const moments: Moment[] = []
+  const miss = topOf(ids, (id) => {
+    const st = board.stats[id]
+    return st ? st.shots - st.hits : 0
+  })
+  if (miss && miss.value >= 10 && miss.ids.length === 1) moments.push({ key: 'plouf', emoji: '💦', title: 'Le roi du plouf', ids: miss.ids, text: `${names(miss.ids, get)} a arrosé la mer avec ${miss.value} tirs dans l’eau. Les poissons disent merci !` })
+  const survivors = topOf(ids, (id) => board.waters[id]?.left)
+  const lost = ids.find((id) => (board.waters[id]?.left ?? 0) === 0)
+  if (survivors && lost && survivors.ids.length === 1 && survivors.ids[0] !== lost && survivors.value >= 3) {
+    moments.push({ key: 'margin', emoji: '⚓', title: 'Victoire sans trembler', ids: survivors.ids, text: `${names(survivors.ids, get)} gagne avec encore ${survivors.value} bateaux à flot. Le port est en fête !` })
+  }
+  if (!moments.length) return null
+  return (
+    <div className="sticker bg-surface p-3">
+      <Moments moments={moments} get={get} title="🎬 Les moments de la bataille" />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import type { GameSummaryProps } from '../types'
 import { useTv } from '@/features/tv/tv'
 import { Grid } from './Grid'
 import { NdcTvSummary } from './TvView'
+import { NdcMoments } from './Moments'
 import { roundHeadline } from './RoundEnd'
 import type { NdcState } from './types'
 
@@ -53,6 +54,7 @@ export default function NomDeCodeSummary({ state, players, meId }: GameSummaryPr
           ))}
         </div>
       )}
+      <NdcMoments s={s} players={players} />
     </motion.div>
   )
 }

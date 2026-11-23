@@ -12,6 +12,7 @@ import type { GamePlayProps, PlayerInfo } from '../types'
 import { BOMB, NEUTRAL, tint } from './Grid'
 import { guessersOf, majority } from './logic'
 import { roundHeadline } from './RoundEnd'
+import { NdcMoments } from './Moments'
 import { ndcActions } from './setup'
 import type { NdcState } from './types'
 
@@ -316,6 +317,7 @@ export function NdcTvSummary({ s, players }: { s: NdcState; players: Record<stri
             ))}
           </div>
         )}
+        <NdcMoments s={s} players={players} tv />
       </div>
     </div>
   )

@@ -7,6 +7,7 @@ import type { GameSummaryProps } from '../types'
 import { PdbCardView } from './Card'
 import { sortHand } from './rules'
 import type { PdbState } from './types'
+import { PdbMoments } from './Moments'
 
 const MEDALS = ['🏆', '🥈', '🥉']
 
@@ -72,6 +73,8 @@ export default function PasDeBolSummary({ state, players, meId }: GameSummaryPro
           {n >= 5 ? 'À 5 joueurs et plus, les 3 premiers sortis gagnent.' : 'Le premier sorti gagne.'} Points = joueurs − place.
         </p>
       </div>
+
+      <PdbMoments state={state} players={players} />
     </div>
   )
 }

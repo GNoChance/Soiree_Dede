@@ -4,9 +4,10 @@ import { cn } from '@/lib/cn'
 import { mood } from '@/features/soiree/players'
 import { makeGet } from './bots'
 import { useTv } from '@/features/tv/tv'
-import type { GameSummaryProps } from '../types'
+import { Moments, names, topOf, type Moment } from '@/features/duel/Moments'
+import type { GameSummaryProps, PlayerInfo } from '../types'
 import { boardOf } from './board'
-import type { DedePartyState } from './types'
+import type { DedePartyState, DpStats } from './types'
 
 const MEDAL = ['🥇', '🥈', '🥉']
 
@@ -28,6 +29,8 @@ export default function DedePartySummary({ state, meId, players }: GameSummaryPr
     .map((id) => ({ id, card: s.stats?.[id]?.best_card }))
     .filter((x) => x.card && x.card.gain > 0)
     .sort((a, b) => (b.card?.gain ?? 0) - (a.card?.gain ?? 0))[0]
+
+  const moments = partyMoments(s, get)
 
   return (
     <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="sticker flex flex-col gap-3 bg-surface p-4">
@@ -94,6 +97,33 @@ export default function DedePartySummary({ state, meId, players }: GameSummaryPr
           </span>
         </div>
       )}
+      <Moments moments={moments} get={get} tv={tv} />
     </motion.div>
   )
 }
+/** Moments drôles : lanterne rouge, séries, doubles, fauchés, mécène de la Tombola… (masqués si 0). */
+function partyMoments(s: DedePartyState, get: (id: string) => PlayerInfo): Moment[] {
+  const out: Moment[] = []
+  const ids = s.players
+  const st = (id: string, k: keyof DpStats) => (s.stats?.[id]?.[k] as number | undefined) ?? 0
+  const many = (a: string[]) => (a.length > 1 ? 'ont' : 'a')
+
+  const last = s.ranking && s.ranking.length > 2 ? s.ranking[s.ranking.length - 1] : null
+  if (last && last.rank > 1 && s.ranking?.filter((r) => r.rank === last.rank).length === 1) {
+    out.push({ key: 'last', emoji: '🐢', title: 'La lanterne rouge', ids: [last.id], text: `${get(last.id).nickname} ferme la marche avec ${last.stars} étoile${last.stars > 1 ? 's' : ''} et ${last.coins} 🪙. La revanche sera douce !` })
+  }
+  const streak = topOf(ids, (id) => st(id, 'mg_streak_max'))
+  if (streak && streak.value >= 2) out.push({ key: 'streak', emoji: '🔥', title: 'En série', ids: streak.ids, text: `${names(streak.ids, get)} ${many(streak.ids)} gagné ${streak.value} mini-jeux d’affilée. Intouchable !` })
+  const dbl = topOf(ids, (id) => st(id, 'doubles'))
+  if (dbl && dbl.value >= 2) out.push({ key: 'doubles', emoji: '🎲', title: 'Les dés en or', ids: dbl.ids, text: `${names(dbl.ids, get)} ${many(dbl.ids)} sorti ${dbl.value} doubles. Les dés ont un chouchou.` })
+  const broke = ids.filter((id) => st(id, 'broke') > 0)
+  if (broke.length) out.push({ key: 'broke', emoji: '💸', title: 'Les poches vides', ids: broke, text: `${names(broke, get)} ${many(broke)} fini à sec au moins une fois. Heureusement, c’est de l’argent de Monopoly !` })
+  const toll = topOf(ids, (id) => st(id, 'toll_paid'))
+  if (toll && toll.value >= 10) out.push({ key: 'toll', emoji: '🎟️', title: 'Mécène de la Tombola', ids: toll.ids, text: `${names(toll.ids, get)} ${many(toll.ids)} offert ${toll.value} 🪙 à la cagnotte. Quelqu’un dira merci.` })
+  const washed = topOf(ids, (id) => st(id, 'washed'))
+  if (washed) out.push({ key: 'washed', emoji: '🌊', title: 'Emporté par la vague', ids: washed.ids, text: `${names(washed.ids, get)} ${many(washed.ids)} été ${washed.value > 1 ? `${washed.value} fois ` : ''}balayé${washed.ids.length > 1 ? 's' : ''} par la marée.` })
+  const robbed = topOf(ids, (id) => st(id, 'robbed'))
+  if (robbed) out.push({ key: 'robbed', emoji: '🦝', title: 'Victime préférée des ratons', ids: robbed.ids, text: `${names(robbed.ids, get)} ${many(robbed.ids)} été dépouillé${robbed.ids.length > 1 ? 's' : ''} ${robbed.value} fois. Le sac se vide vite !` })
+  return out.slice(0, 4)
+}
+

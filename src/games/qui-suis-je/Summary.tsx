@@ -4,6 +4,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GameSummaryProps } from '../types'
 import type { QsjState } from './types'
+import { QsjMoments } from './Moments'
 
 /** Fin de partie : meilleur tour + tous les tours avec leurs cartes trouvées. */
 export default function QuiSuisJeSummary({ state, players, meId }: GameSummaryProps) {
@@ -29,6 +30,7 @@ export default function QuiSuisJeSummary({ state, players, meId }: GameSummaryPr
       <p className="font-display text-lg font-extrabold">
         {totalFound} carte{totalFound > 1 ? 's' : ''} trouvée{totalFound > 1 ? 's' : ''} au total
       </p>
+      <QsjMoments state={state} players={players} />
       <div className="flex flex-col gap-2">
         {history.map((t, i) => {
           const p = playerOrPlaceholder(players, t.guesser)

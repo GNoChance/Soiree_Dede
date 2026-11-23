@@ -203,7 +203,19 @@ begin
         'round', p_state->'round', 'letter', p_state->'letter',
         'points', v_points, 'uniques', v_uniq, 'detail', v_detail),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points, 'det', v_det)));
+        'round', p_state->'round', 'letter', p_state->'letter', 'points', v_points, 'det', v_det,
+        -- moments de fin de partie : mot valide le plus long, réponse la plus contestée (null si rien)
+        'longest', (select jsonb_build_object('pl', e.pl, 'text', e.d->>'text', 'cat', e.cat)
+                      from (select c.key as cat, x.key as pl, x.value as d
+                              from jsonb_each(v_detail) c, jsonb_each(c.value) x) e
+                     where e.d->>'status' in ('unique', 'shared')
+                     order by char_length(e.d->>'text') desc, e.cat, e.pl limit 1),
+        'hot', (select jsonb_build_object('pl', e.pl, 'text', e.d->>'text', 'cat', e.cat,
+                                          'contests', (e.d->>'contests')::integer, 'status', e.d->>'status')
+                  from (select c.key as cat, x.key as pl, x.value as d
+                          from jsonb_each(v_detail) c, jsonb_each(c.value) x) e
+                 where (e.d->>'contests')::integer > 0 and e.d->>'text' <> ''
+                 order by (e.d->>'contests')::integer desc, e.cat, e.pl limit 1))));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 

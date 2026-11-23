@@ -67,6 +67,16 @@ export interface TeamResult {
   stats?: { found: number; team: Team }
 }
 
+/** Compteurs par orateur (state.tstat), cumulés au fil des passages (absent des parties anciennes). */
+export interface TeamTStat {
+  empty_turns?: number
+  max_passed?: number
+  best_turn?: number
+  found_r3?: number
+  best_r2?: number
+  carries?: number
+}
+
 export interface TeamState {
   game: 'devine-en-equipe'
   phase: TeamPhase
@@ -93,6 +103,7 @@ export interface TeamState {
   scores: Record<Team, number>
   round_scores: Array<Record<Team, number>>
   speaker_points: Record<string, number>
+  tstat?: Record<string, TeamTStat>
   last_turn: PassageRecap | null
   winners: Team[] | null
   results: TeamResult[] | null

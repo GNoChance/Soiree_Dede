@@ -52,6 +52,25 @@ export interface PbLastRound {
   detail: Record<string, Record<string, PbDetail>>
 }
 
+/** Réponse marquante d'une manche (history[].longest / hot) ; absent sur les anciennes parties. */
+export interface PbNotable {
+  pl: string
+  text: string
+  cat: string
+  contests?: number
+  status?: PbStatus
+}
+
+export interface PbHistoryEntry {
+  round: number
+  letter: string
+  points: Record<string, number>
+  /** Compteurs par joueur : refused, shared, empty, valid, lawyer. */
+  det?: Record<string, Record<string, number>>
+  longest?: PbNotable | null
+  hot?: PbNotable | null
+}
+
 export interface PetitBacState {
   game: 'petit-bac'
   phase: PbPhase
@@ -77,7 +96,7 @@ export interface PetitBacState {
   /** uid -> nb total de réponses uniques (2 pts). */
   uniques: Record<string, number>
   last_round: PbLastRound | null
-  history: Array<{ round: number; letter: string; points: Record<string, number> }>
+  history: PbHistoryEntry[]
   winners: string[] | null
   results: Array<{ profile_id: string; points: number; won: boolean; placement: number }> | null
 }

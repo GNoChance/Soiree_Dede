@@ -217,6 +217,7 @@ function RevealTv({ s, lr, get }: { s: CefState; lr: CefReveal; get: (id: string
                 <span key={id} className="flex items-center gap-1 rounded-full bg-sunk py-0.5 pr-2 pl-0.5 text-[2.2vmin] font-bold">
                   <Avatar slug={p.slug} expression={mood(p, 'sad')} size={32} />
                   {p.nickname} {lr.passed.includes(id) ? '🏳️' : lr.missed.includes(id) ? '✗' : '⌛'}
+                  {(lr.wrong?.[id]?.length ?? 0) > 0 && <span className="text-muted">✍️ « {lr.wrong?.[id]?.[lr.wrong[id].length - 1]} »</span>}
                 </span>
               )
             })}

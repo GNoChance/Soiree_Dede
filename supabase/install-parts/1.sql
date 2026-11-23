@@ -1537,6 +1537,8 @@ begin
     'winner', p_winner,
     'words', jsonb_build_object('civil', p_server->>'civil_word', 'undercover', p_server->>'undercover_word'),
     'roles', v_roles,
+    -- révélé seulement en fin de partie : qui a voté pour qui, un tableau {votant: cible} par dépouillement
+    'vote_log', coalesce(p_server->'vote_log', '[]'::jsonb),
     'results', v_results);
   return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
 end $$;

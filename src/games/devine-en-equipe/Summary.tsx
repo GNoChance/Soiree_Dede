@@ -2,9 +2,10 @@ import { motion } from 'framer-motion'
 import { Avatar } from '@/components/ui/Avatar'
 import { pickExpression, playerOrPlaceholder } from '@/features/soiree/players'
 import { cn } from '@/lib/cn'
-import type { GameSummaryProps } from '../types'
+import { Moments, names, topOf, type Moment } from '@/features/duel/Moments'
+import type { GameSummaryProps, PlayerInfo } from '../types'
 import { ROUND_RULES, TEAMS, TEAM_META, plural } from './setup'
-import type { TeamState } from './types'
+import type { TeamState, TeamTStat } from './types'
 
 /** Fin de partie : score des équipes manche par manche + meilleur orateur. */
 export default function TeamSummary({ state, players }: GameSummaryProps) {
@@ -15,6 +16,8 @@ export default function TeamSummary({ state, players }: GameSummaryProps) {
   const pts = s.speaker_points ?? {}
   const best = Object.entries(pts).sort((a, b) => b[1] - a[1])[0]
   const mvp = best && best[1] > 0 ? playerOrPlaceholder(players, best[0]) : null
+
+  const moments = teamMoments(s, (id) => playerOrPlaceholder(players, id))
 
   return (
     <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="sticker flex flex-col gap-3 bg-surface p-4">
@@ -72,6 +75,24 @@ export default function TeamSummary({ state, players }: GameSummaryProps) {
           </div>
         </div>
       )}
+      <Moments moments={moments} get={(id) => playerOrPlaceholder(players, id)} />
     </motion.div>
   )
 }
+/** Moments drôles tirés des compteurs par orateur (state.tstat) : masqués pour les parties anciennes. */
+function teamMoments(s: TeamState, get: (id: string) => PlayerInfo): Moment[] {
+  const out: Moment[] = []
+  const ids = s.players ?? []
+  const ts = (id: string, k: keyof TeamTStat) => s.tstat?.[id]?.[k] ?? 0
+  const many = (a: string[]) => (a.length > 1 ? 'ont' : 'a')
+  const flash = topOf(ids, (id) => ts(id, 'best_turn'))
+  if (flash && flash.value >= 3) out.push({ key: 'flash', emoji: '🏃', title: 'Passage éclair', ids: flash.ids, text: `${names(flash.ids, get)} ${many(flash.ids)} fait deviner ${flash.value} mots en un seul passage. Quel débit !` })
+  const mime = topOf(ids, (id) => ts(id, 'found_r3'))
+  if (mime && mime.value >= 3) out.push({ key: 'mime', emoji: '🎭', title: 'Roi du mime', ids: mime.ids, text: `${names(mime.ids, get)} ${many(mime.ids)} fait trouver ${mime.value} mots sans dire un mot. Oscar mérité !` })
+  const pass = topOf(ids, (id) => ts(id, 'max_passed'))
+  if (pass && pass.value >= 3) out.push({ key: 'pass', emoji: '🐢', title: 'Roi du « Passer »', ids: pass.ids, text: `${names(pass.ids, get)} ${many(pass.ids)} passé ${pass.value} mots dans un même passage. Certains mots font de la résistance !` })
+  const empty = topOf(ids, (id) => ts(id, 'empty_turns'))
+  if (empty) out.push({ key: 'empty', emoji: '🙈', title: 'Passage à vide', ids: empty.ids, text: `${names(empty.ids, get)} ${many(empty.ids)} eu ${empty.value > 1 ? `${empty.value} passages` : 'un passage'} sans aucun mot trouvé. Ça arrive aux meilleurs !` })
+  return out.slice(0, 4)
+}
+

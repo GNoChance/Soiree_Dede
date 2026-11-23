@@ -45,6 +45,8 @@ export interface CefReveal {
   picks: Record<string, number>
   /** Nombre de propositions tapées : {profile_id: n}. */
   tries: Record<string, number>
+  /** Dernières mauvaises propositions tapées (max 2 par joueur) : {profile_id: [texte]} ; absent sur les anciennes parties. */
+  wrong?: Record<string, string[]>
   /** Points gagnés sur la question : {profile_id: pts}. */
   points: Record<string, number>
 }
@@ -57,6 +59,8 @@ export interface CefHistoryItem {
   answer: string
   mode: CefMode
   found: CefFound[]
+  /** Mauvaises propositions tapées (max 2 par joueur) ; absent sur les anciennes parties. */
+  wrong?: Record<string, string[]>
 }
 
 export interface CefState extends BaseGameState {

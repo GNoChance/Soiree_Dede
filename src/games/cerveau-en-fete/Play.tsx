@@ -601,6 +601,7 @@ function RevealPhase({ s, lr, meId, isHost, get, act, pending }: { s: CefState; 
                   <Avatar slug={p.slug} expression={mood(p, 'sad')} size={24} />
                   {p.nickname} {tag}
                   {tries > 0 && <span className="text-muted">· {tries} essai{tries > 1 ? 's' : ''}</span>}
+                  {(lr.wrong?.[id]?.length ?? 0) > 0 && <span className="text-muted">· ✍️ « {lr.wrong?.[id]?.[lr.wrong[id].length - 1]} »</span>}
                 </span>
               )
             })}

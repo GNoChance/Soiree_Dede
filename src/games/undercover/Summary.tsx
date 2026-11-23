@@ -12,12 +12,47 @@ const WINNER_LABEL = {
   mrwhite: { text: 'Mister White a trouvé le mot !', emoji: '🤫', bg: 'bg-white' },
 } as const
 
+type Moment = { id: string; emoji: string; title: string; detail: string }
+
+/** Moments drôles tirés du journal des votes (state.vote_log, révélé en fin de partie ; absent sur les anciennes parties). */
+function computeMoments(s: UndercoverState, log: Array<Record<string, string>>, roles: Record<string, string>): Moment[] {
+  const out: Moment[] = []
+  if (!log.length) return out
+  const received: Record<string, number> = {}
+  const onInfiltre: Record<string, number> = {}
+  const total: Record<string, number> = {}
+  for (const round of log)
+    for (const [voter, target] of Object.entries(round)) {
+      received[target] = (received[target] ?? 0) + 1
+      total[voter] = (total[voter] ?? 0) + 1
+      if (roles[target] && roles[target] !== 'civil') onInfiltre[voter] = (onInfiltre[voter] ?? 0) + 1
+    }
+  const best = (rec: Record<string, number>, ids: string[]) => ids.filter((id) => (rec[id] ?? 0) > 0).sort((a, b) => (rec[b] ?? 0) - (rec[a] ?? 0))[0]
+
+  const wrong = (s.eliminated ?? []).find((e) => e.role === 'civil')
+  if (wrong) out.push({ id: wrong.profile_id, emoji: '🤦', title: 'Erreur judiciaire', detail: `éliminé·e à tort (innocent·e) à la manche ${wrong.round}` })
+
+  const sus = best(received, s.players)
+  if (sus && received[sus] >= 2) out.push({ id: sus, emoji: '👀', title: 'Le plus suspecté', detail: `${received[sus]} votes contre lui·elle` })
+
+  const sher = best(onInfiltre, s.players)
+  if (sher && onInfiltre[sher] >= 2) out.push({ id: sher, emoji: '🔎', title: 'Le meilleur flair', detail: `a visé un infiltré ${onInfiltre[sher]} fois` })
+
+  const sneaky = s.players
+    .filter((id) => roles[id] && roles[id] !== 'civil' && (received[id] ?? 0) === 0)
+    .sort((a, b) => Number(s.alive.includes(b)) - Number(s.alive.includes(a)))[0]
+  if (sneaky) out.push({ id: sneaky, emoji: '🥷', title: "L'infiltré·e le plus discret·e", detail: 'n’a reçu aucun vote' })
+  return out.slice(0, 4)
+}
+
 /** Fin de partie : vainqueurs, révélation des deux mots et des rôles. */
 export default function UndercoverSummary({ state, players, meId }: GameSummaryProps) {
   const s = state as unknown as UndercoverState
   if (!s.winner) return null
   const w = WINNER_LABEL[s.winner]
   const roles = s.roles ?? {}
+  const log = ((s as unknown as { vote_log?: Array<Record<string, string>> }).vote_log ?? []).filter((x) => x && typeof x === 'object')
+  const moments = computeMoments(s, log, roles)
   return (
     <div className="flex flex-col gap-3">
       <motion.div
@@ -55,6 +90,34 @@ export default function UndercoverSummary({ state, players, meId }: GameSummaryP
               </motion.div>
             </div>
           ))}
+        </div>
+      )}
+
+      {moments.length > 0 && (
+        <div className="sticker flex flex-col gap-2 bg-surface p-3">
+          <p className="font-display font-extrabold">Les moments de la partie 🎬</p>
+          {moments.map((m, i) => {
+            const p = playerOrPlaceholder(players, m.id)
+            return (
+              <motion.div
+                key={m.title}
+                initial={{ x: -40, opacity: 0, rotate: -3 }}
+                animate={{ x: 0, opacity: 1, rotate: 0 }}
+                transition={{ delay: 1.2 + i * 0.15, type: 'spring', stiffness: 300, damping: 18 }}
+                className="flex items-center gap-3 rounded-chip bg-sunk p-2"
+              >
+                <Avatar slug={p.slug} expression={mood(p, 'sly')} size={44} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-muted">
+                    {m.emoji} {m.title}
+                  </p>
+                  <p className="font-display text-base leading-tight font-extrabold">
+                    {p.nickname} <span className="text-sm font-bold text-muted">· {m.detail}</span>
+                  </p>
+                </div>
+              </motion.div>
+            )
+          })}
         </div>
       )}
 
