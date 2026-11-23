@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { victoryConfetti, burst } from '@/components/ui/confetti'
 import { refreshProfile } from '@/lib/auth'
+import { useHoldUpdate } from '@/store/updateHold'
 import { toastError } from '@/features/soiree/errors'
 import { PushReminderCard } from '@/features/push/PushReminderCard'
 import { DailyBoardView } from './DailyBoard'
@@ -25,6 +26,8 @@ export function DailyPage() {
   const [phase, setPhase] = useState<Phase>('home')
   const [rounds, setRounds] = useState<DailyRound[]>([])
   const [result, setResult] = useState<DailySubmitResult | null>(null)
+  // Pas de « Mettre à jour » en plein défi : le rechargement clôturerait la tentative.
+  useHoldUpdate(phase === 'loading' || phase === 'play' || phase === 'sending')
   // Enregistrement des manches : une file, pour garder l'ordre ; les échecs sont sans gravité
   // (la fin de partie renvoie toutes les réponses, et une tentative coupée est cloturée par le serveur).
   const saveChain = useRef<Promise<unknown>>(Promise.resolve())
