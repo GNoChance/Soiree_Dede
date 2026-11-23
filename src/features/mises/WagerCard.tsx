@@ -20,7 +20,7 @@ function OddsHelp() {
       <ul className="mt-1 list-disc pl-5">
         <li>Plus un joueur gagne souvent à ce jeu, plus sa cote est petite (de ×1,5 à ×5).</li>
         <li>Ton joueur gagne : tu touches mise × cote. Sinon, ta mise est perdue.</li>
-        <li>Partie annulée ou sans gagnant : tu es remboursé·e.</li>
+        <li>Partie annulée ou sans gagnant : tu es remboursé·e (sauf l’hôte qui annule lui-même : sa mise est perdue).</li>
         <li>Paris ouverts 45 s après le lancement (duels : jusqu’au 1er coup).</li>
       </ul>
     </details>

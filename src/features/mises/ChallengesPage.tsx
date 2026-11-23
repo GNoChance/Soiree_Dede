@@ -174,7 +174,7 @@ function NewChallenge({ byId, preset, onDone, onCancel }: { byId: Record<string,
         </div>
         <p className="text-sm leading-snug text-muted">
           {friend ? `Jusqu’à ${max} 🪙 avec ${playerOrPlaceholder(byId, friend).nickname} (le solde de chacun). ` : ''}
-          Chacun met l’enjeu, le gagnant empoche tout. Égalité ou partie annulée : remboursé.
+          Chacun met l’enjeu, le gagnant empoche tout. Égalité : remboursé. Annuler la partie quand on joue le défi = abandon, l’autre empoche tout.
         </p>
       </section>
 

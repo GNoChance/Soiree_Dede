@@ -972,6 +972,7 @@ begin
   if not found then raise exception 'soiree_not_found'; end if;
   if v_s.host_id <> v_me then raise exception 'not_host'; end if;
   if v_s.status = 'ended' then raise exception 'soiree_ended'; end if;
+  perform set_config('app.aborted_by', v_me::text, true);  -- parties en cours coupées par l'hôte (cf. mises)
   return jsonb_build_object('new_unlocks', public._close_soiree(p_soiree_id, 'host', true, now()));
 end $$;
 
@@ -1922,6 +1923,8 @@ begin
 
   if p_action->>'type' = 'abort' then
     if not v_is_host then raise exception 'not_host'; end if;
+    -- Qui annule (lu par le règlement des mises : pari de l'hôte perdu, défi = abandon).
+    perform set_config('app.aborted_by', v_me::text, true);
     v_state := v_m.state || jsonb_build_object('phase', 'aborted', 'aborted', true,
                                                'seq', coalesce((v_m.state->>'seq')::integer, 0) + 1);
     update public.matches set state = v_state, status = 'finished', finished_at = now() where id = p_match_id;

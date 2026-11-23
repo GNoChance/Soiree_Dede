@@ -136,14 +136,16 @@ ok('B gagne : statut finished', after.status === 'finished' && after.winner_id =
 ok('B empoche le pot', (await coins(B)) === cB - 25 + 50 + 20, String(await coins(B)))
 ok('A perd son enjeu', (await coins(A)) === cA - 25 + 5, String(await coins(A)))
 
-// Accepté puis partie annulée -> remboursement
+// Accepté puis partie annulée par un des duellistes (l'hôte A) -> abandon : B empoche le pot
 const a1 = await coins(A), b1 = await coins(B)
 const ch4 = (await as(B)(`select public.create_challenge($1, 'quatre-a-la-suite', 10) r`, [A])).r
 await as(A)(`select public.respond_challenge($1, true) r`, [ch4.id])
 const cm4 = (await as(A)(`select public.start_challenge($1, $2, '{}') r`, [ch4.id, so])).r
 await as(A)(`select public.game_action($1, '{"type":"abort"}') r`, [cm4])
 const s4 = (await db.query(`select status from public.coin_challenges where id = $1`, [ch4.id])).rows[0].status
-ok('annulé : remboursé (void)', s4 === 'void' && (await coins(A)) === a1 && (await coins(B)) === b1, `${s4} ${await coins(A)}/${a1} ${await coins(B)}/${b1}`)
+const w4 = (await db.query(`select winner_id from public.coin_challenges where id = $1`, [ch4.id])).rows[0].winner_id
+ok('annulé par un duelliste : abandon, l’adversaire empoche le pot', s4 === 'finished' && w4 === B && (await coins(A)) === a1 - 10 && (await coins(B)) === b1 + 10, `${s4} ${w4} ${await coins(A)}/${a1} ${await coins(B)}/${b1}`)
+const a1e = await coins(A), b1e = await coins(B)
 
 // Égalité -> remboursement
 const ch5 = (await as(A)(`select public.create_challenge($1, 'morpion', 10) r`, [B])).r
@@ -151,7 +153,7 @@ await as(B)(`select public.respond_challenge($1, true) r`, [ch5.id])
 const cm5 = (await as(A)(`select public.start_challenge($1, $2, '{}') r`, [ch5.id, so])).r
 await db.query(`select public.finish_match($1, $2)`, [cm5, JSON.stringify([{ profile_id: A, won: false, placement: 1, points: 1 }, { profile_id: B, won: false, placement: 1, points: 1 }])])
 const s5 = (await db.query(`select status, winner_id from public.coin_challenges where id = $1`, [ch5.id])).rows[0]
-ok('égalité : remboursé', s5.status === 'finished' && s5.winner_id === null && (await coins(A)) === a1 + 5 && (await coins(B)) === b1 + 5, `${JSON.stringify(s5)} ${await coins(A)} ${await coins(B)}`)
+ok('égalité : remboursé', s5.status === 'finished' && s5.winner_id === null && (await coins(A)) === a1e + 5 && (await coins(B)) === b1e + 5, `${JSON.stringify(s5)} ${await coins(A)} ${await coins(B)}`)
 
 // Accepté jamais joué sous 7 jours -> remboursé
 const a2 = await coins(A), c2 = await coins(C)
@@ -171,5 +173,32 @@ await give(A, -(await coins(A)) + 20, '2') // A n'a plus que 20
 ok('A n’a plus assez : acceptation refusée', (await as(B)(`select public.respond_challenge($1, true) r`, [ch8.id])).err?.includes('challenge_opponent_broke'))
 ok('soldes jamais négatifs', Number((await db.query(`select count(*) c from public.profiles p where public._coins(p.id) < 0`)).rows[0].c) === 0)
 ok('annuler son défi', (await as(A)(`select public.cancel_challenge($1) r`, [ch8.id])).r?.status === 'cancelled')
+
+// ---- L'hôte qui annule ne récupère pas SON pari (les autres sont remboursés)
+await give(A, 100, '3'); await give(D, 20, '3')
+const mh = (await as(A)(`select public.start_match($1, 'morpion', $2) r`, [so, JSON.stringify({ mode: 'duel', duel_players: [B, C], player_ids: [B, C] })])).r
+const ah = await coins(A), dh = await coins(D)
+ok('hôte meneur : peut parier', !(await as(A)(`select public.place_wager($1, $2, 10) r`, [mh, B])).err)
+ok('D parie', !(await as(D)(`select public.place_wager($1, $2, 10) r`, [mh, C])).err)
+await as(A)(`select public.game_action($1, '{"type":"abort"}') r`, [mh])
+ok('hôte qui annule : son pari est perdu', (await coins(A)) === ah - 10 && (await as(A)(`select public.match_wagers($1) r`, [mh])).r.mine.status === 'lost', String(await coins(A)))
+ok('hôte qui annule : les autres sont remboursés', (await coins(D)) === dh)
+
+// ---- Défi entre B et C annulé par l'hôte A (pas duelliste) -> remboursé (void)
+await db.query(`insert into public.friendships(requester_id, addressee_id, status, accepted_at) values ($1, $2, 'accepted', now())`, [B, C])
+await give(B, 20, '4'); await give(C, 20, '4')
+const bv = await coins(B), cv = await coins(C)
+const ch9 = (await as(B)(`select public.create_challenge($1, 'morpion', 10) r`, [C])).r
+await as(C)(`select public.respond_challenge($1, true) r`, [ch9.id])
+const cm9 = (await as(A)(`select public.start_challenge($1, $2, '{}') r`, [ch9.id, so])).r
+await as(A)(`select public.game_action($1, '{"type":"abort"}') r`, [cm9])
+ok('annulé par l’hôte non duelliste : remboursé (void)', (await db.query(`select status from public.coin_challenges where id = $1`, [ch9.id])).rows[0].status === 'void' && (await coins(B)) === bv && (await coins(C)) === cv)
+
+// ---- Fin de soirée par l'hôte : même règle (son pari perdu)
+const me2 = (await as(A)(`select public.start_match($1, 'morpion', $2) r`, [so, JSON.stringify({ mode: 'duel', duel_players: [B, C], player_ids: [B, C] })])).r
+const ae = await coins(A)
+await as(A)(`select public.place_wager($1, $2, 10) r`, [me2, C])
+await as(A)(`select public.end_soiree($1) r`, [so])
+ok('fin de soirée par l’hôte : son pari est perdu', (await coins(A)) === ae - 10, String(await coins(A)))
 
 process.exit(failed ? 1 : 0)

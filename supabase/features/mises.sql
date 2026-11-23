@@ -17,14 +17,16 @@
 --    la partie) : un inconnu a 1 chance sur n ; arrondie au 0,5 et plafonnee entre x1,5 et x5 ;
 --    figee au moment du pari. Gain = floor(mise x cote) si le joueur choisi gagne (equipe /
 --    egalite : il suffit qu'il soit parmi les gagnants), sinon mise perdue. Partie annulee, sans
---    gagnant, ou joueur choisi absent des resultats : rembourse.
+--    gagnant, ou joueur choisi absent des resultats : rembourse ; SAUF le pari de l'hote qui annule
+--    lui-meme la partie (abort / fin de soiree) : perdu.
 -- 2. DEFIS ENTRE JOUEURS (coin_challenges) : « je te defie au Morpion, enjeu 50 ». Ami accepte, jeu
 --    en duel (jeu qui a un hook game_<id>_board_new), enjeu 0/10/25/50/100 <= solde des deux.
 --    48 h pour accepter (sinon expire, rien preleve) ou refuser ; le defiant peut annuler tant que
 --    c'est en attente. Accepte : les deux enjeux sont preleves. Le duel se joue dans une soiree
 --    commune (play_challenge en trouve / cree une) ; l'hote le lance avec start_challenge (mode
 --    duel, 1 manche, eux deux seuls). Fin : le gagnant empoche le pot (2 x enjeu) ; egalite, partie
---    annulee, ou defi accepte jamais joue sous 7 jours : chacun est rembourse.
+--    annulee par l'hote non duelliste, ou defi accepte jamais joue sous 7 jours : chacun est rembourse.
+--    Annulee par un des duellistes (l'hote) : abandon, l'adversaire empoche le pot.
 -- Reglement automatique : trigger matches_mises_settle (status -> 'finished' : finish_match, abort,
 -- fin de soiree, filet 3 h).
 --
@@ -491,10 +493,16 @@ declare
   c         public.coin_challenges%rowtype;
   v_won     uuid[];
   v_gain    integer;
+  -- Hôte qui vient d'annuler la partie (abort) ou de finir la soirée : posé par game_action / end_soiree.
+  v_by      uuid := nullif(current_setting('app.aborted_by', true), '')::uuid;
 begin
   -- Paris
   for w in select * from public.match_wagers where match_id = p_match_id and status = 'open' for update loop
-    if not v_winners or not exists (select 1 from public.match_players where match_id = p_match_id and profile_id = w.pick) then
+    if not v_winners and w.profile_id = v_by then
+      -- L'hôte annule une partie sur laquelle il a parié : pas de remboursement (sinon pari sans risque).
+      update public.match_wagers set status = 'lost', payout = 0, settled_at = now()
+       where match_id = p_match_id and profile_id = w.profile_id;
+    elsif not v_winners or not exists (select 1 from public.match_players where match_id = p_match_id and profile_id = w.pick) then
       perform public._ledger_add(w.profile_id, w.stake, 'wager_refund', 'match:' || p_match_id);
       update public.match_wagers set status = 'refunded', payout = w.stake, settled_at = now()
        where match_id = p_match_id and profile_id = w.profile_id;
@@ -513,7 +521,13 @@ begin
   for c in select * from public.coin_challenges where match_id = p_match_id and status = 'accepted' for update loop
     v_won := array(select profile_id from public.match_players
                     where match_id = p_match_id and won and profile_id in (c.challenger_id, c.opponent_id));
-    if not exists (select 1 from public.match_players where match_id = p_match_id) then
+    if not exists (select 1 from public.match_players where match_id = p_match_id)
+       and v_by in (c.challenger_id, c.opponent_id) then
+      -- Annulée par un des duellistes (hôte) : abandon, l'adversaire empoche le pot.
+      v_won := array[case when v_by = c.challenger_id then c.opponent_id else c.challenger_id end];
+      perform public._ledger_add(v_won[1], 2 * c.stake, 'challenge_win', 'challenge:' || c.id);
+      update public.coin_challenges set status = 'finished', winner_id = v_won[1], settled_at = now() where id = c.id;
+    elsif not exists (select 1 from public.match_players where match_id = p_match_id) then
       perform public._challenge_refund(c);
       update public.coin_challenges set status = 'void', settled_at = now() where id = c.id;
     elsif cardinality(v_won) = 1 then
