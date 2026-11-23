@@ -291,12 +291,16 @@ export function SoireePage() {
         onClose={() => setKickTarget(null)}
         onConfirm={async () => {
           if (!kickTarget) return
+          const wasGuest = byId[kickTarget]?.isGuest
           const { error } = await kickPlayer(soiree.id, kickTarget)
           setKickTarget(null)
           if (error) {
             if (errorCode(error) === 'match_in_progress') toast.error('Impossible d’exclure quelqu’un pendant une partie.')
             else toastError(error)
-          } else fx.whoosh()
+          } else {
+            fx.whoosh()
+            if (wasGuest) toast.success('Invitations fermées : l’ancien QR code ne marche plus. Rouvre-les pour inviter quelqu’un d’autre.')
+          }
           void refetchBans()
         }}
       />

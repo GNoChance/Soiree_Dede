@@ -35,6 +35,11 @@ begin
   insert into public.soiree_bans(soiree_id, profile_id) values (p_soiree_id, p_profile_id)
     on conflict do nothing;
   delete from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id;
+  -- Invité exclu : une nouvelle session suffirait à revenir → on ferme les invitations (l'ancien QR
+  -- ne marche plus ; l'hôte en rouvre un nouveau s'il le veut). Son prénom reste refusé (join_as_guest).
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest) then
+    update public.soirees set guest_token = null where id = p_soiree_id;
+  end if;
 end $$;
 
 -- Ré-inviter un joueur (lève l'exclusion et l'ajoute au salon).

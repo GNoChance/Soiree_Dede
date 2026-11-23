@@ -98,6 +98,11 @@ export function DedePartyOptions({ options, onChange, playerCount: humans }: Gam
               ? `${bots} bot${bots > 1 ? 's' : ''} lance${bots > 1 ? 'nt' : ''} les dés et joue${bots > 1 ? 'nt' : ''} les mini-jeux tout seul${bots > 1 ? 's' : ''}. Ils ne gagnent pas d’XP.`
               : 'Que des vrais joueurs.'}
           </p>
+          {humans === 1 && (
+            <p className="text-sm font-bold text-tomato">
+              🏋️ Seul avec des bots : partie d’entraînement, elle ne compte pas (ni XP, ni trophées, ni classement).
+            </p>
+          )}
         </div>
       )}
       <div className="sticker-sm flex items-center gap-3 bg-sky/20 px-3 py-2">

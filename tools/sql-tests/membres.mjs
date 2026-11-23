@@ -43,12 +43,14 @@ ok('doublon de surnom refusé (insensible à la casse)', (await create(uid(0), '
 
 const lp = (await db.query(`select * from public.list_profiles_public()`)).rows
 const mine = lp.find((p) => p.id === c.r.id)
-ok('apparaît dans list_profiles_public (sans PIN)', !!mine && mine.has_pin === false)
-
-const l1 = await call(UN, `select public.login_profile($1, '1234') r`, [row.slug])
-ok('première connexion : le PIN devient le PIN', l1.r?.ok === true && l1.r.first_login === true, JSON.stringify(l1))
-ok('mauvais PIN ensuite refusé', (await call(uid(11), `select public.login_profile($1, '9999') r`, [row.slug])).r?.error === 'wrong_pin')
-ok('bon PIN ensuite accepté', (await call(uid(11), `select public.login_profile($1, '1234') r`, [row.slug])).r?.ok === true)
+ok('apparaît dans list_profiles_public (avec un code)', !!mine && mine.has_pin === true)
+const PIN = c.r.pin
+ok('code de 4 chiffres renvoyé à l’admin', /^[0-9]{4}$/.test(PIN ?? ''), String(PIN))
+const wrong = PIN === '1234' ? '4321' : '1234'
+ok('personne ne peut prendre le profil avec un autre code', (await call(UN, `select public.login_profile($1, $2) r`, [row.slug, wrong])).r?.error === 'wrong_pin')
+const l1 = await call(UN, `select public.login_profile($1, $2) r`, [row.slug, PIN])
+ok('connexion avec le code donné par l’admin', l1.r?.ok === true && l1.r.first_login === false, JSON.stringify(l1))
+ok('bon PIN ensuite accepté', (await call(uid(11), `select public.login_profile($1, $2) r`, [row.slug, PIN])).r?.ok === true)
 
 // Avatar
 ok('avatar : non-admin refusé', (await call(uid(1), `select public.admin_update_member_avatar($1, 'chat') r`, [c.r.id])).err === 'forbidden')
@@ -56,7 +58,7 @@ ok('avatar : invalide refusé', (await call(uid(0), `select public.admin_update_
 ok('avatar : pas un membre emoji', (await call(uid(0), `select public.admin_update_member_avatar($1, 'chat') r`, [other.id])).err === 'unknown_profile')
 const u = await call(uid(0), `select public.admin_update_member_avatar($1, 'panda') r`, [c.r.id])
 ok('avatar changé', !u.err && u.r.slug === row.slug.replace('renard', 'panda'), u.err ?? u.r?.slug)
-ok('même PIN après changement d’avatar', (await call(uid(12), `select public.login_profile($1, '1234') r`, [u.r.slug])).r?.ok === true)
+ok('même PIN après changement d’avatar', (await call(uid(12), `select public.login_profile($1, $2) r`, [u.r.slug, PIN])).r?.ok === true)
 
 // Compte comme la bande
 const sid = (await call(uid(0), `select public.create_soiree($1) r`, [[c.r.id]])).r?.id

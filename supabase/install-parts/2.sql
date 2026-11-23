@@ -108,7 +108,8 @@ grant execute on function public.admin_delete_idea(uuid) to authenticated;
 -- L'admin ajoute une vraie personne à la bande (pas un invité : is_guest = false, donc classements,
 -- stats, trophées, boutique… comme les 9 autres). Pas encore de chibi : avatar emoji (mêmes ids que
 -- les invités, cf. src/data/guests.ts), slug « m-<avatar>-<6 car.> ».
--- Pas de PIN : à sa première connexion (login_profile), le code saisi devient son code.
+-- Code à 4 chiffres tiré au hasard, renvoyé à l'admin ({..., pin}) qui le lui donne. Pour en
+-- choisir un autre : l'admin réinitialise le code (admin_reset_pin) devant la personne.
 -- Passer en chibi plus tard : voir docs/ARCHITECTURE.md (renommer le slug + catalogue des persos).
 -- Erreurs : forbidden, invalid_first_name, invalid_nickname, invalid_avatar, nickname_taken, unknown_profile.
 -- =============================================================================
@@ -124,6 +125,7 @@ declare
   v_alpha constant text := 'abcdefghjkmnpqrstuvwxyz23456789';
   v_slug  text;
   v_id    uuid;
+  v_pin   text;
 begin
   perform public._require_admin();
   if char_length(v_first) < 1 or char_length(v_first) > 30 then raise exception 'invalid_first_name'; end if;
@@ -146,7 +148,12 @@ begin
           array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','amoureux','cool','gamer'],
           coalesce((select max(sort_order) from public.profiles where not is_guest), 0) + 1)
   returning id into v_id;
-  return public._profile_json(v_id);
+  -- Code tiré au hasard et renvoyé à l'admin (une seule fois) : un profil sans code pourrait être
+  -- pris par n'importe qui (première connexion = le code saisi devient le code).
+  v_pin := lpad(floor(random() * 10000)::integer::text, 4, '0');
+  insert into public.profile_credentials(profile_id, pin_hash, updated_at)
+  values (v_id, extensions.crypt(v_pin, extensions.gen_salt('bf', 8)), now());
+  return public._profile_json(v_id) || jsonb_build_object('pin', v_pin);
 end $$;
 
 -- Change l'emoji d'un membre « m-… » (le slug porte l'avatar ; le suffixe aléatoire est conservé).
@@ -2171,6 +2178,11 @@ begin
   insert into public.soiree_bans(soiree_id, profile_id) values (p_soiree_id, p_profile_id)
     on conflict do nothing;
   delete from public.soiree_players where soiree_id = p_soiree_id and profile_id = p_profile_id;
+  -- Invité exclu : une nouvelle session suffirait à revenir → on ferme les invitations (l'ancien QR
+  -- ne marche plus ; l'hôte en rouvre un nouveau s'il le veut). Son prénom reste refusé (join_as_guest).
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest) then
+    update public.soirees set guest_token = null where id = p_soiree_id;
+  end if;
 end $$;
 
 -- Ré-inviter un joueur (lève l'exclusion et l'ajoute au salon).

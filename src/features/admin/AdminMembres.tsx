@@ -22,7 +22,7 @@ export function AdminMembres() {
   const [nickname, setNickname] = useState('')
   const [avatar, setAvatar] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [added, setAdded] = useState<string | null>(null)
+  const [added, setAdded] = useState<{ nick: string; pin: string | null } | null>(null)
 
   const ready = firstName.trim().length > 0 && nickname.trim().length > 0 && avatar !== null
 
@@ -36,8 +36,9 @@ export function AdminMembres() {
         p_avatar: avatar,
       })
       if (error) throw error
-      const nick = (data as { nickname?: string } | null)?.nickname ?? nickname.trim()
-      setAdded(nick)
+      const res = data as { nickname?: string; pin?: string } | null
+      const nick = res?.nickname ?? nickname.trim()
+      setAdded({ nick, pin: res?.pin ?? null })
       setFirstName('')
       setNickname('')
       setAvatar(null)
@@ -94,9 +95,17 @@ export function AdminMembres() {
         Ajouter
       </Button>
       {added && (
-        <p className="rounded-card border-[3px] border-ink bg-mint/40 p-3 text-center text-sm font-bold text-text">
-          {added} peut se connecter : au premier lancement, il suffit de choisir son code.
-        </p>
+        <div className="flex flex-col items-center gap-1 rounded-card border-[3px] border-ink bg-mint/40 p-3 text-center text-sm font-bold text-text">
+          {added.pin ? (
+            <>
+              <p>Donne-lui son code secret pour se connecter :</p>
+              <p className="font-display text-4xl font-extrabold tracking-[0.3em]">{added.pin}</p>
+              <p className="text-muted">Note-le : il ne sera plus affiché. Pour en choisir un autre, réinitialise son code devant lui dans les Réglages.</p>
+            </>
+          ) : (
+            <p>{added.nick} peut se connecter : au premier lancement, il suffit de choisir son code.</p>
+          )}
+        </div>
       )}
     </Card>
   )

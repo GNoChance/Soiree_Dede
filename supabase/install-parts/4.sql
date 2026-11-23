@@ -1284,6 +1284,10 @@ begin
     into v_results
     from jsonb_array_elements(p_state->'ranking') e;
   p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null, 'results', v_results);
+  -- Seul avec des bots : entraînement, personne ne va dans finish_match (ni XP, ni stats, ni trophées, ni pièces).
+  if jsonb_array_length(p_state->'players') - jsonb_array_length(coalesce(p_state->'bots', '[]'::jsonb)) <= 1 then
+    return jsonb_build_object('state', p_state, 'server', p_server, 'results', '[]'::jsonb);
+  end if;
   -- Les bots ne sont pas des profils : hors de finish_match (XP, stats, trophées), leur rang compte quand même.
   return jsonb_build_object('state', p_state, 'server', p_server, 'results',
     (select coalesce(jsonb_agg(r order by o), '[]'::jsonb) from jsonb_array_elements(v_results) with ordinality t(r, o)
@@ -1501,6 +1505,8 @@ begin
     'phase', 'intro',
     'players', v_ids,
     'bots', v_bots,
+    -- Seul avec des bots : partie d'entraînement, rien ne compte (cf. _dp_finish).
+    'training', cardinality(p_players) = 1,
     'round', 0,
     'rounds', v_rounds,
     'total_rounds', v_rounds,

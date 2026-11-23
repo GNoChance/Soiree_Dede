@@ -150,5 +150,23 @@ ok('fin de soirée puis purge : invité supprimé', purged === 1 && !(await one(
 ok('purge : la partie de la bande reste', !!(await one(`select 1 x from public.match_players where match_id = $1 and profile_id = $2`, [mid, A])))
 ok('purge idempotente', (await one(`select public._purge_guests() n`)).n === 0)
 
+// ---- Invité exclu : il ne revient pas avec un autre téléphone / une nouvelle session
+{
+  const s3 = (await call(uid(1), `select public.create_soiree('{}') r`)).r
+  const t3 = (await call(uid(1), `select public.open_guest_invites($1) r`, [s3.id])).r.token
+  const g4 = (await call(uid(14), `select public.join_as_guest($1, 'Max', 'chat') r`, [t3])).r.profile.id
+  const k = await call(uid(1), `select public.kick_soiree_player($1, $2) r`, [s3.id, g4])
+  ok('exclure un invité', !k.err, k.err)
+  ok('exclure un invité ferme les invitations', (await one(`select guest_token from public.soirees where id = $1`, [s3.id])).guest_token === null)
+  ok('exclu : nouvelle session, ancien QR refusé', (await call(uid(15), `select public.join_as_guest($1, 'Max', 'chat') r`, [t3])).err === 'soiree_not_found')
+  ok('exclu : nouvelle session, code refusé', (await call(uid(15), `select public.join_as_guest($1, 'Max', 'chat') r`, [s3.code])).err === 'guests_closed')
+  const t4 = (await call(uid(1), `select public.open_guest_invites($1) r`, [s3.id])).r.token
+  ok('invitations rouvertes : nouveau QR', t4 && t4 !== t3)
+  ok('exclu : même prénom refusé même avec une nouvelle session', (await call(uid(15), `select public.join_as_guest($1, ' max ', 'panda') r`, [t4])).err === 'soiree_banned')
+  ok('exclu : même téléphone refusé', (await call(uid(14), `select public.join_as_guest($1, 'Maxou', 'chat') r`, [t4])).err === 'soiree_banned')
+  const other = await call(uid(15), `select public.join_as_guest($1, 'Paul', 'panda') r`, [t4])
+  ok('un autre invité peut toujours venir', !other.err, other.err)
+}
+
 console.log(failed ? '\nDES TESTS ONT ÉCHOUÉ' : '\nTous les tests passent')
 process.exit(failed ? 1 : 0)

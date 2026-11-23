@@ -4766,6 +4766,12 @@ begin
   if v_me is not null and exists (select 1 from public.soiree_bans where soiree_id = v_sid and profile_id = v_me) then
     raise exception 'soiree_banned';
   end if;
+  -- Invité exclu revenu avec une nouvelle session : même prénom refusé dans cette soirée.
+  if exists (select 1 from public.soiree_bans b join public.profiles p on p.id = b.profile_id
+              where b.soiree_id = v_sid and p.is_guest and lower(p.nickname) = lower(v_name)
+                and p.id is distinct from v_me) then
+    raise exception 'soiree_banned';
+  end if;
   if (v_me is null or not exists (select 1 from public.soiree_players where soiree_id = v_sid and profile_id = v_me))
      and (select count(*) from public.soiree_players sp join public.profiles p on p.id = sp.profile_id
            where sp.soiree_id = v_sid and p.is_guest) >= public._guest_max_per_soiree() then

@@ -186,7 +186,21 @@ ok('0 joueur → not_enough_players', (await start(OPTS, [])).err === 'not_enoug
   }
   ok('bots : dés lancés dès l’ouverture du lancer', botsRolled)
   ok('bots : jouent chaque mini-jeu', botsPlayed)
-  ok('bots : partie terminée, seul le vrai joueur va dans finish_match', st.state.phase === 'finished' && res?.length === 1 && res[0].profile_id === A && st.state.results.length === 4, JSON.stringify(res))
+  ok('bots : partie terminée, classement complet affiché', st.state.phase === 'finished' && st.state.results.length === 4)
+  ok('seul avec des bots : entraînement, rien ne va dans finish_match (ni XP, ni trophées)', Array.isArray(res) && res.length === 0, JSON.stringify(res))
+  ok('seul avec des bots : l’état le dit (training)', st.state.training === true)
+}
+{
+  // 2 vrais joueurs + 2 bots : les deux vrais joueurs comptent, pas les bots
+  let st = must(await start({ ...OPTS, rounds: 6, bots: 2 }, P.slice(0, 2)), 'bots-duo')
+  ok('2 joueurs + bots : pas d’entraînement', st.state.training === false)
+  let res = null
+  for (let i = 0; i < 200 && st.state.phase !== 'finished'; i++) {
+    const r = must(await act(late(st), A, tick), 'tick ' + st.state.phase)
+    if (r.results) res = r.results
+    st = r
+  }
+  ok('2 joueurs + bots : les 2 vrais joueurs vont dans finish_match', res?.length === 2 && res.every((r) => [A, B].includes(r.profile_id)), JSON.stringify(res))
 }
 ok('9 joueurs → too_many_players', (await start(OPTS, P.slice(0, 9))).err === 'too_many_players')
 ok('8 joueurs acceptés', !(await start(OPTS, P.slice(0, 8))).err)
