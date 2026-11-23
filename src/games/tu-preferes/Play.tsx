@@ -15,7 +15,10 @@ import { AuthorBadge } from '@/features/cartes/AuthorBadge'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import type { TpDilemma, TpReveal, TpSecret, TpSide, TpState } from './types'
 import { percents, themeInfo, tpActions } from './setup'
-import { hash01, NextIn } from '../qui-de-nous/autoTick'
+import { NextIn } from '../qui-de-nous/autoTick'
+import { tpFlyOrder } from './revealOrder'
+import { TuPreferesTv } from './TvView'
+import { useTv } from '@/features/tv/tv'
 
 type Get = (id: string) => PlayerInfo
 type ActFn = GamePlayProps['act']
@@ -58,6 +61,8 @@ export default function TuPreferesPlay({ state, secret, meId, isHost, players, a
   const s = state as unknown as TpState
   const get: Get = (id) => playerOrPlaceholder(players, id)
   useDeadlineTick(s.phase === 'answering' || s.phase === 'reveal' ? s.deadline : null, act)
+  const tv = useTv()
+  if (tv) return <TuPreferesTv s={s} get={get} />
 
   return (
     <div className="flex flex-col gap-4 pb-6">
@@ -382,20 +387,7 @@ const FLY_STEP = 2
 function Reveal({ s, lr, meId, isHost, get, act, pending }: { s: TpState; lr: TpReveal; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean }) {
   const reduce = useReducedMotion()
   // Ordre d'envol : alterné A / B (mélangé) pour garder le suspense. Calculé une fois par manche.
-  const [order] = useState(() => {
-    const shuffled = (side: TpSide) =>
-      Object.keys(lr.choices)
-        .filter((id) => lr.choices[id] === side)
-        .sort((x, y) => hash01(`${lr.round}:${x}`) - hash01(`${lr.round}:${y}`))
-    const a = shuffled('a')
-    const b = shuffled('b')
-    const out: string[] = []
-    while (a.length || b.length) {
-      if (a.length) out.push(a.shift()!)
-      if (b.length) out.push(b.shift()!)
-    }
-    return out
-  })
+  const [order] = useState(() => tpFlyOrder(lr))
   const end = FLY_STEP + order.length
   const [step, setStep] = useState(reduce ? end : 0)
   const done = step >= end

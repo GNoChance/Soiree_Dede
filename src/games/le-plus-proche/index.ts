@@ -18,6 +18,7 @@ export const definition: GameDefinition = {
   rules:
     'Une question, un nombre à deviner : chacun tape son estimation en secret. Le plus proche marque 3 points, le 2e 2 points, le 3e 1 point — et +5 en bonus pour une réponse pile exacte !',
   Play,
+  tv: true,
   Options: LppOptionsPanel,
   Summary,
   defaultOptions: { ...LPP_DEFAULT_OPTIONS },

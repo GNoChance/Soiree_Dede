@@ -122,12 +122,12 @@ export function TvPage() {
   let body: React.ReactNode
   if (notFound) body = waiting('Soirée introuvable', 'Ce lien ne correspond à aucune soirée.', '🤷')
   else if (soireeEnded && !state) body = waiting('La soirée est terminée', 'Merci d’avoir regardé ! À la prochaine soirée.', '🌙')
-  else if (!shownId) body = loaded ? waiting('En attente du prochain jeu…', 'Le mode télé s’allume tout seul dès que l’hôte lance un jeu compatible : un duel (Morpion, 4 à la suite, Bataille navale…) ou Nom de Code.') : <TvSkeleton />
+  else if (!shownId) body = loaded ? waiting('En attente du prochain jeu…', 'Le mode télé s’allume tout seul dès que l’hôte lance un jeu compatible : Cerveau en fête, Le plus proche, Tu préfères, Qui de nous, Nom de Code, Dédé Party, Mini-golf, Kems ou un duel.') : <TvSkeleton />
   else if (!state || !match) body = <TvSkeleton />
   else if (!tvGame)
     body = waiting(
       `En ce moment : ${game?.name ?? 'un autre jeu'}`,
-      'Le mode télé suit les duels et Nom de Code. Il reprendra automatiquement au prochain jeu compatible.',
+      'Ce jeu ne s’affiche pas sur la télé. Elle reprendra automatiquement au prochain jeu compatible.',
       game?.emoji ?? '🎲',
     )
   else if (finished && aborted) body = waiting('Partie annulée', 'L’hôte a annulé la session. On attend la suivante…', '🚫')

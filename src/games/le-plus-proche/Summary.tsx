@@ -3,6 +3,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { useTv } from '@/features/tv/tv'
+import { TvFinal } from '@/features/tv/QuizTv'
 import type { GameSummaryProps } from '../types'
 import type { LppState } from './types'
 import { computeStats, describeMiss, formatNumber, themeInfo, withUnit } from './setup'
@@ -14,6 +16,8 @@ export default function LePlusProcheSummary({ state, meId, players }: GameSummar
   const s = state as unknown as LppState
   const history = s.history ?? []
   const get = (id: string) => playerOrPlaceholder(players, id)
+  const tv = useTv()
+  if (tv) return <TvFinal ids={s.players} scores={s.scores ?? {}} get={get} sub={(id) => ((s.exacts?.[id] ?? 0) > 0 ? `🎯 ×${s.exacts[id]}` : null)} />
   const { stats, mostPrecise, exactKings, maxExact, worst } = computeStats(s.players, history)
   const rows = [...stats].sort((a, b) => (s.scores?.[b.id] ?? 0) - (s.scores?.[a.id] ?? 0))
   const scoreRank = (score: number) => rows.findIndex((x) => (s.scores?.[x.id] ?? 0) === score)

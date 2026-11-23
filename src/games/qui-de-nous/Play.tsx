@@ -14,7 +14,10 @@ import { DropCard, VoterStrip } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { qdnActions } from './setup'
-import { hash01, NextIn, useDeadlineTick } from './autoTick'
+import { NextIn, useDeadlineTick } from './autoTick'
+import { qdnSequence } from './revealOrder'
+import { QuiDeNousTv } from './TvView'
+import { useTv } from '@/features/tv/tv'
 
 /** Champs ajoutés par le serveur (absents des vieilles parties). */
 type QdnS = QuiDeNousState & { deadline?: string | null }
@@ -29,6 +32,8 @@ export default function QuiDeNousPlay({ state, secret, meId, isHost, players, ac
   const s = state as unknown as QdnS
   const get = (id: string) => playerOrPlaceholder(players, id)
   useDeadlineTick(s.phase === 'voting' || s.phase === 'reveal' ? s.deadline : null, act)
+  const tv = useTv()
+  if (tv) return <QuiDeNousTv s={s} get={get} />
 
   return (
     <div className="flex flex-col gap-4 pb-6">
@@ -135,11 +140,7 @@ function Reveal({ s, meId, isHost, get, act, pending }: { s: QdnS; meId: string;
 
   // Ordre de dépouillement : d'abord les joueurs les moins désignés, la majorité en dernier (suspense).
   // Calculé une seule fois par manche (le composant est remonté à chaque manche).
-  const [sequence] = useState(() =>
-    Object.entries(lr.votes)
-      .map(([voter, target]) => ({ voter, target, w: (lr.counts[target] ?? 0) + hash01(`${lr.round}:${voter}`) * 0.5 }))
-      .sort((a, b) => a.w - b.w),
-  )
+  const [sequence] = useState(() => qdnSequence(lr))
 
   const [step, setStep] = useState(reduce ? sequence.length : 0)
   const done = step >= sequence.length

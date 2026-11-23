@@ -18,6 +18,7 @@ export const definition: GameDefinition = {
   rules:
     'Un dilemme, deux choix secrets : ce que TU préfères, puis ce que préférera la MAJORITÉ. 1 point si ton pari est juste (égalité parfaite : personne ne marque). Bonus Rebelle : +1 si tu es le seul de ton avis !',
   Play,
+  tv: true,
   Options: TuPreferesOptions,
   Summary,
   defaultOptions: { ...TP_DEFAULT_OPTIONS },

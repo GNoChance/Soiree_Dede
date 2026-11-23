@@ -17,6 +17,7 @@ export const definition: GameDefinition = {
   maxPlayers: 9,
   rules: 'Une question s’affiche : chacun désigne en secret le joueur qui y correspond le mieux. 1 point si tu votes comme la majorité !',
   Play,
+  tv: true,
   Options: QuiDeNousOptions,
   Summary,
   defaultOptions: QDN_DEFAULT_OPTIONS,

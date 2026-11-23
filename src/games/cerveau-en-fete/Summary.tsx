@@ -3,6 +3,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { useTv } from '@/features/tv/tv'
+import { TvFinal } from '@/features/tv/QuizTv'
 import type { GameSummaryProps } from '../types'
 import type { CefState } from './types'
 import { formatMs, themeInfo } from './setup'
@@ -14,6 +16,11 @@ export default function CerveauSummary({ state, meId, players }: GameSummaryProp
   const s = state as unknown as CefState
   const history = s.history ?? []
   const get = (id: string) => playerOrPlaceholder(players, id)
+  const tv = useTv()
+  if (tv) {
+    const good = (id: string) => history.filter((h) => h.found.some((f) => f.profile_id === id)).length
+    return <TvFinal ids={s.players} scores={s.scores ?? {}} get={get} sub={(id) => `✓ ${good(id)}/${history.length}`} />
+  }
 
   const stats = s.players.map((id) => {
     const mine = history.flatMap((h) => h.found.filter((f) => f.profile_id === id))

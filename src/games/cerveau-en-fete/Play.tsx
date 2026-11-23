@@ -13,6 +13,9 @@ import { cn } from '@/lib/cn'
 import { DropCard } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
+import { useTv } from '@/features/tv/tv'
+import { TvButton } from '@/features/tv/TvButton'
+import CerveauTv from './TvView'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import type { CefPublicQuestion, CefReveal, CefState } from './types'
 import { cefActions, formatMs, rankLabel, themeInfo } from './setup'
@@ -62,10 +65,12 @@ function useDeadlineTick(deadline: string | null | undefined, act: ActFn) {
   return left
 }
 
-export default function CerveauPlay({ state, meId, isHost, players, act, pending }: GamePlayProps) {
+export default function CerveauPlay({ soireeId, state, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as CefState
   const get: Get = (id) => playerOrPlaceholder(players, id)
   useDeadlineTick(s.phase === 'question' || s.phase === 'reveal' ? s.deadline : null, act)
+  const tv = useTv()
+  if (tv) return <CerveauTv state={state} players={players} />
 
   return (
     <div className="flex flex-col gap-4 pb-6">
@@ -74,6 +79,11 @@ export default function CerveauPlay({ state, meId, isHost, players, act, pending
         <RevealPhase key={`r${s.round}`} s={s} lr={s.last_reveal} meId={meId} isHost={isHost} get={get} act={act} pending={pending} />
       )}
       <Scoreboard s={s} meId={meId} get={get} />
+      {(isHost || !s.players.includes(meId)) && (
+        <div className="flex justify-center">
+          <TvButton soireeId={soireeId} />
+        </div>
+      )}
     </div>
   )
 }

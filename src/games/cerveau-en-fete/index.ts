@@ -18,6 +18,7 @@ export const definition: GameDefinition = {
   rules:
     'Une question, un chrono : tape ta réponse (autant d’essais que tu veux, les petites fautes passent) ou choisis-la en QCM (un seul essai). Plus tu es rapide, plus tu marques, +20 pour le premier !',
   Play,
+  tv: true,
   Options: CerveauOptions,
   Summary,
   defaultOptions: { ...CEF_DEFAULT_OPTIONS },
