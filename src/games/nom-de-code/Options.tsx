@@ -7,12 +7,13 @@ import { distributeTeams } from '@/features/teams/teams'
 import type { GameOptionsProps } from '../types'
 import { readNdcOptions } from './setup'
 
-export function NdcOptionsPanel({ options, onChange, playerCount }: GameOptionsProps) {
+export function NdcOptionsPanel({ options, onChange, playingIds }: GameOptionsProps) {
   const o = readNdcOptions(options)
   const set = (patch: Record<string, unknown>) => onChange({ ...options, ...patch })
   const { id: soireeId } = useParams()
-  const { data } = useSoiree(soireeId)
-  const ids = useMemo(() => data?.playerIds ?? [], [data?.playerIds])
+  // Seuls les joueurs retenus (cochés dans « Qui joue ? ») sont proposés ; sans cette info, tous ceux de la soirée.
+  const { data } = useSoiree(playingIds ? undefined : soireeId)
+  const ids = useMemo(() => playingIds ?? data?.playerIds ?? [], [playingIds, data?.playerIds])
 
   // Première ouverture : équipes tirées au hasard (puis composables à la main).
   useEffect(() => {
@@ -58,7 +59,6 @@ export function NdcOptionsPanel({ options, onChange, playerCount }: GameOptionsP
           playerIds={ids}
           onChange={(teams, teamCount) => onChange({ ...options, teams, teamCount })}
         />
-        {playerCount < ids.length && <p className="text-sm text-muted">Les joueurs décochés plus haut ne joueront pas (équipes rééquilibrées si besoin).</p>}
       </div>
     </div>
   )

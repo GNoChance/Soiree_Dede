@@ -15,9 +15,11 @@ export function roundHeadline(s: NdcState): string {
   const w = s.round_winner
   const win = w ? TEAM_INFO[w] : null
   const bombed = s.teams.find((t) => t.eliminated && s.round_end_reason === 'bomb')
+  // Équipe qui a touché la bombe (lue sur la carte dévoilée) : à 3 ou 4 équipes, c'est elle qu'il faut nommer.
+  const bombBy = Object.values(s.revealed).find((r) => r.color === 'bomb')?.by
   if (!win) return 'Fin de la manche'
   if (s.round_end_reason === 'bomb') return `💣 Boum ! Les ${bombed ? TEAM_INFO[bombed.id].short : '…'} ont touché la bombe : les ${win.short} gagnent !`
-  if (s.round_end_reason === 'last_team') return `${win.emoji} Les ${win.short}, dernière équipe en jeu, gagnent !`
+  if (s.round_end_reason === 'last_team') return `${bombBy ? `💣 Les ${TEAM_INFO[bombBy].short} sont éliminés ! ` : ''}${win.emoji} Les ${win.short}, dernière équipe en jeu, gagnent !`
   return `${win.emoji} Les ${win.short} ont trouvé tous leurs mots !`
 }
 

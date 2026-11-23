@@ -50,6 +50,7 @@ const MESSAGES: Record<string, string> = {
   invalid_clue: 'Un seul mot (sans espace) et un nombre de 1 à 9.',
   clue_is_grid_word: 'C’est un mot de la grille !',
   not_spy: 'Seul l’espion donne l’indice.',
+  clue_too_late: 'Trop tard : le temps est écoulé, le tour est passé à l’autre équipe.',
   not_guesser: 'Ce n’est pas à toi de deviner.',
   stop_too_early: 'Trouvez au moins un mot avant de passer.',
   not_a_player: 'Tu ne joues pas cette partie.',

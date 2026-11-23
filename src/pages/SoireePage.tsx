@@ -714,7 +714,7 @@ function HostPanel({ soireeId, playerIds, byId, meId, busy, launchReq, preset, o
           <TutoButton gameId={game.id} gameName={game.name} className="self-start" />
           {Options && (
             <Card>
-              <Options options={options} onChange={(o) => setOptionsByGame((m) => ({ ...m, [game.id]: o }))} playerCount={playing.length} />
+              <Options options={options} onChange={(o) => setOptionsByGame((m) => ({ ...m, [game.id]: o }))} playerCount={playing.length} playingIds={playing} />
             </Card>
           )}
         </motion.div>

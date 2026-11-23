@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Hand, Send, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/features/soiree/errors'
 import { TEAM_INFO } from '@/features/teams/teams'
@@ -14,7 +15,7 @@ import type { NdcState } from './types'
  * Zone au-dessus de la grille : l'espion actif tape son indice (phase clue) ;
  * en phase guess, l'indice en grand, les essais, la majorité et « Stop, on passe ».
  */
-export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId: string; isHost: boolean; act: GamePlayProps['act']; pending: boolean }) {
+export function CluePanel({ s, meId, act, pending }: { s: NdcState; meId: string; act: GamePlayProps['act']; pending: boolean }) {
   const role = myRole(s, meId)
   const active = TEAM_INFO[s.turn]
   const isActiveSpy = role.spy && role.team === s.turn
@@ -40,7 +41,10 @@ export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId
           className="sticker flex flex-col items-center gap-1 rounded-card p-3 text-center"
           style={{ backgroundColor: active.soft, color: '#1f1b2e' }}
         >
-          <p className="font-display text-3xl font-extrabold uppercase">🔎 {s.clue.word} · {s.clue.n}</p>
+          {/* Indice long : la taille diminue et le mot passe à la ligne (jamais de débordement). */}
+          <p className={cn('max-w-full font-display font-extrabold uppercase leading-tight [overflow-wrap:anywhere]', clueSize(s.clue.word))}>
+            🔎 {s.clue.word} <span className="whitespace-nowrap">· {s.clue.n}</span>
+          </p>
           <p className="text-sm font-bold">
             {active.emoji} Les {active.short} devinent · {s.guesses_left} essai{s.guesses_left > 1 ? 's' : ''} restant{s.guesses_left > 1 ? 's' : ''}
           </p>
@@ -72,14 +76,47 @@ export function CluePanel({ s, meId, isHost, act, pending }: { s: NdcState; meId
           </Button>
         </div>
       )}
+    </div>
+  )
+}
 
-      {isHost && (s.phase === 'clue' || s.phase === 'guess') && (
-        <div className="flex justify-end">
-          <Button variant="ghost" size="sm" icon={<SkipForward className="size-4" />} disabled={pending} onClick={() => void act(ndcActions.skip())}>
-            Passer le tour
+/** Taille de l'indice affiché en grand selon sa longueur (24 caractères max). */
+function clueSize(word: string): string {
+  const n = word.length
+  return n <= 8 ? 'text-3xl' : n <= 12 ? 'text-2xl' : n <= 17 ? 'text-xl' : 'text-lg'
+}
+
+/**
+ * Bouton de l'hôte « Passer le tour », placé sous la grille (loin de « Stop, on passe ») et
+ * protégé par une confirmation : un tap par erreur ne fait plus perdre son tour à une équipe.
+ */
+export function SkipTurn({ act, pending }: { act: GamePlayProps['act']; pending: boolean }) {
+  const [ask, setAsk] = useState(false)
+  return (
+    <div className="mt-4 flex justify-center">
+      <Button variant="ghost" size="sm" icon={<SkipForward className="size-4" />} disabled={pending} onClick={() => setAsk(true)}>
+        Passer le tour (hôte)
+      </Button>
+      <Modal open={ask} onClose={() => setAsk(false)} title="Passer le tour ?">
+        <p className="mb-4 text-base font-bold">L’équipe qui joue perd son tour : c’est à l’équipe suivante de jouer.</p>
+        <div className="flex flex-col gap-2">
+          <Button
+            fullWidth
+            variant="danger"
+            icon={<SkipForward className="size-5" />}
+            disabled={pending}
+            onClick={() => {
+              setAsk(false)
+              void act(ndcActions.skip())
+            }}
+          >
+            Oui, on passe
+          </Button>
+          <Button fullWidth variant="secondary" onClick={() => setAsk(false)}>
+            Non, on continue
           </Button>
         </div>
-      )}
+      </Modal>
     </div>
   )
 }

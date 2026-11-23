@@ -2,7 +2,7 @@
  * Règles pures de Nom de Code (sans React), mêmes règles que supabase/games/nom-de-code.sql :
  * normalisation des mots, seuil de majorité, refus d'un indice, rôles.
  */
-import type { TeamColor } from '@/features/teams/teams'
+import { TEAM_INFO, type TeamColor } from '@/features/teams/teams'
 import type { NdcState } from './types'
 
 const FROM = 'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ'
@@ -43,4 +43,10 @@ export function guessersOf(s: NdcState, id: TeamColor): string[] {
 export function myRole(s: NdcState, meId: string): { team: TeamColor | null; spy: boolean } {
   const t = s.teams.find((x) => x.players.includes(meId))
   return { team: t?.id ?? null, spy: Boolean(t && t.spy === meId) }
+}
+
+/** « Rouges », « Rouges et Bleus », « Rouges, Bleus et Verts »… */
+export function teamNames(ids: TeamColor[]): string {
+  const names = ids.map((id) => TEAM_INFO[id].short)
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}` : (names[0] ?? '')
 }

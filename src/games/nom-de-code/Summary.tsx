@@ -31,7 +31,8 @@ export default function NomDeCodeSummary({ state, players, meId }: GameSummaryPr
         if (!t) return null
         return (
           <div key={w} className="flex flex-col items-center gap-2 text-center">
-            <p className="font-display text-2xl font-extrabold" style={{ color: TEAM_INFO[w].color }}>
+            {/* Pastille sur fond clair, texte encre : lisible pour toutes les équipes (le jaune sur fond blanc ne l'était pas) */}
+            <p className="sticker-sm rounded-chip px-3 py-1 font-display text-2xl font-extrabold" style={{ backgroundColor: TEAM_INFO[w].soft, color: '#1f1b2e' }}>
               {TEAM_INFO[w].emoji} Les {TEAM_INFO[w].short} gagnent !
             </p>
             <div className="flex flex-wrap justify-center gap-2">

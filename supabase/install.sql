@@ -18140,7 +18140,8 @@ begin
     'revealed', '{}'::jsonb, 'clue', null, 'guesses_left', 0, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb,
     'turn_found', 0, 'round_winner', null, 'round_end_reason', null, 'key', null,
     'deadline', public._ndc_deadline(p_state->>'timer', 'clue'));
-  p_server := p_server || jsonb_build_object('key', v_key, 'first', '{}'::jsonb, 'team_err', v_zero, 'max_deficit', v_zero);
+  p_server := p_server || jsonb_build_object('key', v_key, 'first', '{}'::jsonb, 'team_err', v_zero, 'team_ok', v_zero,
+                                             'max_deficit', v_zero, 'last_turn', null);
   return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 end $$;
 
@@ -18296,7 +18297,12 @@ begin
   select t into v_win from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_winner;
   p_server := public._ndc_bump(p_server, v_win->>'spy', 'spy_wins', 1);
   for v_m in select jsonb_array_elements_text(v_win->'players') loop
-    if coalesce((p_server->'team_err'->>p_winner)::integer, 0) = 0 then p_server := public._ndc_bump(p_server, v_m, 'flawless', 1); end if;
+    -- « Sans faute » : aucune erreur ET au moins un bon mot trouvé par l'équipe elle-même
+    -- (sinon on gagne sans jouer quand l'adversaire touche la bombe au premier coup)
+    if coalesce((p_server->'team_err'->>p_winner)::integer, 0) = 0
+       and coalesce((p_server->'team_ok'->>p_winner)::integer, 0) >= 1 then
+      p_server := public._ndc_bump(p_server, v_m, 'flawless', 1);
+    end if;
     if coalesce((p_server->'max_deficit'->>p_winner)::integer, 0) >= 3 then p_server := public._ndc_bump(p_server, v_m, 'comeback', 1); end if;
   end loop;
   p_state := p_state || jsonb_build_object(
@@ -18318,6 +18324,7 @@ declare
   v_n    integer := jsonb_array_length(p_state->'teams');
   v_cur  integer;
   v_i    integer;
+  v_old  text := p_state->>'turn';
   v_next text := p_state->>'turn';
 begin
   select o - 1 into v_cur from jsonb_array_elements(p_state->'teams') with ordinality t(x, o) where x->>'id' = p_state->>'turn';
@@ -18331,7 +18338,8 @@ begin
   p_state := p_state || jsonb_build_object(
     'turn', v_next, 'phase', 'clue', 'clue', null, 'votes', '{}'::jsonb, 'stop', '[]'::jsonb,
     'guesses_left', 0, 'turn_found', 0, 'deadline', public._ndc_deadline(p_state->>'timer', 'clue'));
-  p_server := p_server || jsonb_build_object('first', '{}'::jsonb);
+  -- last_turn : équipe dont le tour vient de se terminer (pour distinguer un indice « trop tard » d'un intrus)
+  p_server := p_server || jsonb_build_object('first', '{}'::jsonb, 'last_turn', v_old);
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -18356,7 +18364,9 @@ begin
     elsif v_c not in ('neutral', 'bomb') and v_c <> v_turn then p_server := public._ndc_bump(p_server, v_v, 'enemy_reveals', 1);
     end if;
   end loop;
-  if v_c = v_turn and v_first is not null then p_server := public._ndc_bump(p_server, v_first, 'first_good', 1); end if;
+  -- « Bon flair » : le premier à avoir posé sa tête, SEULEMENT s'il l'a laissée sur ce mot jusqu'au dévoilement
+  -- (qui a retiré ou déplacé sa tête n'est plus dans v_voters).
+  if v_c = v_turn and v_first is not null and v_first = any(v_voters) then p_server := public._ndc_bump(p_server, v_first, 'first_good', 1); end if;
 
   select jsonb_agg(case
            when t->>'id' = v_c and v_c = v_turn then t || jsonb_build_object('found', (t->>'found')::integer + 1)
@@ -18372,6 +18382,9 @@ begin
   if v_c = v_turn then
     p_state := p_state || jsonb_build_object('turn_found', (p_state->>'turn_found')::integer + 1,
                                              'guesses_left', (p_state->>'guesses_left')::integer - 1);
+    -- bons mots trouvés par l'équipe elle-même (pour « Sans faute »)
+    p_server := p_server || jsonb_build_object('team_ok', coalesce(p_server->'team_ok', '{}'::jsonb)
+      || jsonb_build_object(v_turn, coalesce((p_server->'team_ok'->>v_turn)::integer, 0) + 1));
   else
     p_server := jsonb_set(p_server, array['team_err', v_turn], to_jsonb(coalesce((p_server->'team_err'->>v_turn)::integer, 0) + 1));
   end if;
@@ -18430,6 +18443,12 @@ begin
 
   -- ---------------------------------------------------------------- clue
   if v_type = 'clue' then
+    -- indice envoyé juste après la fin du chrono : le tour est déjà passé à une autre équipe,
+    -- l'ancien espion reçoit « trop tard » (et non « seul l'espion… »)
+    if v_phase in ('clue', 'guess') and v_me is distinct from v_spy
+       and v_me = (select t->>'spy' from jsonb_array_elements(p_state->'teams') t where t->>'id' = p_server->>'last_turn') then
+      raise exception 'clue_too_late';
+    end if;
     if v_phase <> 'clue' then raise exception 'wrong_phase'; end if;
     if v_me is distinct from v_spy then raise exception 'not_spy'; end if;
     v_word := btrim(coalesce(p_action->>'word', ''));

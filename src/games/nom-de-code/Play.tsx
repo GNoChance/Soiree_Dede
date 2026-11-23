@@ -10,12 +10,14 @@ import { TEAM_INFO } from '@/features/teams/teams'
 import { TvButton } from '@/features/tv/TvButton'
 import { useTv } from '@/features/tv/tv'
 import type { GamePlayProps } from '../types'
-import { CluePanel } from './CluePanel'
+import { CluePanel, SkipTurn } from './CluePanel'
+import { EliminationNotice } from './Elimination'
 import { Grid } from './Grid'
-import { myRole } from './logic'
+import { myRole, teamNames } from './logic'
 import { RoundEnd } from './RoundEnd'
 import { ndcActions } from './setup'
 import { NdcTv } from './TvView'
+import { useDeadlineTick } from './useTick'
 import type { NdcCell, NdcSecret, NdcState } from './types'
 
 const isSecret = (x: unknown): x is NdcSecret => !!x && typeof x === 'object' && typeof (x as NdcSecret).round === 'number'
@@ -62,22 +64,8 @@ function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players
   const left = useCountdown(live ? s.deadline : null)
   const timeUp = live && Boolean(s.deadline) && left <= 0
 
-  // Échéance : un tick (idempotent), avec un petit délai aléatoire et ré-essai (horloge en avance).
-  useEffect(() => {
-    if (!timeUp || !(role.team || isHost)) return
-    let t = 0
-    let cancelled = false
-    const send = async () => {
-      if (cancelled) return
-      await act(ndcActions.tick())
-      if (!cancelled) t = window.setTimeout(() => void send(), 2500)
-    }
-    t = window.setTimeout(() => void send(), 150 + Math.random() * 500)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
-    }
-  }, [timeUp, act, role.team, isHost])
+  // Échéance : un seul tick (l'hôte tout de suite), les joueurs d'équipe ne servent que de secours.
+  useDeadlineTick(timeUp && Boolean(role.team || isHost), act, isHost ? 'host' : 'player')
 
   // Rôle affiché 3 s au début de chaque manche (front uniquement).
   const [roleRound, setRoleRound] = useState<number | null>(null)
@@ -108,6 +96,7 @@ function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players
   }, [s.revealed, controls])
 
   const secs = Math.ceil(left / 1000)
+  const out = s.teams.filter((t) => t.eliminated).map((t) => t.id)
   return (
     <motion.div animate={controls} className="flex flex-col gap-3 pb-6">
       {/* Pastilles d'équipe : mots restants, équipe active, éliminées grisées */}
@@ -132,9 +121,10 @@ function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players
             ⏱️ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
           </span>
         )}
+        {live && out.length > 0 && <p className="w-full text-center text-sm font-bold text-muted">💀 {out.length > 1 ? 'Éliminés' : 'Éliminé'} : {teamNames(out)}</p>}
       </div>
 
-      {live && <CluePanel s={s} meId={meId} isHost={isHost} act={act} pending={pending} />}
+      {live && <CluePanel s={s} meId={meId} act={act} pending={pending} />}
       {live && (
         <Grid
           s={s}
@@ -146,9 +136,13 @@ function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players
         />
       )}
       {live && role.spy && <p className="text-center text-xs text-muted">🕵️ Tu vois les couleurs secrètes : chut !</p>}
+      {/* Loin de « Stop, on passe » (au-dessus de la grille) : l'hôte passe le tour après confirmation. */}
+      {live && isHost && <SkipTurn act={act} pending={pending} />}
       {(s.phase === 'round_end' || s.phase === 'finished') && <RoundEnd s={s} meId={meId} isHost={isHost} act={act} pending={pending} players={players} />}
 
       {(isHost || !role.team) && <TvButton soireeId={soireeId} />}
+
+      <EliminationNotice s={s} meTeam={role.team} />
 
       <AnimatePresence>
         {roleRound === s.round && (

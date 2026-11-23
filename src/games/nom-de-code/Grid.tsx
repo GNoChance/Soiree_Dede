@@ -6,7 +6,15 @@ import { TEAM_INFO } from '@/features/teams/teams'
 import type { PlayerInfo } from '../types'
 import type { NdcCell, NdcState } from './types'
 
-export const NEUTRAL = '#eadfc8'
+/**
+ * Neutre dévoilé : taupe rayé (nettement plus sombre que le neutre caché, crème ou blanc) + 😐.
+ * Les couleurs sont fixes (thèmes clair et sombre) : texte encre sur fond moyen, contraste > 7.
+ */
+export const NEUTRAL_REVEALED: React.CSSProperties = {
+  backgroundColor: '#b9ad92',
+  backgroundImage: 'repeating-linear-gradient(135deg, rgba(31,27,46,0.18) 0 6px, transparent 6px 12px)',
+  color: '#1f1b2e',
+}
 export const BOMB = '#1f1b2e'
 
 /** Fond léger (couleur secrète) d'une carte non dévoilée, vue par l'espion ou en fin de manche. */
@@ -48,8 +56,10 @@ export function Grid({
         let style: React.CSSProperties | undefined = secret ?? undefined
         let face: React.ReactNode = null
         if (rev) {
-          if (rev.color === 'neutral') style = { background: NEUTRAL, color: '#1f1b2e' }
-          else if (rev.color === 'bomb') {
+          if (rev.color === 'neutral') {
+            style = NEUTRAL_REVEALED
+            face = <span className="text-2xl leading-none">😐</span>
+          } else if (rev.color === 'bomb') {
             style = { background: BOMB, color: '#ffffff' }
             face = <span className="text-2xl leading-none">💥</span>
           } else {
@@ -72,8 +82,9 @@ export function Grid({
             className={cn(
               'relative flex aspect-[4/5] flex-col items-center justify-center gap-0.5 overflow-hidden rounded-chip border-[3px] border-ink px-0.5 text-center',
               !style && 'bg-surface text-text',
+              // carte cachée = en relief (ombre décalée) ; carte retournée = à plat, sans ombre
+              !rev && 'shadow-sticker-sm',
               mine && 'ring-4 ring-sun',
-              rev && 'opacity-95',
             )}
             aria-label={rev ? `${w} (dévoilé)` : `${w}${mine ? ' (ta tête)' : ''}`}
           >

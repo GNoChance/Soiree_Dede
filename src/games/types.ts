@@ -71,6 +71,8 @@ export interface GameOptionsProps {
   options: Record<string, unknown>
   onChange: (options: Record<string, unknown>) => void
   playerCount: number
+  /** Joueurs retenus au lancement (cochés dans « Qui joue ? »), dans l'ordre de la soirée. Absent = inconnu. */
+  playingIds?: string[]
 }
 
 /** Bloc spécifique au jeu affiché sur l'écran de résultats commun. */

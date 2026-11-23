@@ -9,12 +9,13 @@ import { useCountdown } from '@/features/soiree/useServerClock'
 import { TEAM_INFO } from '@/features/teams/teams'
 import { useViewport } from '@/features/tv/tv'
 import type { GamePlayProps, PlayerInfo } from '../types'
-import { BOMB, NEUTRAL, tint } from './Grid'
+import { EliminationNotice } from './Elimination'
+import { BOMB, NEUTRAL_REVEALED, tint } from './Grid'
 import { guessersOf, majority } from './logic'
 import { roundHeadline } from './RoundEnd'
 import { NdcMoments } from './Moments'
-import { ndcActions } from './setup'
 import type { NdcState } from './types'
+import { useDeadlineTick } from './useTick'
 
 /**
  * Vue télé de Nom de Code (rendue par Play sous TvContext) : lecture seule, jamais de secret.
@@ -50,8 +51,14 @@ function TvGrid({ s, players, cellW, cellH, showKey }: { s: NdcState; players: R
         let style: React.CSSProperties | undefined = hidden ?? undefined
         let face: React.ReactNode = null
         if (rev) {
-          if (rev.color === 'neutral') style = { background: NEUTRAL, color: '#1f1b2e' }
-          else if (rev.color === 'bomb') {
+          if (rev.color === 'neutral') {
+            style = NEUTRAL_REVEALED
+            face = (
+              <span style={{ fontSize: cellH * 0.3 }} className="leading-none">
+                😐
+              </span>
+            )
+          } else if (rev.color === 'bomb') {
             style = { background: BOMB, color: '#ffffff' }
             face = (
               <span style={{ fontSize: cellH * 0.34 }} className="leading-none">
@@ -126,6 +133,13 @@ function TeamCard({ s, id, live, players, big }: { s: NdcState; id: NdcState['tu
   )
 }
 
+/** Taille de l'indice selon sa longueur (24 caractères max) : il reste entier, à la ligne si besoin. */
+function tvClueSize(word: string, big: boolean): string {
+  const n = word.length
+  const steps = big ? ['text-5xl', 'text-4xl', 'text-3xl', 'text-2xl'] : ['text-4xl', 'text-3xl', 'text-2xl', 'text-xl']
+  return n <= 8 ? steps[0] : n <= 12 ? steps[1] : n <= 17 ? steps[2] : steps[3]
+}
+
 function CluePanelTv({ s, players, big }: { s: NdcState; players: Record<string, PlayerInfo>; big: boolean }) {
   const active = TEAM_INFO[s.turn]
   const team = s.teams.find((t) => t.id === s.turn)
@@ -149,7 +163,7 @@ function CluePanelTv({ s, players, big }: { s: NdcState; players: Record<string,
         className="sticker flex flex-col items-center gap-1 rounded-card p-3 text-center"
         style={{ backgroundColor: active.soft, color: '#1f1b2e' }}
       >
-        <p className={cn('break-all font-display font-extrabold leading-tight uppercase', big ? 'text-5xl' : 'text-4xl')}>
+        <p className={cn('max-w-full font-display font-extrabold leading-tight uppercase [overflow-wrap:anywhere]', tvClueSize(s.clue.word, big))}>
           🔎 {s.clue.word} <span className="whitespace-nowrap">· {s.clue.n}</span>
         </p>
         <p className={cn('font-bold', big ? 'text-xl' : 'text-base')}>
@@ -173,22 +187,8 @@ export function NdcTv({ state, act, players }: GamePlayProps) {
   const timeUp = live && Boolean(s.deadline) && left <= 0
   const secs = Math.ceil(left / 1000)
 
-  // Échéance : un tick idempotent (ré-essayé tant que la phase n'a pas bougé).
-  useEffect(() => {
-    if (!timeUp) return
-    let t = 0
-    let cancelled = false
-    const send = async () => {
-      if (cancelled) return
-      await act(ndcActions.tick())
-      if (!cancelled) t = window.setTimeout(() => void send(), 2500)
-    }
-    t = window.setTimeout(() => void send(), 400 + Math.random() * 800)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
-    }
-  }, [timeUp, act])
+  // Échéance : la télé n'est qu'un dernier secours (l'hôte envoie le tick, puis les joueurs d'équipe).
+  useDeadlineTick(timeUp, act, 'tv')
 
   useEffect(() => {
     if (live && s.deadline && secs > 0 && secs <= 5) fx.tick()
@@ -263,6 +263,7 @@ export function NdcTv({ state, act, players }: GamePlayProps) {
 
   return (
     <div className={cn('flex h-full gap-4 p-3', landscape ? 'flex-row items-center justify-center' : 'flex-col items-center overflow-y-auto')}>
+      <EliminationNotice s={s} big />
       {landscape ? (
         <>
           <TvGrid s={s} players={players} cellW={cellW} cellH={cellH} showKey={ended} />
@@ -294,7 +295,8 @@ export function NdcTvSummary({ s, players }: { s: NdcState; players: Record<stri
           if (!t) return null
           return (
             <motion.div key={w} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex flex-col items-center gap-2 text-center">
-              <p className="font-display text-4xl font-extrabold" style={{ color: TEAM_INFO[w].color }}>
+              {/* Pastille sur fond clair, texte encre : lisible pour toutes les équipes (le jaune sur fond clair ne l'était pas) */}
+              <p className="sticker rounded-card px-4 py-1 font-display text-4xl font-extrabold" style={{ backgroundColor: TEAM_INFO[w].soft, color: '#1f1b2e' }}>
                 {TEAM_INFO[w].emoji} Les {TEAM_INFO[w].short} gagnent !
               </p>
               <div className="flex flex-wrap justify-center gap-3">

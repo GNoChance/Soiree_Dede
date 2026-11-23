@@ -102,7 +102,8 @@ export function TeamsPicker({
             const meta = TEAM_INFO[c]
             return (
               <div key={c} className="sticker-sm flex min-h-28 flex-col gap-1.5 rounded-card p-2" style={{ backgroundColor: meta.soft, color: '#1f1b2e' }}>
-                <p className="text-center font-display text-base font-extrabold" style={{ color: meta.color }}>
+                {/* Texte encre (hérité) sur le fond clair de l'équipe : la couleur vive (jaune surtout) y était illisible */}
+                <p className="text-center font-display text-base font-extrabold">
                   {meta.emoji} {meta.short} · {cols[c].length}
                 </p>
                 <div className="flex flex-wrap justify-center gap-1.5">{cols[c].map(token)}</div>
