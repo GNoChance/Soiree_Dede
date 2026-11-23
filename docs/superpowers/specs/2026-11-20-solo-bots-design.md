@@ -1,6 +1,7 @@
 # Jouer seul contre un bot — conception
 
 Statut : **à valider par l'utilisateur**. Choix faits avec lui le 2026-11-20.
+**Étape 2 (hors ligne) abandonnée par l'utilisateur le 2026-11-23.**
 
 ## 1. Intention
 S'entraîner seul, quand on n'a personne sous la main, sur les 4 duels de réflexion :
