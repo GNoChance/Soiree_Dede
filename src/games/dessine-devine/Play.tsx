@@ -62,8 +62,9 @@ function useAutoTick(s: DrawState, act: ActFn, meId: string, isHost: boolean) {
     if (s.phase === 'finished' || s.phase === 'aborted' || !s.deadline) return null
     const d = new Date(s.deadline).getTime()
     const h = s.phase === 'drawing' && s.next_hint_at ? new Date(s.next_hint_at).getTime() : Infinity
-    return Math.min(d, h)
-  }, [s.phase, s.deadline, s.next_hint_at])
+    const c = s.phase === 'drawing' && s.draw_check_at && !s.drawn ? new Date(s.draw_check_at).getTime() : Infinity
+    return Math.min(d, h, c)
+  }, [s.phase, s.deadline, s.next_hint_at, s.draw_check_at, s.drawn])
   const role = s.drawer === meId ? 0 : isHost ? 1 : 2
   const actRef = useRef(act)
   useEffect(() => {
@@ -414,6 +415,15 @@ interface LocalClose {
 function DrawingStage({ s, matchId, meId, isDrawer, isPlayer, secret, canvasRef, get, act, onGuessed }: StageProps) {
   const drawing = s.phase === 'drawing'
   const found = s.found.includes(meId)
+  // Premier trait : prévient le serveur (sinon « dessinateur absent » au bout de 25 s). Une fois par tour.
+  const sentStart = useRef(0)
+  const onFirstStroke = () => {
+    if (s.drawn || sentStart.current === s.turn) return
+    sentStart.current = s.turn
+    void act(ddActions.drawingStarted()).then((r) => {
+      if (!r) sentStart.current = 0
+    })
+  }
   const canGuess = drawing && isPlayer && !isDrawer && !found
   const [focused, setFocused] = useState(false)
   const vvh = useVisualViewportHeight()
@@ -473,7 +483,7 @@ function DrawingStage({ s, matchId, meId, isDrawer, isPlayer, secret, canvasRef,
   return (
     <div ref={stageRef} className="flex scroll-mt-2 flex-col gap-2">
       <div className="relative mx-auto w-full" style={canvasMaxWidth ? { maxWidth: canvasMaxWidth } : undefined}>
-        <DrawCanvas ref={canvasRef} matchId={matchId} turn={s.turn} meId={meId} isDrawer={isDrawer} active={drawing} />
+        <DrawCanvas ref={canvasRef} matchId={matchId} turn={s.turn} meId={meId} isDrawer={isDrawer} active={drawing} onFirstStroke={onFirstStroke} />
         {/* Bulles du fil par-dessus le canvas quand le clavier est ouvert */}
         {focused && <FeedBubbles feed={feed.slice(-3)} get={get} meId={meId} />}
         <AnimatePresence>
@@ -666,7 +676,7 @@ function RevealCard({ s, get }: { s: DrawState; get: Get }) {
         transition={{ type: 'spring', stiffness: 200, damping: 14 }}
         className="sticker flex w-full max-w-xs flex-col items-center gap-1.5 bg-surface p-3 text-center"
       >
-        <p className="text-sm font-bold text-muted">{lt.skipped ? 'Tour passé' : nobody ? 'Personne n’a trouvé…' : 'C’était…'}</p>
+        <p className="text-sm font-bold text-muted">{lt.idle ? `${drawer.nickname} n’a pas dessiné… on passe !` : lt.skipped ? 'Tour passé' : nobody ? 'Personne n’a trouvé…' : 'C’était…'}</p>
         {lt.word && (
           <motion.p
             initial={{ scale: 0.3 }}

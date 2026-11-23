@@ -9,6 +9,7 @@ export const qdnActions = {
   vote: (target: string) => ({ type: 'vote', target }),
   reveal: () => ({ type: 'reveal' }),
   next: () => ({ type: 'next' }),
+  tick: () => ({ type: 'tick' }),
 }
 
 export const QDN_ROUND_CHOICES = [5, 10, 15] as const

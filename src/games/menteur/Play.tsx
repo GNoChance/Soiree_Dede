@@ -106,14 +106,14 @@ export default function MenteurPlay({ matchId, state, secret, meId, isHost, play
     const end = new Date(s.deadline).getTime()
     let timer = 0
     const fire = () => {
-      void act(mtrActions.tick())
+      if (isPlayer || isHost) void act(mtrActions.tick())
       timer = window.setTimeout(fire, 4000 + Math.random() * 2000)
     }
     const first = s.phase === 'bidding' ? s.turn === meId : isHost
     const delay = Math.max(0, end - serverNow()) + (first ? 200 : 1500 + Math.random() * 2000)
     timer = window.setTimeout(fire, delay)
     return () => clearTimeout(timer)
-  }, [s.deadline, s.phase, s.turn, meId, isHost, act])
+  }, [s.deadline, s.phase, s.turn, meId, isHost, isPlayer, act])
 
   /* ---- sons ---- */
   const lastTurnSeq = useRef(s.turn_seq)
@@ -162,7 +162,8 @@ export default function MenteurPlay({ matchId, state, secret, meId, isHost, play
             <Avatar slug={turnPlayer.slug} expression={mood(turnPlayer, 'think')} size={48} />
           </motion.div>
           <p className="flex-1 font-display text-lg leading-tight font-extrabold">
-            {turnPlayer.nickname} réfléchit…
+            {turnPlayer.nickname} réfléchit…{s.absent?.[s.turn ?? ''] ? ' 💤 absent·e' : ''}
+            {s.returned && s.turn_seq <= (s.returned_seq ?? 0) + 2 && <span className="block text-sm font-bold text-grape">👋 {s.returned === meId ? 'Te revoilà !' : `${get(s.returned).nickname} est de retour !`}</span>}
             <span className="block text-sm font-bold text-muted">{s.bid ? 'Surenchérir ou crier « Menteur ! » ?' : 'C’est à lui·elle d’ouvrir les enchères.'}</span>
           </p>
           <span className={cn('font-display text-2xl font-extrabold tabular-nums', secLeft <= 5 && 'text-tomato')}>{secLeft}</span>
@@ -313,7 +314,7 @@ function RoundTable({ s, seats, get, meId, left, total }: { s: MtrState; seats: 
               )}
             </div>
             <span className={cn('max-w-full truncate font-display text-xs leading-tight font-extrabold', id === meId && 'text-grape')}>
-              {id === meId ? 'Toi' : p.nickname}
+              {id === meId ? 'Toi' : p.nickname}{s.absent?.[id] ? ' 💤' : ''}
             </span>
             {!out && (
               <motion.span key={count} initial={{ scale: 1.6 }} animate={{ scale: 1 }} className="mt-0.5">

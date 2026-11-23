@@ -61,7 +61,7 @@ ok('rounds each : total_rounds = taille de la plus grande équipe', (await start
 ok('rounds one : total_rounds = 1', s2.state.total_rounds === 1)
 ok('timer normal : deadline ≈ maintenant + 120 s', approxSeconds(s2.state.deadline, 120), s2.state.deadline)
 ok('timer fast : deadline ≈ maintenant + 60 s', approxSeconds((await start(T2, { timer: 'fast' })).r.state.deadline, 60))
-ok('timer relaxed : deadline null', (await start(T2, { timer: 'relaxed' })).r.state.deadline === null)
+ok('timer relaxed : deadline ≈ +300 s (plafond)', approxSeconds((await start(T2, { timer: 'relaxed' })).r.state.deadline, 300))
 ok('stats initialisées à 0 pour chaque joueur', Object.keys(s2.server.stats).length === 9 && s2.server.stats[P[0]].bomb_votes === 0)
 
 // refus
@@ -230,7 +230,9 @@ const tk3 = must(await act(tk1, P[0], false, { type: 'tick' }), 'tk3')
 ok('tick rejoué : idempotent', tk3.state.turn === tk1.state.turn && tk3.server.stats[spyOf(G)].idle_clue === 1)
 const relaxed = await fresh(T6, { timer: 'relaxed' })
 const tkR = must(await act({ ...relaxed, state: { ...relaxed.state } }, P[0], false, { type: 'tick' }), 'tkR')
-ok('relaxed : tick ne fait rien', tkR.state.turn === relaxed.state.turn && tkR.state.phase === 'clue' && tkR.state.deadline === null)
+ok('relaxed : tick avant plafond ne fait rien', tkR.state.turn === relaxed.state.turn && tkR.state.phase === 'clue' && approxSeconds(tkR.state.deadline, 300))
+const tkR2 = must(await act(past(relaxed), P[0], false, { type: 'tick' }), 'tkR2')
+ok('relaxed : tick après plafond passe le tour', tkR2.state.turn === otherOf(relaxed) && tkR2.state.phase === 'clue')
 
 // skip (hôte)
 ok('skip par un non-hôte → not_host', (await act(G, P[1], false, { type: 'skip' })).err === 'not_host')

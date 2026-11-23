@@ -786,6 +786,29 @@ export class Game {
   }
 
   /**
+   * Reprise après rechargement : le serveur a déjà compté `completed` tours pour moi.
+   * On repart juste après la ligne, au bon numéro de tour (le prochain passage compte
+   * le tour `completed + 1`, sans recompter les précédents).
+   */
+  resumeLaps(completed: number) {
+    const r = this.me
+    if (!r || completed < 1 || r.finish !== null) return
+    const tr = this.track
+    const idx = 3
+    const [x, z] = tr.pointAt(idx, 0)
+    r.x = x
+    r.z = z
+    r.idx = tr.wrap(idx)
+    r.lat = 0
+    r.heading = Math.atan2(tr.tz[r.idx], tr.tx[r.idx])
+    r.speed = 0
+    r.lap = completed + 1
+    r.cp = 0
+    r.cut = -1
+    r.netP = this.progress(r)
+  }
+
+  /**
    * Ce téléphone conduit-il les bots ? (le premier joueur présent, cf. Play).
    * Reprise : on part du dernier état reçu (position, cap, vitesse, tour, checkpoint).
    * Abandon : les bots redeviennent distants et suivent les paquets du nouveau conducteur.
@@ -1266,7 +1289,12 @@ export class Game {
   private frame = (stamp: number) => {
     this.raf = requestAnimationFrame(this.frame)
     if (!this.last) this.last = stamp
-    const dt = Math.min(0.05, (stamp - this.last) / 1000)
+    const rawDt = (stamp - this.last) / 1000
+    const dt = Math.min(0.05, rawDt) // visuels (caméra, particules)
+    // Simulation : sous-pas <= 1/30 s pour que la vitesse réelle ne dépende pas du FPS (max 8 sous-pas).
+    const simDt = Math.min(0.25, Math.max(0, rawDt))
+    const subN = Math.max(1, Math.min(8, Math.ceil(simDt / (1 / 30))))
+    const subDt = simDt / subN
     this.last = stamp
     const now = this.o.now()
     this.nowMs = now
@@ -1282,16 +1310,20 @@ export class Game {
     } else {
       this.time = Math.max(0, -left / 1000)
       const inp = this.input()
-      for (const r of this.racers) {
-        if (r.kind === 'remote') this.follow(r, now)
-        else if (r.kind === 'bot' || r.finish !== null || this.o.autopilot) this.step(r, this.botInput(r), false, false, dt)
-        else this.step(r, inp.steer, inp.drift, inp.brake, dt)
+      for (let i = 0; i < subN; i++) {
+        for (const r of this.racers) {
+          if (r.kind === 'remote') {
+            if (i === 0) this.follow(r, now)
+          } else if (r.kind === 'bot' || r.finish !== null || this.o.autopilot) this.step(r, this.botInput(r), false, false, subDt)
+          else this.step(r, inp.steer, inp.drift, inp.brake, subDt)
+        }
+        this.collide()
+        this.updateItems(subDt, now)
       }
-      this.collide()
       if (this.phase === 'racing' && this.me?.finish != null) this.phase = 'finished'
     }
     // les obstacles du circuit bougent dès le décompte
-    this.updateItems(this.phase === 'countdown' ? 0 : dt, now)
+    if (this.phase === 'countdown') this.updateItems(0, now)
 
     const t = stamp / 1000
     for (const r of this.racers) {

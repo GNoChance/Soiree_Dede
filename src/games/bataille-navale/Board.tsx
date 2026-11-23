@@ -5,6 +5,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { mood, pickExpression } from '@/features/soiree/players'
 import { supabase } from '@/lib/supabase'
+import { useServerClock } from '@/features/soiree/useServerClock'
 import { fx as feedback, vibrate } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import type { DuelBoardProps, DuelInfo } from '@/features/duel/types'
@@ -278,6 +279,11 @@ function SetupView({ board, me, duel, colors, get, onMove, onReady, serverFleet 
       window.clearTimeout(timer.current)
     }
   }, [])
+  const serverNow = useServerClock()
+  const deadlineRef = useRef<string | null>(null)
+  useEffect(() => {
+    deadlineRef.current = ctx?.deadline ?? null
+  })
   const latest = useRef<BnShip[] | null>(null)
   const acked = useRef('')
   /** Envoie la flotte locale si le serveur ne l'a pas déjà. */
@@ -299,9 +305,13 @@ function SetupView({ board, me, duel, colors, get, onMove, onReady, serverFleet 
       latest.current = f
       setDraft(f)
       window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => void flush(), 450)
+      // Dans les 3 dernières secondes : envoi immédiat (le serveur valide la flotte à l'échéance).
+      const dl = deadlineRef.current
+      const lastSecs = dl ? new Date(dl).getTime() - serverNow() < 3000 : false
+      if (lastSecs) void flush()
+      else timer.current = window.setTimeout(() => void flush(), 450)
     },
-    [flush],
+    [flush, serverNow],
   )
 
   // Filet : pas de flotte reçue au bout de 2,5 s -> placement auto local, envoyé au serveur.

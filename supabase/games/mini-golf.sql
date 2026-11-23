@@ -328,6 +328,14 @@ begin
     if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') then
       return public._mg_close_hole(p_state, p_server);
     end if;
+    -- Il ne reste qu'un joueur : le trou se clot 45 s apres (meme en « Sans chrono »),
+    -- sans rallonger un chrono deja plus court.
+    if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') - 1 then
+      p_state := p_state || jsonb_build_object('deadline', to_jsonb(
+        case when p_state->>'deadline' is not null
+             then least((p_state->>'deadline')::timestamptz, now() + interval '45 seconds')
+             else now() + interval '45 seconds' end));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- tick (échéances)

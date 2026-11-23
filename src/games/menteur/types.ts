@@ -76,6 +76,11 @@ export interface MtrState {
   /** Joueur qui doit parler (null hors phase bidding). */
   turn: string | null
   turn_seq: number
+  /** Absent auto (2 tours joués par tick) : tours express. Absents des anciennes parties. */
+  absent?: Record<string, boolean>
+  idle?: Record<string, number>
+  returned?: string
+  returned_seq?: number
   turn_seconds: 30 | 45 | 60
   pile_enabled: boolean
   bid: MtrBid | null

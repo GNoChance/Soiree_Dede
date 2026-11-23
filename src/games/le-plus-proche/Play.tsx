@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion'
-import { ArrowRight, Check, Eye, Pencil, Trophy } from 'lucide-react'
+import { ArrowRight, Check, Eye, FastForward, Pencil, Trophy } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Badge } from '@/components/ui/Badge'
@@ -36,9 +36,9 @@ const MEDALS = ['🥇', '🥈', '🥉']
  * Envoie {"type":"tick"} quand l'échéance est passée (horloge serveur), puis
  * réessaie tant que le state n'a pas changé (le serveur ignore les ticks en avance).
  */
-function useDeadlineTick(deadline: string | null | undefined, act: ActFn) {
+function useDeadlineTick(deadline: string | null | undefined, act: ActFn, enabled = true) {
   const left = useCountdown(deadline)
-  const expired = !!deadline && left <= 0 && new Date(deadline).getTime() <= serverNow()
+  const expired = enabled && !!deadline && left <= 0 && new Date(deadline).getTime() <= serverNow()
   useEffect(() => {
     if (!expired) return
     let sent = 0
@@ -58,8 +58,11 @@ function useDeadlineTick(deadline: string | null | undefined, act: ActFn) {
 export default function LePlusProchePlay({ state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as LppState
   const get: Get = (id) => playerOrPlaceholder(players, id)
-  useDeadlineTick(s.phase === 'question' ? s.deadline : null, act)
+  useDeadlineTick(s.phase === 'question' || s.phase === 'reveal' ? s.deadline : null, act, isHost || s.players.includes(meId))
   const mySecret = secret as LppSecret | null
+  // La manche dont l'animation de révélation est terminée (les scores ne bougent qu'après).
+  const [landedRound, setLandedRound] = useState(0)
+  const landed = s.phase !== 'reveal' || landedRound === s.round
 
   return (
     <div className="flex flex-col gap-4 pb-6">
@@ -67,9 +70,9 @@ export default function LePlusProchePlay({ state, secret, meId, isHost, players,
         <QuestionPhase key={`q${s.round}`} s={s} secret={mySecret?.round === s.round ? mySecret : null} meId={meId} isHost={isHost} get={get} act={act} />
       )}
       {s.phase === 'reveal' && s.last_reveal && (
-        <RevealPhase key={`r${s.round}`} s={s} lr={s.last_reveal} meId={meId} isHost={isHost} get={get} act={act} pending={pending} />
+        <RevealPhase key={`r${s.round}`} s={s} lr={s.last_reveal} meId={meId} isHost={isHost} get={get} act={act} pending={pending} onLanded={() => setLandedRound(s.round)} />
       )}
-      <Scoreboard s={s} meId={meId} get={get} />
+      <Scoreboard s={s} meId={meId} get={get} landed={landed} />
     </div>
   )
 }
@@ -377,8 +380,8 @@ function timeline(n: number, reduce: boolean) {
   return { avatar: (i: number) => 0.5 + i * step, truth, after: truth + 0.9 }
 }
 
-function Ruler({ lr, get, meId, unit }: { lr: LppReveal; get: Get; meId: string; unit: string | null }) {
-  const reduce = !!useReducedMotion()
+function Ruler({ lr, get, meId, unit, fast }: { lr: LppReveal; get: Get; meId: string; unit: string | null; fast: boolean }) {
+  const reduce = !!useReducedMotion() || fast
   const entries = lr.ranking
   const scale = useMemo(() => buildScale(entries.map((e) => e.value), lr.answer), [entries, lr.answer])
   const positions = entries.map((e) => scale.pos(e.value))
@@ -535,10 +538,22 @@ function Podium({ entries, get, delay }: { entries: LppRankingEntry[]; get: Get;
   )
 }
 
-function RevealPhase({ s, lr, meId, isHost, get, act, pending }: { s: LppState; lr: LppReveal; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean }) {
-  const reduce = !!useReducedMotion()
+function RevealPhase({ s, lr, meId, isHost, get, act, pending, onLanded }: { s: LppState; lr: LppReveal; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean; onLanded: () => void }) {
+  const [fast, setFast] = useState(false)
+  const reduce = !!useReducedMotion() || fast
   const unit = lr.question.unit
   const t = timeline(lr.ranking.length, reduce)
+  const [animOver, setAnimOver] = useState(false)
+  // Fin de l'animation : les scores du classement se mettent à jour.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setAnimOver(true)
+      onLanded()
+    }, (t.after + 0.9) * 1000)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fast])
+  const left = useCountdown(s.deadline, 500)
   const last = s.round >= s.total_rounds
   const silent = s.players.filter((id) => !lr.ranking.some((e) => e.profile_id === id))
 
@@ -568,7 +583,13 @@ function RevealPhase({ s, lr, meId, isHost, get, act, pending }: { s: LppState; 
         )}
       </motion.div>
 
-      <Ruler lr={lr} get={get} meId={meId} unit={unit} />
+      <Ruler key={fast ? 'fast' : 'slow'} lr={lr} get={get} meId={meId} unit={unit} fast={fast} />
+
+      {!animOver && (
+        <button type="button" className="mx-auto flex items-center gap-1 font-display font-extrabold text-muted underline" onClick={() => setFast(true)}>
+          <FastForward className="size-4" /> Passer l’animation
+        </button>
+      )}
 
       <Podium entries={lr.ranking} get={get} delay={t.after} />
 
@@ -605,6 +626,11 @@ function RevealPhase({ s, lr, meId, isHost, get, act, pending }: { s: LppState; 
         )}
       </motion.div>
 
+      {s.deadline && (
+        <p className="text-center text-sm font-bold text-muted">
+          {last ? 'Résultats' : 'Suite'} dans {Math.max(0, Math.ceil(left / 1000))} s
+        </p>
+      )}
       {isHost ? (
         <Button size="lg" fullWidth loading={pending} icon={last ? <Trophy className="size-6" /> : <ArrowRight className="size-6" />} onClick={() => void act(lppActions.next(s.round))}>
           {last ? 'Voir les résultats' : 'Manche suivante'}
@@ -620,10 +646,13 @@ function RevealPhase({ s, lr, meId, isHost, get, act, pending }: { s: LppState; 
 /* Tableau des scores                                                          */
 /* -------------------------------------------------------------------------- */
 
-function Scoreboard({ s, meId, get }: { s: LppState; meId: string; get: Get }) {
-  const sorted = [...s.players].sort((a, b) => (s.scores[b] ?? 0) - (s.scores[a] ?? 0))
-  const deltas = s.phase === 'reveal' ? (s.last_reveal?.points ?? {}) : {}
-  const delay = s.phase === 'reveal' ? timeline(s.last_reveal?.ranking.length ?? 0, false).after : 0
+function Scoreboard({ s, meId, get, landed }: { s: LppState; meId: string; get: Get; landed: boolean }) {
+  // Tant que l'animation n'est pas finie, on affiche les scores d'avant la manche.
+  const pts = s.phase === 'reveal' ? (s.last_reveal?.points ?? {}) : {}
+  const shown = (id: string) => (landed ? (s.scores[id] ?? 0) : (s.scores[id] ?? 0) - (pts[id] ?? 0))
+  const sorted = [...s.players].sort((a, b) => shown(b) - shown(a))
+  const deltas = s.phase === 'reveal' && landed ? pts : {}
+  const delay = 0
   return (
     <div className="sticker bg-sunk p-3">
       <p className="mb-2 flex items-center gap-1.5 font-display font-extrabold">
@@ -633,7 +662,7 @@ function Scoreboard({ s, meId, get }: { s: LppState; meId: string; get: Get }) {
         <div className="flex flex-col gap-1">
           {sorted.map((id, i) => {
             const p = get(id)
-            const sc = s.scores[id] ?? 0
+            const sc = shown(id)
             const d = deltas[id]
             const ex = s.exacts?.[id] ?? 0
             return (

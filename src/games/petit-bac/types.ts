@@ -9,6 +9,7 @@ export interface PbCategory {
   emoji: string
 }
 
+/** (state) score_deadline?: string — fin de la phase round_score (auto-avance), absent sur les anciennes parties. */
 export type PbPhase = 'writing' | 'validation' | 'round_score' | 'finished' | 'aborted'
 
 /** Refus automatique : vide ou mauvaise lettre (null = à valider par les joueurs). */
@@ -34,6 +35,8 @@ export interface PbDetail {
 export interface PbValidation {
   /** Catégorie affichée (0-based). */
   cat_index: number
+  /** Fin du temps de la catégorie en cours (auto-avance) ; absent sur les anciennes parties. */
+  deadline?: string
   /** catId -> uid -> réponse */
   answers: Record<string, Record<string, PbAnswer>>
   /** catId -> uid ciblé -> uids des contestataires */

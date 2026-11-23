@@ -131,7 +131,9 @@ begin
     'bids', '[]'::jsonb,
     'total_dice', v_total,
     'reveal', null,
-    'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer + p_grace)));
+    'deadline', public._mtr_iso(now() + make_interval(secs => case
+      when coalesce((p_state->'absent'->>p_starter)::boolean, false) then 8   -- absent auto : tour express
+      else (p_state->>'turn_seconds')::integer + p_grace end)));
   return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 end $$;
 
@@ -373,7 +375,10 @@ declare
   v_secrets jsonb := null;
   v_bids    jsonb;
 begin
-  if v_phase not in ('bidding', 'reveal') then raise exception 'wrong_phase'; end if;
+  if v_phase not in ('bidding', 'reveal') then
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
   if jsonb_typeof(v_bid) <> 'object' then v_bid := null; end if;
 
   -- ---------------------------------------------------------------- tick
@@ -431,6 +436,24 @@ begin
     raise exception 'unknown_action';
   end if;
 
+  -- Absent auto : 2 tours consécutifs joués par tick -> tours express ; une action du joueur le fait revenir.
+  if v_auto then
+    p_state := p_state || jsonb_build_object('idle', coalesce(p_state->'idle', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_state->'idle'->>v_me)::integer, 0) + 1));
+    if (p_state->'idle'->>v_me)::integer >= 2 and not coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', coalesce(p_state->'absent', '{}'::jsonb)
+        || jsonb_build_object(v_me, true));
+    end if;
+  elsif v_type in ('bid', 'liar', 'pile') then
+    if p_state->'idle' ? v_me then
+      p_state := p_state || jsonb_build_object('idle', (p_state->'idle') - v_me);
+    end if;
+    if coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', (p_state->'absent') - v_me,
+                                               'returned', v_me, 'returned_seq', coalesce((p_state->>'turn_seq')::integer, 0));
+    end if;
+  end if;
+
   -- ---------------------------------------------------------------- application
   if v_type = 'bid' then
     if not public._mtr_valid(v_q, v_f, v_bid, v_total) then raise exception 'bid_too_low'; end if;
@@ -444,7 +467,9 @@ begin
       'bids', v_bids || jsonb_build_array(v_bid),
       'turn', public._mtr_next(p_state, v_me),
       'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
-      'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer)));
+      'deadline', public._mtr_iso(now() + make_interval(secs => case
+        when coalesce((p_state->'absent'->>public._mtr_next(p_state, v_me))::boolean, false) then 8
+        else (p_state->>'turn_seconds')::integer end)));
 
   elsif v_type in ('liar', 'pile') then
     p_state := public._mtr_resolve(p_state, p_server, v_me, v_type, v_auto);

@@ -47,7 +47,7 @@ export function NdcOptionsPanel({ options, onChange, playerCount }: GameOptionsP
           ]}
         />
         <p className="text-sm text-muted">
-          {o.timer === 'relaxed' ? 'Pas de chrono : on prend son temps.' : o.timer === 'fast' ? '1 min pour l’indice, 2 min pour deviner.' : '2 min pour l’indice, 3 min pour deviner.'}
+          {o.timer === 'relaxed' ? 'On prend son temps (5 min max par phase, le chrono n’apparaît qu’à la dernière minute).' : o.timer === 'fast' ? '1 min pour l’indice, 2 min pour deviner.' : '2 min pour l’indice, 3 min pour deviner.'}
         </p>
       </div>
       <div className="flex flex-col gap-1.5">

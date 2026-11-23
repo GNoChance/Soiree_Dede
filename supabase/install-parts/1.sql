@@ -1174,6 +1174,7 @@ begin
       'question_by', v_by->0,
       'players', to_jsonb(p_players),
       'voters', '[]'::jsonb,
+      'deadline', to_jsonb(now() + interval '45 seconds'),   -- fin du vote : révélation auto (tick)
       'scores', v_zero,
       'designated', v_zero,
       'last_reveal', null,
@@ -1194,6 +1195,7 @@ declare
   v_max     integer;
   v_maj     text[];
   v_scorers text[];
+  v_nvotes  integer;
 begin
   select coalesce(jsonb_object_agg(t.target, t.c), '{}'::jsonb), coalesce(max(t.c), 0)
     into v_counts, v_max
@@ -1202,10 +1204,15 @@ begin
 
   v_maj := array(select key from jsonb_each_text(v_counts)
                   where v_max > 0 and value::integer = v_max order by key);
+  -- « Triangle » : chacun désigné une seule fois (max = 1) avec >= 3 ex-aequo -> pas de majorité.
+  if v_max = 1 and cardinality(v_maj) >= 3 then v_maj := '{}'; end if;
   v_scorers := array(select key from jsonb_each_text(v_votes) where value = any(v_maj) order by key);
+  v_nvotes := (select count(*)::integer from jsonb_each_text(v_votes));
 
   p_state := p_state || jsonb_build_object(
     'phase', 'reveal',
+    -- suite auto : le temps du dépouillement animé (~1 s par vote) + ~15 s de lecture
+    'deadline', to_jsonb(now() + make_interval(secs => 16 + v_nvotes)),
     'scores', (select jsonb_object_agg(key, value::integer + case when key = any(v_scorers) then 1 else 0 end)
                  from jsonb_each_text(p_state->'scores')),
     'designated', (select jsonb_object_agg(key, value::integer + coalesce((v_counts->>key)::integer, 0))
@@ -1277,8 +1284,29 @@ begin
   select coalesce(jsonb_agg(key order by key), '[]'::jsonb) into v_winners
     from jsonb_each_text(p_state->'scores') where v_max > 0 and value::integer = v_max;
 
-  p_state := p_state || jsonb_build_object('phase', 'finished', 'winners', v_winners, 'results', v_results);
+  p_state := p_state || jsonb_build_object('phase', 'finished', 'deadline', null, 'winners', v_winners, 'results', v_results);
   return jsonb_build_object('state', p_state, 'server', p_server, 'results', v_results);
+end $$;
+
+-- Manche suivante (ou fin de partie) depuis la phase reveal : « next » de l'hôte ou tick.
+create or replace function public._qdn_advance(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_round integer := (p_state->>'round')::integer;
+begin
+  if v_round >= (p_state->>'total_rounds')::integer then
+    return public._qdn_finish(p_state, p_server);
+  end if;
+  p_state := p_state || jsonb_build_object(
+    'phase', 'voting', 'round', v_round + 1,
+    'question', p_server->'questions'->>v_round,   -- index 0-based = manche suivante
+    'question_by', coalesce(p_server->'authors'->v_round, 'null'::jsonb),
+    'voters', '[]'::jsonb,
+    'deadline', to_jsonb(now() + interval '45 seconds'));
+  p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
 create or replace function public.game_qui_de_nous_action(
@@ -1293,8 +1321,19 @@ declare
   v_total  integer := (p_state->>'total_rounds')::integer;
   v_target text;
   v_voters jsonb;
+  v_actor  text := p_actor::text;
+  v_res    jsonb;
+  v_dl     timestamptz := nullif(p_state->>'deadline', '')::timestamptz;
 begin
-  if v_type = 'vote' then
+  if v_type = 'tick' then
+    -- Idempotent : ignoré si trop tôt, sans échéance (vieille partie) ou hors phase.
+    if v_dl is null or now() < v_dl or v_phase not in ('voting', 'reveal') then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    if v_phase = 'voting' then return public._qdn_reveal(p_state, p_server); end if;
+    return public._qdn_advance(p_state, p_server);
+
+  elsif v_type = 'vote' then
     if v_phase <> 'voting' then raise exception 'wrong_phase'; end if;
     if not (p_state->'players' ? p_actor::text) then raise exception 'not_a_player'; end if;
     begin
@@ -1305,16 +1344,20 @@ begin
     if v_target is null or not (p_state->'players' ? v_target) then raise exception 'invalid_target'; end if;
     if v_target = p_actor::text then raise exception 'cannot_vote_self'; end if;
 
-    p_server := jsonb_set(p_server, array['votes', p_actor::text], to_jsonb(v_target), true);
+    p_server := jsonb_set(p_server, array['votes', v_actor], to_jsonb(v_target), true);
     select coalesce(jsonb_agg(pl order by o), '[]'::jsonb) into v_voters
       from jsonb_array_elements_text(p_state->'players') with ordinality as t(pl, o)
      where (p_server->'votes') ? pl;
     p_state := jsonb_set(p_state, '{voters}', v_voters);
 
     if jsonb_array_length(v_voters) >= jsonb_array_length(p_state->'players') then
-      return public._qdn_reveal(p_state, p_server);
+      v_res := public._qdn_reveal(p_state, p_server);
+    else
+      v_res := jsonb_build_object('state', p_state, 'server', p_server);
     end if;
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    -- Mon vote, relisible après rechargement (match_secrets).
+    return v_res || jsonb_build_object('secrets', jsonb_build_object(
+      v_actor, jsonb_build_object('round', v_round, 'target', v_target)));
 
   elsif v_type = 'reveal' then
     if not p_is_host then raise exception 'not_host'; end if;
@@ -1324,16 +1367,7 @@ begin
   elsif v_type = 'next' then
     if not p_is_host then raise exception 'not_host'; end if;
     if v_phase <> 'reveal' then raise exception 'wrong_phase'; end if;
-    if v_round >= v_total then
-      return public._qdn_finish(p_state, p_server);
-    end if;
-    p_state := p_state || jsonb_build_object(
-      'phase', 'voting', 'round', v_round + 1,
-      'question', p_server->'questions'->>v_round,   -- index 0-based = manche suivante
-      'question_by', coalesce(p_server->'authors'->v_round, 'null'::jsonb),
-      'voters', '[]'::jsonb);
-    p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._qdn_advance(p_state, p_server);
 
   else
     raise exception 'unknown_action';
@@ -1417,6 +1451,8 @@ begin
       'voters', '[]'::jsonb,
       'candidates', '[]'::jsonb,
       'revote', false,
+      'deadline', null,
+      'vote_unlock', to_jsonb(now() + interval '90 seconds'),   -- après : tout joueur vivant peut lancer le vote
       'last_vote', null,
       'eliminated', '[]'::jsonb,
       'current_elimination', null,
@@ -1497,6 +1533,7 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'finished',
+    'deadline', null,
     'winner', p_winner,
     'words', jsonb_build_object('civil', p_server->>'civil_word', 'undercover', p_server->>'undercover_word'),
     'roles', v_roles,
@@ -1531,6 +1568,7 @@ begin
     -- Égalité : un seul revote entre ex-aequo.
     p_state := p_state || jsonb_build_object(
       'phase', 'vote', 'revote', true, 'candidates', to_jsonb(v_tied), 'voters', '[]'::jsonb,
+      'deadline', to_jsonb(now() + interval '60 seconds'),
       'last_vote', jsonb_build_object('round', p_state->'round', 'votes', v_votes, 'counts', v_counts,
                                       'outcome', 'revote', 'tied', to_jsonb(v_tied)));
     p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
@@ -1557,9 +1595,89 @@ begin
     'current_elimination', v_rec,
     'voters', '[]'::jsonb,
     'candidates', '[]'::jsonb,
+    -- devinette de Mister White : 45 s ; écran d'élimination : suite auto après 20 s
+    'deadline', to_jsonb(now() + case when v_role = 'mrwhite' then interval '45 seconds' else interval '20 seconds' end),
     'last_vote', jsonb_build_object('round', p_state->'round', 'votes', v_votes, 'counts', v_counts,
                                     'outcome', v_outcome, 'tied', to_jsonb(v_tied)));
   p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Fin de l'écran d'élimination : victoire, ou manche de description suivante.
+create or replace function public._uc_next(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_civ     integer;
+  v_inf     integer;
+  v_order   text[];
+  v_n       integer;
+  v_idx     integer;
+  v_starter text;
+  j         integer;
+begin
+  select count(*) filter (where p_server->'roles'->>a = 'civil'),
+         count(*) filter (where p_server->'roles'->>a <> 'civil')
+    into v_civ, v_inf
+    from jsonb_array_elements_text(p_state->'alive') as t(a);
+
+  if v_inf = 0 then
+    return public._uc_finish(p_state, p_server, 'civils');
+  elsif v_civ <= v_inf then
+    return public._uc_finish(p_state, p_server, 'infiltres');
+  end if;
+
+  -- Manche suivante : le premier orateur tourne au joueur vivant suivant.
+  v_order := array(select jsonb_array_elements_text(p_state->'order'));
+  v_n := cardinality(v_order);
+  v_idx := coalesce(array_position(v_order, p_state->>'starter'), 1);
+  for j in 1 .. v_n loop
+    if (p_state->'alive') ? v_order[((v_idx - 1 + j) % v_n) + 1] then
+      v_starter := v_order[((v_idx - 1 + j) % v_n) + 1];
+      exit;
+    end if;
+  end loop;
+
+  p_state := p_state || jsonb_build_object(
+    'phase', 'describe',
+    'round', (p_state->>'round')::integer + 1,
+    'starter', v_starter,
+    'current_elimination', null,
+    'mrwhite_guess', null,
+    'voters', '[]'::jsonb,
+    'candidates', '[]'::jsonb,
+    'revote', false,
+    'deadline', null,
+    'vote_unlock', to_jsonb(now() + interval '90 seconds'));
+  p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Ouvre le vote (host, ou joueur vivant après le délai de description).
+create or replace function public._uc_open_vote(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'vote', 'revote', false, 'candidates', p_state->'alive', 'voters', '[]'::jsonb,
+    'deadline', to_jsonb(now() + interval '60 seconds'));
+  p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Mister White n'a pas trouvé (refus, ou délai écoulé) : écran d'élimination, suite auto après 20 s.
+create or replace function public._uc_guess_failed(p_state jsonb, p_server jsonb, p_word text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  p_state := p_state || jsonb_build_object(
+    'phase', 'elimination',
+    'deadline', to_jsonb(now() + interval '20 seconds'),
+    'mrwhite_guess', jsonb_build_object('profile_id', p_state->'current_elimination'->>'profile_id',
+                                        'word', p_word, 'correct', false));
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -1583,14 +1701,27 @@ declare
   v_idx     integer;
   v_starter text;
   j         integer;
+  v_dl      timestamptz := nullif(p_state->>'deadline', '')::timestamptz;
+  v_unlock  timestamptz := nullif(p_state->>'vote_unlock', '')::timestamptz;
 begin
-  if v_type = 'start_vote' then
-    if not p_is_host then raise exception 'not_host'; end if;
-    if v_phase <> 'describe' then raise exception 'wrong_phase'; end if;
-    p_state := p_state || jsonb_build_object(
-      'phase', 'vote', 'revote', false, 'candidates', p_state->'alive', 'voters', '[]'::jsonb);
-    p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
+  if v_type = 'tick' then
+    -- Idempotent : ignoré si trop tôt, sans échéance (vieille partie) ou hors phase.
+    if v_dl is null or now() < v_dl then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    if v_phase = 'vote' then return public._uc_tally(p_state, p_server); end if;
+    if v_phase = 'mrwhite_guess' then return public._uc_guess_failed(p_state, p_server, null); end if;
+    if v_phase = 'elimination' then return public._uc_next(p_state, p_server); end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
+
+  elsif v_type = 'start_vote' then
+    if v_phase <> 'describe' then raise exception 'wrong_phase'; end if;
+    -- L'hôte à tout moment ; un joueur vivant seulement une fois le délai de description écoulé.
+    if not p_is_host then
+      if not ((p_state->'alive') ? v_actor) then raise exception 'not_host'; end if;
+      if v_unlock is not null and now() < v_unlock then raise exception 'not_host'; end if;
+    end if;
+    return public._uc_open_vote(p_state, p_server);
 
   elsif v_type = 'vote' then
     if v_phase <> 'vote' then raise exception 'wrong_phase'; end if;
@@ -1631,55 +1762,17 @@ begin
     if v_correct then
       return public._uc_finish(p_state, p_server, 'mrwhite');
     end if;
-    p_state := p_state || jsonb_build_object('phase', 'elimination');
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._uc_guess_failed(p_state, p_server, v_guess);
 
   elsif v_type = 'skip_guess' then
     if not p_is_host then raise exception 'not_host'; end if;
     if v_phase <> 'mrwhite_guess' then raise exception 'wrong_phase'; end if;
-    p_state := p_state || jsonb_build_object(
-      'phase', 'elimination',
-      'mrwhite_guess', jsonb_build_object('profile_id', p_state->'current_elimination'->>'profile_id',
-                                          'word', null, 'correct', false));
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._uc_guess_failed(p_state, p_server, null);
 
   elsif v_type = 'next' then
     if not p_is_host then raise exception 'not_host'; end if;
     if v_phase <> 'elimination' then raise exception 'wrong_phase'; end if;
-
-    select count(*) filter (where p_server->'roles'->>a = 'civil'),
-           count(*) filter (where p_server->'roles'->>a <> 'civil')
-      into v_civ, v_inf
-      from jsonb_array_elements_text(p_state->'alive') as t(a);
-
-    if v_inf = 0 then
-      return public._uc_finish(p_state, p_server, 'civils');
-    elsif v_civ <= v_inf then
-      return public._uc_finish(p_state, p_server, 'infiltres');
-    end if;
-
-    -- Manche suivante : le premier orateur tourne au joueur vivant suivant.
-    v_order := array(select jsonb_array_elements_text(p_state->'order'));
-    v_n := cardinality(v_order);
-    v_idx := coalesce(array_position(v_order, p_state->>'starter'), 1);
-    for j in 1 .. v_n loop
-      if (p_state->'alive') ? v_order[((v_idx - 1 + j) % v_n) + 1] then
-        v_starter := v_order[((v_idx - 1 + j) % v_n) + 1];
-        exit;
-      end if;
-    end loop;
-
-    p_state := p_state || jsonb_build_object(
-      'phase', 'describe',
-      'round', (p_state->>'round')::integer + 1,
-      'starter', v_starter,
-      'current_elimination', null,
-      'mrwhite_guess', null,
-      'voters', '[]'::jsonb,
-      'candidates', '[]'::jsonb,
-      'revote', false);
-    p_server := jsonb_set(p_server, '{votes}', '{}'::jsonb);
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._uc_next(p_state, p_server);
 
   else
     raise exception 'unknown_action';
@@ -1964,10 +2057,14 @@ revoke all on function public._qdn_tstats(jsonb, text) from public, anon, authen
 revoke all on function public.game_qui_de_nous_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_reveal(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._qdn_finish(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._qdn_advance(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public.game_qui_de_nous_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 revoke all on function public.game_undercover_start(uuid[], jsonb) from public, anon, authenticated;
 revoke all on function public._uc_finish(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public._uc_tally(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._uc_next(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._uc_open_vote(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public._uc_guess_failed(jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.game_undercover_action(jsonb, jsonb, uuid, boolean, jsonb) from public, anon, authenticated;
 revoke all on function public._game_fn(text, text, text) from public, anon, authenticated;
 
@@ -3715,7 +3812,7 @@ begin
   v_s := public._duel_stat(v_s, v_starter, 'starts', 1);
   v_d := v_d || jsonb_build_object(
     'game_no', v_g, 'starter', v_starter, 'moves', 0, 'last_move', null,
-    'outcome', null, 'winner', null, 'ready', '[]'::jsonb,
+    'outcome', null, 'winner', null, 'forfeit', null, 'ready', '[]'::jsonb,
     'bets_until', case when v_g = 1 then to_jsonb(public._duel_in(15)) else v_d->'bets_until' end);
   if v_setup > 0 then
     v_d := v_d || jsonb_build_object('turn', null);
@@ -3901,16 +3998,24 @@ declare
   v_r      jsonb;
   v_out    text;
   v_turn   text;
+  v_n      integer;
 begin
   v_r := public._duel_board_move(p_game, v_state->'board', coalesce(v_server->'board', 'null'::jsonb), p_actor, p_move);
   v_out := v_r->>'outcome';
   if v_out is not null and v_out not in ('win', 'draw') then raise exception 'invalid_board'; end if;
   if v_r ? 'server' then v_server := v_server || jsonb_build_object('board', v_r->'server'); end if;
+  -- Coups automatiques CONSÉCUTIFS par joueur (remis à 0 dès qu'il joue lui-même) ; le 3e = forfait.
+  v_n := case when p_auto then coalesce((v_d->'auto_streak'->>p_actor)::integer, 0) + 1 else 0 end;
   v_d := v_d || jsonb_build_object(
     'moves', coalesce((v_d->>'moves')::integer, 0) + 1,
-    'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto));
+    'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto),
+    'auto_streak', coalesce(v_d->'auto_streak', '{}'::jsonb) || jsonb_build_object(p_actor, v_n));
   v_state := v_state || jsonb_build_object('board', v_r->'board', 'duel', v_d);
-  if v_out is not null then
+  if v_out is null and v_n >= 3 then
+    -- Duelliste absent : il perd la manche par forfait.
+    v_state := public._duel_end_game(v_state, 'win', public._duel_other(v_d, p_actor),
+                 jsonb_build_object('forfeit', p_actor));
+  elsif v_out is not null then
     -- board_move peut renvoyer 'game' : compteurs de fin de manche pour les trophées (rangés dans games[].x)
     v_state := public._duel_end_game(v_state, v_out, v_r->>'winner',
                  case when v_r ? 'game' then jsonb_build_object('game', v_r->'game') end);
@@ -4238,7 +4343,11 @@ declare
   v_move   jsonb;
   p        text;
 begin
-  if v_phase not in ('transition', 'setup', 'playing', 'result') then raise exception 'wrong_phase'; end if;
+  if v_phase not in ('transition', 'setup', 'playing', 'result') then
+    -- Un tick tardif (partie déjà finie) est une relance automatique : sans effet, sans erreur.
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
 
   if v_type = 'tick' then
     if p_state->>'deadline' is null or now() < (p_state->>'deadline')::timestamptz then

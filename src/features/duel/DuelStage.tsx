@@ -59,9 +59,11 @@ interface FighterProps {
   need: number
   outcome: 'win' | 'lose' | 'draw' | null
   ready?: boolean
+  /** false : pas d'anneau (le jeu a sa propre pendule). */
+  ring?: boolean
 }
 
-function Fighter({ player, side, color, me, active, frac, secLeft, score, wins, need, outcome, ready }: FighterProps) {
+function Fighter({ player, side, color, me, active, frac, secLeft, score, wins, need, outcome, ready, ring = true }: FighterProps) {
   const reduce = useReducedMotion()
   const size = 84
   const expr =
@@ -82,7 +84,7 @@ function Fighter({ player, side, color, me, active, frac, secLeft, score, wins, 
       className={cn('flex min-w-0 flex-1 flex-col items-center gap-1', side === 'b' && 'order-3')}
     >
       <div className="relative flex items-center justify-center" style={{ width: size + 18, height: size + 18 }}>
-        {active && <TimerRing frac={frac} size={size + 18} stroke={6} />}
+        {active && ring && <TimerRing frac={frac} size={size + 18} stroke={6} />}
         <motion.div
           className="relative overflow-hidden rounded-full border-[3px] border-ink shadow-sticker-sm"
           style={{ width: size, height: size, background: color }}
@@ -141,6 +143,8 @@ export interface DuelStageProps {
   colors: { a: string; b: string }
   /** ms restantes avant l'échéance de la phase. */
   left: number
+  /** Le plateau a sa propre pendule (échecs) : pas d'anneau basé sur turn_seconds. */
+  ownClock?: boolean
   className?: string
 }
 
@@ -148,7 +152,7 @@ export interface DuelStageProps {
  * En-tête du duel : les deux duellistes face à face (chibis, couleurs),
  * chrono du joueur au trait, points de session et manches gagnées.
  */
-export function DuelStage({ duel, session, phase, meId, get, colors, left, className }: DuelStageProps) {
+export function DuelStage({ duel, session, phase, meId, get, colors, left, ownClock = false, className }: DuelStageProps) {
   const reduce = useReducedMotion()
   const total = (session.turn_seconds || 30) * 1000
   const frac = left / total
@@ -170,6 +174,7 @@ export function DuelStage({ duel, session, phase, meId, get, colors, left, class
       me={id === meId}
       active={phase === 'playing' && duel.turn === id}
       frac={frac}
+      ring={!ownClock}
       secLeft={secLeft}
       score={session.scores[id] ?? 0}
       wins={duel.wins[id] ?? 0}

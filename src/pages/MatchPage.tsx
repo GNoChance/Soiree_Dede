@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { ChibiImage } from '@/components/ui/ChibiImage'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useSession } from '@/store/session'
+import { useWakeLock } from '@/lib/wakeLock'
 import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
 import { soireeEndCopy, useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
@@ -56,6 +57,8 @@ export function MatchPage() {
   useEnsurePlayers(soireeData?.playerIds)
   const finished = match?.status === 'finished'
   const aborted = Boolean(state?.aborted || state?.phase === 'aborted')
+  // Écran toujours allumé tant que la partie n'est pas terminée.
+  useWakeLock(Boolean(match) && !finished && !aborted && state?.phase !== 'finished')
   // Tant que la soirée n'est pas connue (chargement), on ne sait pas si je suis l'hôte (meneur qui ne joue pas) : pas de bandeau.
   const spectator = useSpectator(state, meId, isHost) && Boolean(soireeData || outsider)
   const soireeEnded = soireeData?.soiree.status === 'ended'

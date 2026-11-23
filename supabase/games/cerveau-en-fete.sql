@@ -324,6 +324,14 @@ begin
   then
     return public._cef_reveal(p_state, p_server);
   end if;
+  -- Accélérateur : dès que la majorité a trouvé ou passé, il ne reste que 8 s (jamais allongé).
+  if (select count(*) from jsonb_array_elements_text(p_state->'players') pl
+       where p_state->'passed' ? pl
+          or exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = pl))
+     * 2 > jsonb_array_length(p_state->'players')
+     and (p_state->>'deadline')::timestamptz > now() + interval '8 seconds' then
+    p_state := p_state || jsonb_build_object('deadline', to_jsonb(now() + interval '8 seconds'));
+  end if;
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 

@@ -9,6 +9,8 @@ import type { BaseGameState, GameActionPayload } from '@/games/types'
 export interface BnMatchCtx {
   matchId: string
   act: (action: GameActionPayload) => Promise<BaseGameState | null>
+  /** Échéance de la phase en cours (ISO) : sert à envoyer sans délai en fin de préparation. */
+  deadline?: string | null
 }
 
 export const BnMatchContext = createContext<BnMatchCtx | null>(null)

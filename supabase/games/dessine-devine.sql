@@ -204,6 +204,9 @@ begin
   p_state := p_state || jsonb_build_object(
     'phase', 'drawing',
     'started_at', public._dd_iso(v_start),
+    -- dessinateur absent : s'il n'a pas posé un premier trait (drawing_started) d'ici là, le tour est passé
+    'drawn', false,
+    'draw_check_at', public._dd_iso(v_start + interval '25 seconds'),
     'deadline', public._dd_iso(v_start + make_interval(secs => v_secs)),
     'next_hint_at', p_server->'hints_left'->0->'at',
     'hint', public._dd_mask(v_text, '[]'::jsonb),
@@ -257,11 +260,13 @@ begin
     'phase', 'reveal',
     'deadline', public._dd_iso(now() + make_interval(secs => (p_state->>'reveal_seconds')::integer)),
     'next_hint_at', null,
+    'draw_check_at', null, 'idle_drawer', null,
     'hint', case when v_word is null then null else to_jsonb(v_word->>'word') end,
     'last_turn', jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
       'word', v_word->>'word', 'found', p_state->'found',
-      'points', p_state->'turn_points', 'skipped', p_skipped),
+      'points', p_state->'turn_points', 'skipped', p_skipped,
+      'idle', coalesce((p_state->>'idle_drawer')::boolean, false)),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
       'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped,
@@ -528,6 +533,14 @@ begin
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
 
+  -- ------------------------------------------------------------- drawing_started
+  elsif v_type = 'drawing_started' then
+    -- tardif / rejoué / pas le dessinateur : ignoré sans erreur (idempotent)
+    if v_phase <> 'drawing' or v_me <> p_state->>'drawer' then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    return jsonb_build_object('state', p_state || jsonb_build_object('drawn', true, 'draw_check_at', null), 'server', p_server);
+
   -- ----------------------------------------------------------------------- tick
   elsif v_type = 'tick' then
     if v_phase = 'choosing' then
@@ -538,6 +551,11 @@ begin
     elsif v_phase = 'drawing' then
       if now() >= (p_state->>'deadline')::timestamptz then
         return public._dd_end_turn(p_state, p_server, false);
+      end if;
+      -- dessinateur absent (parties en cours sans draw_check_at : ignoré)
+      if p_state->>'draw_check_at' is not null and not coalesce((p_state->>'drawn')::boolean, false)
+         and now() >= (p_state->>'draw_check_at')::timestamptz then
+        return public._dd_end_turn(p_state || jsonb_build_object('idle_drawer', true), p_server, true);
       end if;
       if p_state->>'next_hint_at' is not null and now() >= (p_state->>'next_hint_at')::timestamptz then
         return public._dd_apply_hints(p_state, p_server);

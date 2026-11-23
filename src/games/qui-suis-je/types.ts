@@ -13,7 +13,7 @@
  *   si la file est épuisée). Minimum 5 cartes, maximum 800.
  *
  * STATE PUBLIC (matches.state) :
- *   phase   'placing'  le devineur se prépare (pas d'échéance) → action `ready`
+ *   phase   'placing'  le devineur se prépare (échéance 45 s → tour sauté) → action `ready`
  *         | 'playing'  3-2-1 jusqu'à `starts_at`, puis chrono jusqu'à `deadline`
  *         | 'recap'    4 s (deadline) : résumé du tour (`last_turn`)
  *         | 'finished' | 'aborted'

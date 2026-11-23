@@ -14,14 +14,25 @@ import { DropCard, VoterStrip } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { qdnActions } from './setup'
+import { hash01, NextIn, useDeadlineTick } from './autoTick'
 
-export default function QuiDeNousPlay({ state, meId, isHost, players, act, pending }: GamePlayProps) {
-  const s = state as unknown as QuiDeNousState
+/** Champs ajoutés par le serveur (absents des vieilles parties). */
+type QdnS = QuiDeNousState & { deadline?: string | null }
+
+function isVoteSecret(v: unknown): v is { round: number; target: string } {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return typeof o.round === 'number' && typeof o.target === 'string'
+}
+
+export default function QuiDeNousPlay({ state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
+  const s = state as unknown as QdnS
   const get = (id: string) => playerOrPlaceholder(players, id)
+  useDeadlineTick(s.phase === 'voting' || s.phase === 'reveal' ? s.deadline : null, act)
 
   return (
     <div className="flex flex-col gap-4 pb-6">
-      {s.phase === 'voting' && <Voting s={s} meId={meId} isHost={isHost} get={get} players={players} act={act} pending={pending} />}
+      {s.phase === 'voting' && <Voting s={s} secret={secret} meId={meId} isHost={isHost} get={get} players={players} act={act} pending={pending} />}
       {s.phase === 'reveal' && s.last_reveal && (
         <Reveal key={s.last_reveal.round} s={s} meId={meId} isHost={isHost} get={get} act={act} pending={pending} />
       )}
@@ -37,9 +48,10 @@ type ActFn = GamePlayProps['act']
 /* Vote                                                                        */
 /* -------------------------------------------------------------------------- */
 
-function Voting({ s, meId, isHost, get, players, act, pending }: { s: QuiDeNousState; meId: string; isHost: boolean; get: Get; players: Record<string, PlayerInfo>; act: ActFn; pending: boolean }) {
+function Voting({ s, secret, meId, isHost, get, players, act, pending }: { s: QdnS; secret: unknown; meId: string; isHost: boolean; get: Get; players: Record<string, PlayerInfo>; act: ActFn; pending: boolean }) {
   const [myVote, setMyVote] = useState<{ round: number; target: string } | null>(null)
-  const chosen = myVote?.round === s.round ? myVote.target : null
+  const stored = isVoteSecret(secret) && secret.round === s.round ? secret.target : null
+  const chosen = myVote?.round === s.round ? myVote.target : stored
   const isPlayer = s.players.includes(meId)
   const iVoted = s.voters.includes(meId)
   const targets = s.players.filter((id) => id !== meId)
@@ -102,6 +114,7 @@ function Voting({ s, meId, isHost, get, players, act, pending }: { s: QuiDeNousS
       )}
 
       <VoterStrip ids={s.players} voters={s.voters} players={players} />
+      <NextIn deadline={s.deadline} label="Révélation dans" />
 
       {isHost && (
         <Button variant={allVoted ? 'primary' : 'secondary'} fullWidth loading={pending} icon={<Eye className="size-5" />} onClick={() => void act(qdnActions.reveal())}>
@@ -116,7 +129,7 @@ function Voting({ s, meId, isHost, get, players, act, pending }: { s: QuiDeNousS
 /* Dépouillement                                                               */
 /* -------------------------------------------------------------------------- */
 
-function Reveal({ s, meId, isHost, get, act, pending }: { s: QuiDeNousState; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean }) {
+function Reveal({ s, meId, isHost, get, act, pending }: { s: QdnS; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean }) {
   const lr = s.last_reveal!
   const reduce = useReducedMotion()
 
@@ -124,7 +137,7 @@ function Reveal({ s, meId, isHost, get, act, pending }: { s: QuiDeNousState; meI
   // Calculé une seule fois par manche (le composant est remonté à chaque manche).
   const [sequence] = useState(() =>
     Object.entries(lr.votes)
-      .map(([voter, target]) => ({ voter, target, w: (lr.counts[target] ?? 0) + Math.random() * 0.5 }))
+      .map(([voter, target]) => ({ voter, target, w: (lr.counts[target] ?? 0) + hash01(`${lr.round}:${voter}`) * 0.5 }))
       .sort((a, b) => a.w - b.w),
   )
 
@@ -216,7 +229,7 @@ function Reveal({ s, meId, isHost, get, act, pending }: { s: QuiDeNousState; meI
                 </div>
               </>
             ) : (
-              <p className="font-display text-xl font-extrabold">Personne n’a voté ! 🦗</p>
+              <p className="font-display text-xl font-extrabold">{Object.keys(lr.votes).length ? 'Pas de majorité ! ⚖️' : 'Personne n’a voté ! 🦗'}</p>
             )}
           </motion.div>
         )}
@@ -301,7 +314,7 @@ function Reveal({ s, meId, isHost, get, act, pending }: { s: QuiDeNousState; meI
           {last ? 'Voir les résultats' : 'Question suivante'}
         </Button>
       )}
-      {!isHost && done && <p className="text-center font-bold text-muted">L’hôte va lancer la suite…</p>}
+      {done && <NextIn deadline={s.deadline} label={last ? 'Résultats dans' : 'Question suivante dans'} />}
     </>
   )
 }

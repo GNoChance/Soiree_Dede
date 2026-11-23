@@ -20,10 +20,10 @@
 --                une action si soft_timer, jamais imposé). Les autres jugent
 --                {"type":"vote_result","success":true|false} (secret jusqu'au
 --                dépouillement, public : `validated`). Majorité stricte de 👍
---                (up > down) → +1 point. Le désigné peut {"type":"refuse"} →
+--                (up >= down, égalité = réussi) → +1 point. Le désigné peut {"type":"refuse"} →
 --                gage tiré au sort, 0 point. Échéance dure 150 s.
 --   4. result  : `last_result`. {"type":"next"} (hôte) → tour suivant ou fin ;
---                si `auto`, échéance 12 s puis tick.
+--                échéance 12 s (option `auto`) ou 25 s sinon, puis tick.
 -- {"type":"next"} (hôte) fait aussi avancer les autres phases (choose → type
 -- aléatoire, vote/perform → dépouillement avec les votes reçus).
 -- {"type":"stop"} (hôte, toute phase) → fin de partie avec les scores actuels
@@ -47,8 +47,18 @@ as $$
     when 'perform' then 150   -- réalisation + jugement (échéance dure)
     when 'soft' then 60       -- minuteur doux d'une action
     when 'reveal' then 4      -- animation de révélation de la carte (avant le minuteur doux)
-    when 'auto' then 12       -- passage automatique au tour suivant
+    when 'auto' then 12       -- passage automatique au tour suivant (option « enchaînement auto »)
+    when 'result' then 25     -- passage au tour suivant sans l'hôte (hors option auto)
+    when 'grace' then 5       -- grâce avant fermeture anticipée du jugement (résultat acquis)
   end
+$$;
+
+-- Échéance ISO UTC millisecondes (Safari n'aime pas le format brut de timestamptz).
+create or replace function public._aov_iso(p_ts timestamptz)
+returns text language sql stable
+set search_path = public, extensions
+as $$
+  select to_char(p_ts at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
 $$;
 
 -- Incrémente stats[pl][key].
@@ -99,8 +109,8 @@ begin
         'target', v_target,
         'turns', 4 + floor(random() * 3)::integer,       -- tours complets (4 à 6)
         'offset', round((0.18 + random() * 0.64)::numeric, 3), -- position dans la part (0..1)
-        'until', v_until),
-    'deadline', v_until + make_interval(secs => public._aov_const('choose')),
+        'until', public._aov_iso(v_until)),
+    'deadline', public._aov_iso(v_until + make_interval(secs => public._aov_const('choose'))),
     'timer_until', null,
     'proposals', '[]'::jsonb,
     'voted', '[]'::jsonb,
@@ -142,7 +152,7 @@ begin
     'kind_random', p_random,
     'proposals', v_props,
     'voted', '[]'::jsonb,
-    'deadline', now() + make_interval(secs => public._aov_const('vote')),
+    'deadline', public._aov_iso(now() + make_interval(secs => public._aov_const('vote'))),
     'stats', public._aov_bump(p_state->'stats', v_t,
                               case p_kind when 'action' then 'actions' else 'verites' end));
   p_server := p_server || jsonb_build_object('used', v_used, 'card_votes', '{}'::jsonb);
@@ -181,9 +191,9 @@ begin
         'tied', case when jsonb_array_length(v_tied) > 1 then v_tied else '[]'::jsonb end,
         'random', jsonb_array_length(v_tied) > 1),
     'validated', '[]'::jsonb,
-    'deadline', now() + make_interval(secs => public._aov_const('perform')),
+    'deadline', public._aov_iso(now() + make_interval(secs => public._aov_const('perform'))),
     'timer_until', case when v_soft and p_state->>'kind' = 'action'
-                        then to_jsonb(now() + make_interval(secs => public._aov_const('reveal') + public._aov_const('soft')))
+                        then to_jsonb(public._aov_iso(now() + make_interval(secs => public._aov_const('reveal') + public._aov_const('soft'))))
                         else 'null'::jsonb end);
   p_server := p_server || jsonb_build_object('result_votes', '{}'::jsonb);
   return jsonb_build_object('state', p_state, 'server', p_server);
@@ -215,7 +225,7 @@ begin
      order by random() limit 1;
     v_gage := coalesce(v_gage, 'Fais ta plus belle révérence en disant « Pardon, ô grand public ! »');
     v_stats := public._aov_bump(v_stats, v_t, 'refusals');
-  elsif v_up > v_down then
+  elsif v_up >= v_down then   -- égalité = réussi
     v_outcome := 'success';
     v_points := 1;
     v_stats := public._aov_bump(v_stats, v_t, 'success');
@@ -233,7 +243,7 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'result',
-    'deadline', case when v_auto then to_jsonb(now() + make_interval(secs => public._aov_const('auto'))) else 'null'::jsonb end,
+    'deadline', public._aov_iso(now() + make_interval(secs => public._aov_const(case when v_auto then 'auto' else 'result' end))),
     'timer_until', null,
     'scores', jsonb_set(p_state->'scores', array[v_t],
                         to_jsonb(coalesce((p_state->'scores'->>v_t)::integer, 0) + v_points), true),
@@ -427,6 +437,8 @@ declare
   v_voters   text[] := public._aov_voters(p_state);
   v_idx      integer;
   v_done     jsonb;
+  v_up       integer;
+  v_down     integer;
 begin
   if v_type = 'tick' then
     if v_phase not in ('choose', 'vote', 'perform', 'result') or v_deadline is null or now() < v_deadline then
@@ -477,6 +489,15 @@ begin
        or (v_deadline is not null and now() >= v_deadline) then
       return public._aov_close_round(p_state, p_server, false);
     end if;
+    -- Résultat acquis (majorité absolue des votants possibles, irréversible) :
+    -- on raccourcit l'échéance à ~5 s de grâce, le tick ferme le tour.
+    select count(*) filter (where value = 'true'), count(*) filter (where value = 'false')
+      into v_up, v_down from jsonb_each_text(p_server->'result_votes');
+    if (2 * v_up >= cardinality(v_voters) or 2 * v_down > cardinality(v_voters))
+       and (v_deadline is null or v_deadline > now() + make_interval(secs => public._aov_const('grace'))) then
+      p_state := p_state || jsonb_build_object('deadline',
+                   public._aov_iso(now() + make_interval(secs => public._aov_const('grace'))));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   elsif v_type = 'refuse' then
@@ -503,6 +524,7 @@ begin
   end if;
 end $$;
 
+revoke all on function public._aov_iso(timestamptz) from public, anon, authenticated;
 revoke all on function public._aov_const(text) from public, anon, authenticated;
 revoke all on function public._aov_bump(jsonb, text, text, integer) from public, anon, authenticated;
 revoke all on function public._aov_voters(jsonb) from public, anon, authenticated;
@@ -1806,6 +1828,7 @@ begin
     'time_limit', v_limit,
     'started_at', now(),
     'deadline', case when v_limit > 0 then to_jsonb(now() + make_interval(mins => v_limit)) else 'null'::jsonb end,
+    'idle_deadline', null,
     'sheets', v_empty,
     'last_roll', null,
     'forced', false,
@@ -1857,6 +1880,10 @@ begin
     if v_late and now() > (p_state->>'deadline')::timestamptz + interval '3 seconds' then
       return public._bw_finish(p_state, p_server, true);
     end if;
+    if p_state->>'idle_deadline' is not null
+       and now() > (p_state->>'idle_deadline')::timestamptz + interval '3 seconds' then
+      return public._bw_finish(p_state, p_server, true);
+    end if;
 
     v_sheet := coalesce(p_state->'sheets'->v_me, '[]'::jsonb);
     v_prev := v_sheet->(v_frame - 1)->(v_roll - 1);
@@ -1889,11 +1916,17 @@ begin
     if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') then
       return public._bw_finish(p_state, p_server, false);
     end if;
+    -- Il ne reste qu'un joueur : fin automatique 90 s apres son dernier lancer
+    -- (veille, 3D plantee...). Chaque lancer du retardataire repousse l'echeance.
+    if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') - 1 then
+      p_state := p_state || jsonb_build_object('idle_deadline', to_jsonb(now() + interval '90 seconds'));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- tick
   elsif v_type = 'tick' then
-    if v_phase = 'playing' and v_late then
+    if v_phase = 'playing' and (v_late or (p_state->>'idle_deadline' is not null
+                                           and now() >= (p_state->>'idle_deadline')::timestamptz)) then
       return public._bw_finish(p_state, p_server, true);
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
@@ -2249,6 +2282,14 @@ begin
        and not exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = pl))
   then
     return public._cef_reveal(p_state, p_server);
+  end if;
+  -- Accélérateur : dès que la majorité a trouvé ou passé, il ne reste que 8 s (jamais allongé).
+  if (select count(*) from jsonb_array_elements_text(p_state->'players') pl
+       where p_state->'passed' ? pl
+          or exists (select 1 from jsonb_array_elements(p_state->'found') f where f->>'profile_id' = pl))
+     * 2 > jsonb_array_length(p_state->'players')
+     and (p_state->>'deadline')::timestamptz > now() + interval '8 seconds' then
+    p_state := p_state || jsonb_build_object('deadline', to_jsonb(now() + interval '8 seconds'));
   end if;
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;

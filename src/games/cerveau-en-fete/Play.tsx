@@ -258,7 +258,7 @@ function QuestionPhase({ s, meId, isHost, get, act }: { s: CefState; meId: strin
         )}
         {isHost && (
           <Button variant="ghost" className={cn(isPlayer && !done ? '' : 'flex-1')} icon={<SkipForward className="size-5" />} onClick={() => void act(cefActions.skip(s.round))}>
-            Passer la question
+            ⏭ Révéler la réponse
           </Button>
         )}
       </div>

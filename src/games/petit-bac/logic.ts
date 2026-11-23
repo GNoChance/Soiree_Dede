@@ -12,13 +12,18 @@ for (let i = 0; i < ACC_FROM.length; i++) ACC_MAP[ACC_FROM[i]] = ACC_TO[i]
 /** Article de tête ignoré : le / la / les / l' / un / une. */
 const ARTICLE = /^(l\s*['’`]\s*|(le|la|les|un|une)\s+)/
 
-/** Minuscules, sans article de tête, sans accents, espaces ni ponctuation. */
-export function normalizeAnswer(p: string | null | undefined): string {
-  const s = (p ?? '').trim().toLowerCase().replace(ARTICLE, '')
+/** Minuscules, sans accents, espaces ni ponctuation (article de tête conservé). */
+function plain(s: string): string {
   const t = s.replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/æ/g, 'ae').replace(/Æ/g, 'AE')
   let out = ''
   for (const ch of t) out += ACC_MAP[ch] ?? ch
   return out.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** Minuscules, sans article de tête, sans accents/espaces/ponctuation, sans s/x final si > 3 car. (lion = lions). */
+export function normalizeAnswer(p: string | null | undefined): string {
+  const n = plain((p ?? '').trim().toLowerCase().replace(ARTICLE, ''))
+  return n.length > 3 && /[sx]$/.test(n) ? n.slice(0, -1) : n
 }
 
 /** Nettoyage d'une saisie avant envoi (comme _pb_clean). */
@@ -32,13 +37,16 @@ export type AutoStatus = 'empty' | 'letter' | null
 export function autoStatus(text: string, letter: string): AutoStatus {
   const n = normalizeAnswer(text)
   if (!n) return 'empty'
-  if (n[0] !== (letter ?? '').toLowerCase()) return 'letter'
+  const l = (letter ?? '').toLowerCase()
+  // Article accepté : « La Réunion », « L'Italie » valent pour la lettre L.
+  const raw = plain((text ?? '').trim().toLowerCase())
+  if (n[0] !== l && raw[0] !== l) return 'letter'
   return null
 }
 
-/** Refusée si contestée par la majorité stricte des AUTRES joueurs. */
+/** Refusée si contestée par la majorité stricte des AUTRES joueurs (au moins 2 : à 2 joueurs, jamais). */
 export function isRefusedByVotes(contests: number, nPlayers: number): boolean {
-  return contests * 2 > nPlayers - 1
+  return contests >= 2 && contests * 2 > nPlayers - 1
 }
 
 export type ScoreStatus = 'unique' | 'shared' | 'refused' | 'empty' | 'letter'

@@ -262,6 +262,20 @@ ok('bornes : bank_shot ignoré si non rentrée, eau ≤ coups', (await (async ()
   return r.server.tstats[A].water <= 6 && r.server.tstats[A].mill_hits <= 6 && !r.server.tstats[A].bank_shot
 })()))
 
+// ----------------------------------------------------------------------------- clôture auto (dernier joueur)
+{
+  const stNT = started(must(await start({ timer: 0 }, [A, B, P[2]]), 'nt3'), 60)
+  const a1 = must(await act(stNT, A, hole(0, 3)), 'a1')
+  ok('sans chrono : 1 fini sur 3, pas d’échéance', a1.state.deadline === null)
+  const a2 = must(await act(a1, B, hole(0, 3)), 'a2')
+  ok('sans chrono : il ne reste qu’un joueur → échéance ≈ +45 s', approx(a2.state.deadline, 45), String(a2.state.deadline))
+  const a3 = must(await act(late(a2), A, { type: 'tick' }), 'a3')
+  ok('échéance dépassée → trou clos, absent ramassé', a3.state.phase === 'hole_end' && a3.state.cards[P[2]][0] === 7)
+  const stT = started(must(await start({ timer: 90 }, [A, B]), 't2'), 10)
+  const b1 = must(await act(stT, A, hole(0, 3)), 'b1')
+  ok('chrono 90 s : dernier joueur → échéance raccourcie à ≈ 45 s', approx(b1.state.deadline, 45), String(b1.state.deadline))
+}
+
 // ----------------------------------------------------------------------------- catalogue
 const tenue = (await db.query(`select game_id, condition_type, threshold, emoji from public.tenues where id = 'golfer'`)).rows[0]
 ok('catalogue : tenue golfer (10 victoires au mini-golf)', tenue?.game_id === 'mini-golf' && tenue.condition_type === 'game_wins' && tenue.threshold === 10 && tenue.emoji === '⛳')

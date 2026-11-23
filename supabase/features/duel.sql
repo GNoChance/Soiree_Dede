@@ -369,7 +369,7 @@ begin
   v_s := public._duel_stat(v_s, v_starter, 'starts', 1);
   v_d := v_d || jsonb_build_object(
     'game_no', v_g, 'starter', v_starter, 'moves', 0, 'last_move', null,
-    'outcome', null, 'winner', null, 'ready', '[]'::jsonb,
+    'outcome', null, 'winner', null, 'forfeit', null, 'ready', '[]'::jsonb,
     'bets_until', case when v_g = 1 then to_jsonb(public._duel_in(15)) else v_d->'bets_until' end);
   if v_setup > 0 then
     v_d := v_d || jsonb_build_object('turn', null);
@@ -555,16 +555,24 @@ declare
   v_r      jsonb;
   v_out    text;
   v_turn   text;
+  v_n      integer;
 begin
   v_r := public._duel_board_move(p_game, v_state->'board', coalesce(v_server->'board', 'null'::jsonb), p_actor, p_move);
   v_out := v_r->>'outcome';
   if v_out is not null and v_out not in ('win', 'draw') then raise exception 'invalid_board'; end if;
   if v_r ? 'server' then v_server := v_server || jsonb_build_object('board', v_r->'server'); end if;
+  -- Coups automatiques CONSÉCUTIFS par joueur (remis à 0 dès qu'il joue lui-même) ; le 3e = forfait.
+  v_n := case when p_auto then coalesce((v_d->'auto_streak'->>p_actor)::integer, 0) + 1 else 0 end;
   v_d := v_d || jsonb_build_object(
     'moves', coalesce((v_d->>'moves')::integer, 0) + 1,
-    'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto));
+    'last_move', jsonb_build_object('by', p_actor, 'move', p_move, 'auto', p_auto),
+    'auto_streak', coalesce(v_d->'auto_streak', '{}'::jsonb) || jsonb_build_object(p_actor, v_n));
   v_state := v_state || jsonb_build_object('board', v_r->'board', 'duel', v_d);
-  if v_out is not null then
+  if v_out is null and v_n >= 3 then
+    -- Duelliste absent : il perd la manche par forfait.
+    v_state := public._duel_end_game(v_state, 'win', public._duel_other(v_d, p_actor),
+                 jsonb_build_object('forfeit', p_actor));
+  elsif v_out is not null then
     -- board_move peut renvoyer 'game' : compteurs de fin de manche pour les trophées (rangés dans games[].x)
     v_state := public._duel_end_game(v_state, v_out, v_r->>'winner',
                  case when v_r ? 'game' then jsonb_build_object('game', v_r->'game') end);
@@ -892,7 +900,11 @@ declare
   v_move   jsonb;
   p        text;
 begin
-  if v_phase not in ('transition', 'setup', 'playing', 'result') then raise exception 'wrong_phase'; end if;
+  if v_phase not in ('transition', 'setup', 'playing', 'result') then
+    -- Un tick tardif (partie déjà finie) est une relance automatique : sans effet, sans erreur.
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
 
   if v_type = 'tick' then
     if p_state->>'deadline' is null or now() < (p_state->>'deadline')::timestamptz then

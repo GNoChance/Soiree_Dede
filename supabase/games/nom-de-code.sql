@@ -20,7 +20,7 @@ returns jsonb language sql volatile
 set search_path = public, extensions
 as $$ select coalesce(jsonb_agg(x order by random()), '[]'::jsonb) from jsonb_array_elements(coalesce(p, '[]'::jsonb)) x $$;
 
--- Échéance d'une phase selon le chrono choisi (null = Détendu).
+-- Échéance d'une phase selon le chrono choisi (Détendu = plafond 5/6 min).
 create or replace function public._ndc_deadline(p_timer text, p_phase text)
 returns jsonb language sql stable
 set search_path = public, extensions
@@ -28,7 +28,8 @@ as $$
   select case
     when p_timer = 'normal' then to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 120 else 180 end))
     when p_timer = 'fast'   then to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 60 else 120 end))
-    else 'null'::jsonb end
+    -- Détendu : plafond large (5 min / 6 min) pour qu'un espion ou un joueur parti ne bloque jamais la partie
+    else to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 300 else 360 end)) end
 $$;
 
 -- Espions de la dernière partie de Nom de Code terminée depuis moins de 12 h qui partage

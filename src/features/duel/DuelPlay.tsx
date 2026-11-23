@@ -16,7 +16,7 @@ import { TvButton } from '@/features/tv/TvButton'
 import { DuelTv } from './DuelTv'
 import { useDuelTv } from './tv'
 import { SessionBoard } from './SessionBoard'
-import { fmtTurnClock, pickSideColors } from './logic'
+import { fmtTurnClock, hasOwnClock, pickSideColors } from './logic'
 import { useDuel, useDuelTicker } from './useDuel'
 import type { DuelAction, DuelBoardProps } from './types'
 
@@ -105,7 +105,7 @@ function DuelPlayScreen<B, M>({ soireeId, state, secret, meId, isHost, players, 
         </DuelTransition>
       ) : (
         <>
-          <DuelStage duel={duel} session={session} phase={phase} meId={meId} get={get} colors={colors} left={v.left} />
+          <DuelStage duel={duel} session={session} phase={phase} meId={meId} get={get} colors={colors} left={v.left} ownClock={hasOwnClock(s.board)} />
 
           {/* Consigne */}
           <AnimatePresence mode="wait">

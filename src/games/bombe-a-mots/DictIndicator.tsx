@@ -19,7 +19,7 @@ export function DictIndicator({ className }: { className?: string }) {
           <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="inline-block">
             📖
           </motion.span>
-          Chargement du dico…
+          Chargement du dico… (mots acceptés en attendant)
         </>
       ) : d.status === 'ready' ? (
         <>📖 Dico prêt · {d.size.toLocaleString('fr-FR')} mots</>

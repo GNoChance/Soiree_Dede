@@ -27,6 +27,8 @@ export type PdbLogEntry =
   | { n: number; t: 'denounce'; p: string; target: string; count: number }
   | { n: number; t: 'out'; p: string; place: number }
   | { n: number; t: 'reshuffle' }
+  | { n: number; t: 'absent'; p: string }
+  | { n: number; t: 'back'; p: string }
 
 export interface PdbState {
   game: 'pas-de-bol'
@@ -58,6 +60,9 @@ export interface PdbState {
   /** 'drawn' = le joueur a pioché une carte jouable : il peut la poser ou passer. */
   turn_phase: 'play' | 'drawn'
   turn_seq: number
+  /** Absent auto (2 tours joués par tick) : tours express. Absent des anciennes parties. */
+  absent?: Record<string, boolean>
+  idle?: Record<string, number>
   turn_seconds: number
   deadline: string | null
   log: PdbLogEntry[]

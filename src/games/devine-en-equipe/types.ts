@@ -5,7 +5,7 @@
  *   1 « Décris » · 2 « Un seul mot » · 3 « Mime ».
  *
  * STATE PUBLIC (matches.state) — le mot courant n'y apparaît JAMAIS :
- *   phase   'ready'     écran « Au tour de X — prêt ? » (pas de chrono ; l'orateur envoie `ready`)
+ *   phase   'ready'     écran « Au tour de X — prêt ? » (échéance ~45 s : orateur absent → passage sauté ; l'orateur envoie `ready`)
  *         | 'playing'   passage en cours jusqu'à `deadline` → `{"type":"tick"}` par n'importe qui
  *         | 'round_end' tableau des scores entre deux manches (l'hôte envoie `next_round`)
  *         | 'finished' | 'aborted'

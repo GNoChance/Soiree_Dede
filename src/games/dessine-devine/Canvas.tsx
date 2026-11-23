@@ -31,6 +31,8 @@ interface Props {
   isDrawer: boolean
   /** Phase de dessin en cours (sinon lecture seule). */
   active: boolean
+  /** Appelé au premier trait du dessinateur (prévient le serveur qu'il est bien là). */
+  onFirstStroke?: () => void
   className?: string
   ref?: Ref<CanvasHandle>
 }
@@ -121,7 +123,7 @@ const rid = () => Math.random().toString(36).slice(2, 9)
 
 /* ------------------------------- composant -------------------------------- */
 
-export default function DrawCanvas({ matchId, turn, meId, isDrawer, active, className, ref }: Props) {
+export default function DrawCanvas({ matchId, turn, meId, isDrawer, active, onFirstStroke, className, ref }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sizeRef = useRef({ W: 0, H: 0, dpr: 1 })
@@ -371,6 +373,7 @@ export default function DrawCanvas({ matchId, turn, meId, isDrawer, active, clas
     if (!canDraw || currentRef.current) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
+    onFirstStroke?.()
     e.currentTarget.setPointerCapture(e.pointerId)
     const [x, y] = point(e)
     const s: Stroke = { id: rid(), c: color, w: eraser ? ERASER_SIZE : SIZES[size], e: eraser || undefined, p: [x, y] }

@@ -23,7 +23,7 @@ returns jsonb language sql volatile
 set search_path = public, extensions
 as $$ select coalesce(jsonb_agg(x order by random()), '[]'::jsonb) from jsonb_array_elements(coalesce(p, '[]'::jsonb)) x $$;
 
--- Échéance d'une phase selon le chrono choisi (null = Détendu).
+-- Échéance d'une phase selon le chrono choisi (Détendu = plafond 5/6 min).
 create or replace function public._ndc_deadline(p_timer text, p_phase text)
 returns jsonb language sql stable
 set search_path = public, extensions
@@ -31,7 +31,8 @@ as $$
   select case
     when p_timer = 'normal' then to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 120 else 180 end))
     when p_timer = 'fast'   then to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 60 else 120 end))
-    else 'null'::jsonb end
+    -- Détendu : plafond large (5 min / 6 min) pour qu'un espion ou un joueur parti ne bloque jamais la partie
+    else to_jsonb(now() + make_interval(secs => case when p_phase = 'clue' then 300 else 360 end)) end
 $$;
 
 -- Espions de la dernière partie de Nom de Code terminée depuis moins de 12 h qui partage
@@ -615,7 +616,9 @@ begin
     'turn', p_player,
     'turn_phase', 'play',
     'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
-    'deadline', public._pdb_iso(now() + make_interval(secs => coalesce((p_state->>'turn_seconds')::integer, 30))));
+    'deadline', public._pdb_iso(now() + make_interval(secs => case
+      when coalesce((p_state->'absent'->>p_player)::boolean, false) then 6   -- absent auto : tour express
+      else coalesce((p_state->>'turn_seconds')::integer, 30) end)));
   if p_clear_open and p_state->'last_card'->>p_player = 'open' then
     p_state := p_state #- array['last_card', p_player];
   end if;
@@ -915,7 +918,21 @@ declare
   p          text;
   i          integer;
 begin
-  if p_state->>'phase' <> 'playing' then raise exception 'wrong_phase'; end if;
+  if p_state->>'phase' <> 'playing' then
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
+
+  -- Toute action du joueur lui-même remet son compteur d'auto à zéro et le fait revenir s'il était absent.
+  if v_type <> 'tick' and (p_state->'players') ? v_me then
+    if coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', (p_state->'absent') - v_me);
+      p_state := public._pdb_log(p_state, jsonb_build_object('t', 'back', 'p', v_me));
+    end if;
+    if coalesce(p_state->'idle', '{}'::jsonb) ? v_me then
+      p_state := p_state || jsonb_build_object('idle', (p_state->'idle') - v_me);
+    end if;
+  end if;
 
   -- ---------------------------------------------------------------- tick
   if v_type = 'tick' then
@@ -932,6 +949,15 @@ begin
         't', 'draw', 'p', v_turn, 'count', jsonb_array_length(v_r->'drawn'), 'auto', true, 'cumul', v_pending > 0));
       if v_pending > 0 then p_server := public._pdb_cumul(p_server, v_turn, jsonb_array_length(v_r->'drawn')); end if;
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
+    end if;
+    -- Absent auto : 2 tours consécutifs joués par tick.
+    p_state := p_state || jsonb_build_object('idle', coalesce(p_state->'idle', '{}'::jsonb)
+      || jsonb_build_object(v_turn, coalesce((p_state->'idle'->>v_turn)::integer, 0) + 1));
+    if (p_state->'idle'->>v_turn)::integer >= 2
+       and not coalesce((p_state->'absent'->>v_turn)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', coalesce(p_state->'absent', '{}'::jsonb)
+        || jsonb_build_object(v_turn, true));
+      p_state := public._pdb_log(p_state, jsonb_build_object('t', 'absent', 'p', v_turn));
     end if;
     p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_turn, 1), true);
 
@@ -1252,15 +1278,26 @@ revoke all on function public.game_pas_de_bol_action(jsonb, jsonb, uuid, boolean
 -- =============================================================================
 
 -- Normalisation d'une réponse : minuscules, sans article de tête
--- (le/la/les/l'/un/une), sans accents, espaces ni ponctuation.
+-- (le/la/les/l'/un/une), sans accents, espaces ni ponctuation, et sans s/x final
+-- si le résultat fait plus de 3 caractères (lion = lions). Miroir : normalizeAnswer (logic.ts).
 create or replace function public._pb_norm(p text)
 returns text language sql immutable
 set search_path = public, extensions
 as $$
-  select public._normalize_word(
-    regexp_replace(lower(btrim(coalesce(p, ''))), '^(l\s*[''’`]\s*|(le|la|les|un|une)\s+)', ''))
+  select case when char_length(n) > 3 and n ~ '[sx]$' then left(n, -1) else n end
+    from (select public._normalize_word(
+            regexp_replace(lower(btrim(coalesce(p, ''))), '^(l\s*[''’`]\s*|(le|la|les|un|une)\s+)', '')) as n) t
 $$;
 
+-- Première lettre acceptée : celle du texte sans article OU du texte brut
+-- (« La Réunion », « L'Italie » valent pour la lettre L). Miroir : autoStatus (logic.ts).
+create or replace function public._pb_letter_ok(p text, p_letter text)
+returns boolean language sql immutable
+set search_path = public, extensions
+as $$
+  select left(public._pb_norm(p), 1) = lower(p_letter)
+      or left(public._normalize_word(lower(btrim(coalesce(p, '')))), 1) = lower(p_letter)
+$$;
 -- Nettoyage d'une saisie : espaces normalisés, 60 caractères max.
 create or replace function public._pb_clean(p text)
 returns text language sql immutable
@@ -1302,7 +1339,7 @@ as $$
              'text', x.t,
              'norm', public._pb_norm(x.t),
              'auto', case when public._pb_norm(x.t) = '' then 'empty'
-                          when left(public._pb_norm(x.t), 1) <> lower(p_state->>'letter') then 'letter'
+                          when not public._pb_letter_ok(x.t, p_state->>'letter') then 'letter'
                           else null end))
       from (select pl, coalesce(p_server->'answers'->pl->>(c->>'id'), '') as t
               from jsonb_array_elements_text(p_state->'players') pl) x)), '{}'::jsonb)
@@ -1318,8 +1355,25 @@ begin
     'phase', 'validation',
     'validation', jsonb_build_object(
       'cat_index', 0,
+      'deadline', to_jsonb(now() + interval '15 seconds'),
       'answers', public._pb_build_answers(p_state, p_server),
       'contests', '{}'::jsonb));
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Catégorie suivante (ou scores après la dernière) : hôte (next_category) ou tick à l'échéance.
+create or replace function public._pb_advance(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_cur integer := (p_state#>>'{validation,cat_index}')::integer;
+begin
+  if v_cur + 1 >= jsonb_array_length(p_state->'categories') then
+    return public._pb_score(p_state, p_server);
+  end if;
+  p_state := jsonb_set(p_state, '{validation,cat_index}', to_jsonb(v_cur + 1));
+  p_state := jsonb_set(p_state, '{validation,deadline}', to_jsonb(now() + interval '15 seconds'), true);
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -1333,7 +1387,8 @@ as $$
 $$;
 
 -- Barème de la manche : unique valide 2, valide partagée 1, refusée/vide 0.
--- Refusée si contestée par la majorité stricte des AUTRES joueurs.
+-- Refusée si contestée par la majorité stricte des AUTRES joueurs (et au moins 2 contestations :
+-- à 2 joueurs, une contestation seule ne refuse rien).
 create or replace function public._pb_score(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -1365,7 +1420,7 @@ begin
       v_cnt := coalesce(jsonb_array_length(p_state#>array['validation', 'contests', v_cat, pl]), 0);
       if a is null or a->>'auto' is not null then
         v_status := coalesce(a->>'auto', 'empty');
-      elsif v_cnt * 2 > v_n - 1 then
+      elsif v_cnt >= 2 and v_cnt * 2 > v_n - 1 then   -- à 2 joueurs : jamais refusée par un seul 👎
         v_status := 'refused';
       else
         v_status := 'valid';
@@ -1407,6 +1462,7 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'round_score',
+    'score_deadline', to_jsonb(now() + interval '20 seconds'),  -- animation des scores + lecture, puis tick -> manche suivante
     'validation', null,
     'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
                  from jsonb_each_text(p_state->'scores')),
@@ -1613,6 +1669,18 @@ begin
     if v_phase = 'writing' and now() >= (p_state->>'deadline')::timestamptz then
       return public._pb_to_validation(p_state, p_server);
     end if;
+    -- Validation : la catégorie avance seule à son échéance (state anciens sans deadline : inchangés).
+    if v_phase = 'round_score' and p_state->>'score_deadline' is not null
+       and now() >= (p_state->>'score_deadline')::timestamptz then
+      if v_round >= (p_state->>'total_rounds')::integer then
+        return public._pb_finish(p_state, p_server);
+      end if;
+      return public._pb_start_round(p_state - 'forced' - 'score_deadline', p_server, v_round + 1);
+    end if;
+    if v_phase = 'validation' and p_state#>>'{validation,deadline}' is not null
+       and now() >= (p_state#>>'{validation,deadline}')::timestamptz then
+      return public._pb_advance(p_state, p_server);
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- end_round
@@ -1663,18 +1731,18 @@ begin
     v_contests := v_contests || jsonb_build_object(v_cat,
                     coalesce(v_contests->v_cat, '{}'::jsonb) || jsonb_build_object(v_target, v_list));
     p_state := jsonb_set(p_state, '{validation,contests}', v_contests);
+    -- Contestation sur la catégorie en cours : on laisse au moins 8 s pour en discuter (jamais raccourci).
+    if v_value and v_idx = v_cur and p_state#>>'{validation,deadline}' is not null then
+      p_state := jsonb_set(p_state, '{validation,deadline}', to_jsonb(greatest(
+        (p_state#>>'{validation,deadline}')::timestamptz, now() + interval '8 seconds')));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- next_category
   elsif v_type = 'next_category' then
     if not p_is_host then raise exception 'not_host'; end if;
     if v_phase <> 'validation' then raise exception 'wrong_phase'; end if;
-    v_cur := (p_state#>>'{validation,cat_index}')::integer;
-    if v_cur + 1 >= v_ncat then
-      return public._pb_score(p_state, p_server);
-    end if;
-    p_state := jsonb_set(p_state, '{validation,cat_index}', to_jsonb(v_cur + 1));
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._pb_advance(p_state, p_server);
 
   -- ---------------------------------------------------------------- close_validation
   elsif v_type = 'close_validation' then
@@ -1697,6 +1765,8 @@ begin
 end $$;
 
 revoke all on function public._pb_norm(text) from public, anon, authenticated;
+revoke all on function public._pb_letter_ok(text, text) from public, anon, authenticated;
+revoke all on function public._pb_advance(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_clean(text) from public, anon, authenticated;
 revoke all on function public._pb_start_round(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._pb_build_answers(jsonb, jsonb) from public, anon, authenticated;
@@ -1934,7 +2004,8 @@ set search_path = public, extensions
 as $$ select to_char(p at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') $$;
 
 -- Tour p_turn : le devineur se prépare (pose le téléphone sur son front).
--- Pas d'échéance : le devineur envoie `ready` (l'hôte peut passer le tour).
+-- Échéance ~45 s (`placing_seconds`) : le devineur envoie `ready` ; sinon (absent) le tick
+-- saute le tour. L'hôte peut aussi passer le tour (`skip_turn`).
 create or replace function public._qsj_start_turn(p_state jsonb, p_server jsonb, p_turn integer)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -1950,7 +2021,7 @@ begin
     'card', null,
     'card_index', 0,
     'starts_at', null,
-    'deadline', null,
+    'deadline', public._qsj_iso(now() + make_interval(secs => coalesce((p_state->>'placing_seconds')::integer, 45))),
     'turn_found', 0,
     'turn_passed', 0,
     'turn_log', '[]'::jsonb);
@@ -2133,6 +2204,7 @@ begin
     'themes', v_themes,
     'turn_seconds', v_secs,
     'countdown_seconds', 4,
+    'placing_seconds', 45,
     'recap_seconds', 4,
     'scores', v_zero,
     'last_turn', null,
@@ -2216,8 +2288,14 @@ begin
         return public._qsj_finish(p_state, p_server);
       end if;
       return public._qsj_start_turn(p_state, p_server, v_turn + 1);
+    elsif v_phase = 'placing' then
+      -- devineur absent : échéance passée → on saute son tour (rétrocompat : pas d'échéance = ignoré)
+      if nullif(p_state->>'deadline', '') is null or now() < (p_state->>'deadline')::timestamptz then
+        return jsonb_build_object('state', p_state, 'server', p_server);
+      end if;
+      return public._qsj_end_turn(p_state, p_server, true);
     end if;
-    -- placing (pas d'échéance) ou autre : ignoré sans erreur.
+    -- autre phase : ignoré sans erreur.
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ------------------------------------------------------------------ skip_turn
@@ -3408,10 +3486,29 @@ begin
     s := s || jsonb_build_object('away', (s->'away') - v_me);
     s := public._tdp_log(s, jsonb_build_object('player', v_me, 'kind', 'back'));
   end if;
+  -- Action du joueur lui-même : son tour n'est pas « auto » et son compteur repart à zéro.
+  if v_type not in ('tick', 'skip') and (p_state->'players') ? v_me then
+    s := s || jsonb_build_object(
+      'idle', coalesce(s->'idle', '{}'::jsonb) - v_me,
+      'manual_turn', case when t = v_me then to_jsonb((s->>'turn_no')::integer) else s->'manual_turn' end);
+  end if;
   g := jsonb_build_object('s', s, 'v', coalesce(p_server, '{}'::jsonb));
 
   if v_type = 'tick' then
     g := public._tdp_auto_step(g);
+    -- Absent auto : 2 tours entiers d'affilée joués par le minuteur (sans aucune action du joueur).
+    if g->'s'->>'phase' is distinct from 'finished'
+       and (g->'s'->>'turn_no')::integer > (s->>'turn_no')::integer
+       and (s->>'manual_turn') is distinct from (s->>'turn_no') then
+      s := g->'s';
+      s := s || jsonb_build_object('idle', coalesce(s->'idle', '{}'::jsonb)
+        || jsonb_build_object(t, coalesce((s->'idle'->>t)::integer, 0) + 1));
+      if (s->'idle'->>t)::integer >= 2 and not (coalesce(s->'away', '[]'::jsonb) ? t) then
+        s := s || jsonb_build_object('away', coalesce(s->'away', '[]'::jsonb) || to_jsonb(t));
+        s := public._tdp_log(s, jsonb_build_object('player', t, 'kind', 'away', 'auto', true));
+      end if;
+      g := jsonb_set(g, '{s}', s);
+    end if;
 
   elsif v_type = 'skip' then
     if not (coalesce(s->'away', '[]'::jsonb) ? t) then
@@ -3572,7 +3669,8 @@ revoke all on function public.game_tour_des_potes_action(jsonb, jsonb, uuid, boo
 --
 -- Phases : answering -> reveal -> (answering …) -> finished.
 -- Révélation : quand tous ont répondu, à l'échéance (`deadline` + {"type":"tick"}),
--- ou forcée par l'hôte ({"type":"reveal"}).
+-- ou forcée par l'hôte ({"type":"reveal"}). Après la révélation, une échéance (20 s) enchaîne
+-- automatiquement sur le dilemme suivant (tick) ; l'hôte peut aller plus vite ({"type":"next"}).
 --
 -- Points (calculés sur les joueurs ayant répondu) :
 --   * +1 si le pari = le choix majoritaire. Égalité parfaite (ou personne n'a
@@ -3754,7 +3852,8 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'reveal',
-    'deadline', null,
+    -- suite auto : verdict animé (~5 s) + ~15 s de lecture, puis tick -> dilemme suivant
+    'deadline', to_jsonb(now() + interval '20 seconds'),
     'scores', v_scores,
     'stats', v_stats,
     'last_reveal', jsonb_build_object(
@@ -3842,11 +3941,13 @@ declare
   v_res      jsonb;
 begin
   if v_type = 'tick' then
-    -- Idempotent : ignoré sans erreur si trop tôt ou hors phase de réponse.
-    if v_phase <> 'answering' or v_deadline is null or now() < v_deadline then
+    -- Idempotent : ignoré sans erreur si trop tôt, sans échéance ou hors phase.
+    if v_phase not in ('answering', 'reveal') or v_deadline is null or now() < v_deadline then
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
-    return public._tp_reveal(p_state, p_server);
+    if v_phase = 'answering' then return public._tp_reveal(p_state, p_server); end if;
+    if v_round >= v_total then return public._tp_finish(p_state, p_server); end if;
+    return public._tp_open_round(p_state, p_server, v_round + 1);
 
   elsif v_type = 'answer' then
     if v_phase <> 'answering' then raise exception 'wrong_phase'; end if;

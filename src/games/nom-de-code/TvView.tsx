@@ -215,7 +215,7 @@ export function NdcTv({ state, act, players }: GamePlayProps) {
 
   const win = s.round_winner ? TEAM_INFO[s.round_winner] : null
   const timer =
-    live && s.deadline ? (
+    live && s.deadline && (s.timer !== 'relaxed' || secs <= 60) ? (
       <span className={cn('sticker-sm rounded-full bg-surface px-4 py-1 text-center font-display text-3xl font-extrabold tabular-nums', secs <= 10 && 'text-tomato')}>⏱️ {mmss(Math.max(0, secs))}</span>
     ) : null
 

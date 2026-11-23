@@ -1161,10 +1161,29 @@ begin
     s := s || jsonb_build_object('away', (s->'away') - v_me);
     s := public._tdp_log(s, jsonb_build_object('player', v_me, 'kind', 'back'));
   end if;
+  -- Action du joueur lui-même : son tour n'est pas « auto » et son compteur repart à zéro.
+  if v_type not in ('tick', 'skip') and (p_state->'players') ? v_me then
+    s := s || jsonb_build_object(
+      'idle', coalesce(s->'idle', '{}'::jsonb) - v_me,
+      'manual_turn', case when t = v_me then to_jsonb((s->>'turn_no')::integer) else s->'manual_turn' end);
+  end if;
   g := jsonb_build_object('s', s, 'v', coalesce(p_server, '{}'::jsonb));
 
   if v_type = 'tick' then
     g := public._tdp_auto_step(g);
+    -- Absent auto : 2 tours entiers d'affilée joués par le minuteur (sans aucune action du joueur).
+    if g->'s'->>'phase' is distinct from 'finished'
+       and (g->'s'->>'turn_no')::integer > (s->>'turn_no')::integer
+       and (s->>'manual_turn') is distinct from (s->>'turn_no') then
+      s := g->'s';
+      s := s || jsonb_build_object('idle', coalesce(s->'idle', '{}'::jsonb)
+        || jsonb_build_object(t, coalesce((s->'idle'->>t)::integer, 0) + 1));
+      if (s->'idle'->>t)::integer >= 2 and not (coalesce(s->'away', '[]'::jsonb) ? t) then
+        s := s || jsonb_build_object('away', coalesce(s->'away', '[]'::jsonb) || to_jsonb(t));
+        s := public._tdp_log(s, jsonb_build_object('player', t, 'kind', 'away', 'auto', true));
+      end if;
+      g := jsonb_set(g, '{s}', s);
+    end if;
 
   elsif v_type = 'skip' then
     if not (coalesce(s->'away', '[]'::jsonb) ? t) then

@@ -50,7 +50,8 @@ function useTeamSecret(matchId: string, s: TeamState, propSecret: unknown) {
 
 /** Envoie `tick` à l'échéance (orateur d'abord, puis l'hôte, puis les autres ; relance toutes les 3 s). */
 function useAutoTick(s: TeamState, act: ActFn, meId: string, isHost: boolean) {
-  const target = s.phase === 'playing' && s.deadline ? new Date(s.deadline).getTime() : null
+  const allowed = isHost || s.teams.red.includes(meId) || s.teams.blue.includes(meId)
+  const target = allowed && (s.phase === 'playing' || s.phase === 'ready') && s.deadline ? new Date(s.deadline).getTime() : null
   const role = s.speaker === meId ? 0 : isHost ? 1 : 2
   const actRef = useRef(act)
   useEffect(() => {
@@ -260,6 +261,7 @@ function RuleCard({ round, compact }: { round: number; compact?: boolean }) {
 
 function ReadyScreen({ s, get, role, pending, onGo }: { s: TeamState; get: Get; role: Role; pending: boolean; onGo: () => void }) {
   const reduce = useReducedMotion()
+  const waitMs = useCountdown(s.deadline, 250)
   const sp = get(s.speaker)
   const meta = TEAM_META[s.team]
   const recap = s.last_turn && s.last_turn.turn_no === s.turn_no - 1 && s.last_turn.reason !== 'empty' ? s.last_turn : null
@@ -285,6 +287,11 @@ function ReadyScreen({ s, get, role, pending, onGo }: { s: TeamState; get: Get; 
         <p className="flex items-center gap-1 font-bold">
           <Timer className="size-5" /> {s.budget} s{s.carried ? ' (temps conservé de la manche précédente)' : ''}
         </p>
+        {s.deadline && (
+          <p className="text-sm font-bold opacity-90">
+            {role === 'speaker' ? 'Lance-toi' : `On attend ${sp.nickname}`}… sinon on passe dans {Math.ceil(waitMs / 1000)} s
+          </p>
+        )}
       </div>
 
       <RuleCard round={s.round} />

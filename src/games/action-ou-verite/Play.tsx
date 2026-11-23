@@ -34,6 +34,7 @@ const VOTE_MS = 30_000
 const PERFORM_MS = 150_000
 const SOFT_MS = 60_000
 const AUTO_MS = 12_000
+const RESULT_MS = 25_000
 
 /**
  * Envoie {"type":"tick"} quand l'échéance est passée (horloge serveur), puis
@@ -61,7 +62,8 @@ export default function ActionVeritePlay({ state, meId, isHost, players, act, pe
   const s = state as unknown as AovState
   const get: Get = (id) => playerOrPlaceholder(players, id)
   const live = s.phase === 'choose' || s.phase === 'vote' || s.phase === 'perform' || s.phase === 'result'
-  useDeadlineTick(live ? s.deadline : null, act)
+  const isPlayer = (s.players ?? []).includes(meId)
+  useDeadlineTick(live && (isPlayer || isHost) ? s.deadline : null, act)
   const p: PhaseProps = { s, meId, isHost, get, players, act, pending }
 
   return (
@@ -626,7 +628,7 @@ function ResultPhase({ s, meId, isHost, get, act, pending, r }: PhaseProps & { r
   const me = r.target === meId
   const last = s.total_rounds > 0 && s.round >= s.total_rounds
   const boxRef = useRef<HTMLDivElement>(null)
-  const autoLeft = useCountdown(s.auto ? s.deadline : null, 250)
+  const autoLeft = useCountdown(s.deadline, 250)
 
   useEffect(() => {
     if (r.outcome === 'success') {
@@ -714,11 +716,11 @@ function ResultPhase({ s, meId, isHost, get, act, pending, r }: PhaseProps & { r
       )}
       {voters.length === 0 && r.outcome === 'fail' && <p className="text-center font-bold text-muted">Personne n’a jugé à temps 🦗</p>}
 
-      {s.auto && s.deadline && (
+      {s.deadline && (
         <p className="text-center font-display font-extrabold text-muted">
-          {last ? 'Résultats' : 'Tour suivant'} dans {Math.ceil(autoLeft / 1000)} s…
+          {last ? 'Résultats' : 'On passe au tour suivant'} dans {Math.ceil(autoLeft / 1000)} s…
           <span className="mx-auto mt-1 block h-2 w-40 overflow-hidden rounded-full border-2 border-ink bg-sunk">
-            <span className="block h-full bg-sun transition-[width] duration-200" style={{ width: `${Math.max(0, Math.min(100, (autoLeft / AUTO_MS) * 100))}%` }} />
+            <span className="block h-full bg-sun transition-[width] duration-200" style={{ width: `${Math.max(0, Math.min(100, (autoLeft / (s.auto ? AUTO_MS : RESULT_MS)) * 100))}%` }} />
           </span>
         </p>
       )}
@@ -728,7 +730,7 @@ function ResultPhase({ s, meId, isHost, get, act, pending, r }: PhaseProps & { r
           {last ? 'Voir les résultats' : 'Tour suivant'}
         </Button>
       ) : (
-        <p className="text-center font-bold text-muted">L’hôte va relancer la roue…</p>
+        <p className="text-center font-bold text-muted">La roue repart bientôt (ou dès que l’hôte appuie)…</p>
       )}
     </>
   )

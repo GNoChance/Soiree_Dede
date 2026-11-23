@@ -150,7 +150,7 @@ export function checkWord(
   if (!word.includes(syllable)) return { ok: false, reason: 'missing', word }
   if (word.replace(/-/g, '').length <= syllable.length) return { ok: false, reason: 'short', word }
   for (const w of played) if (w === word) return { ok: false, reason: 'played', word }
-  if (dict.status === 'loading') return { ok: false, reason: 'loading', word }
+  // Dico pas encore chargé (ou indisponible) : on ne pénalise personne à cause du réseau, on se fie au serveur.
   if (dict.status === 'ready' && !dict.has(word)) return { ok: false, reason: 'dico', word }
   return { ok: true, word }
 }

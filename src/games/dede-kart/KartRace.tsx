@@ -18,6 +18,8 @@ interface Props {
   now: () => number
   autopilot?: boolean
   autoCut?: boolean
+  /** Tours déjà comptés par le serveur pour moi (reprise après rechargement). */
+  resumeLaps?: number
   /** Affiche le classement local à mon arrivée (essai solo). En multi, c'est le serveur qui classe. */
   showResults?: boolean
   onLap?: (id: string, completed: number) => void
@@ -55,6 +57,7 @@ export default function KartRace(p: Props) {
       onHit: (id, h) => cb.current.onHit?.(id, h),
     })
     game.current = g
+    if (cb.current.resumeLaps) g.resumeLaps(cb.current.resumeLaps)
     setMuted(g.muted)
     done.current = false
     cb.current.onReady?.(g)

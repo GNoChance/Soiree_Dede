@@ -543,6 +543,22 @@ function Validation({ s, meId, isPlayer, isHost, get, act, pending }: { s: Petit
   // Ordre de révélation : réponses vides à la fin (suspense sur les vraies réponses).
   const order = [...s.players].sort((a, b) => Number(!answers[a]?.text) - Number(!answers[b]?.text))
 
+  const left = useCountdown(v.deadline ?? null, 500)
+  // Auto-avance : tick à l'échéance de la catégorie (le serveur ignore les ticks en avance).
+  const expired = !!v.deadline && left <= 0 && new Date(v.deadline).getTime() <= serverNow()
+  useEffect(() => {
+    if (!expired || !(isPlayer || isHost)) return
+    let sent = 0
+    const send = () => {
+      if (sent++ < 6) void act(pbActions.tick())
+    }
+    const first = window.setTimeout(send, 150 + Math.random() * 450)
+    const retry = window.setInterval(send, 2500)
+    return () => {
+      clearTimeout(first)
+      clearInterval(retry)
+    }
+  }, [expired, v.deadline, idx, act, isPlayer, isHost])
   const [busy, setBusy] = useState<string | null>(null)
   const toggle = async (target: string, value: boolean) => {
     setBusy(target)
@@ -595,7 +611,7 @@ function Validation({ s, meId, isPlayer, isHost, get, act, pending }: { s: Petit
           const st = live[id]?.status ?? 'empty'
           const voters = contests[id] ?? []
           const mine = voters.includes(meId)
-          const canContest = isPlayer && id !== meId && !a?.auto
+          const canContest = isPlayer && id !== meId && !a?.auto && n > 2
           const refused = st === 'refused' || st === 'letter' || st === 'empty'
           const ui = STATUS_UI[st]
           return (
@@ -659,8 +675,16 @@ function Validation({ s, meId, isPlayer, isHost, get, act, pending }: { s: Petit
       </div>
 
       <p className="text-center text-sm text-muted">
-        👎 pour contester une réponse : refusée si plus de la moitié des autres joueurs la contestent.
+        {n <= 2
+          ? '👎 à deux, une contestation ne retire pas les points : on se fait confiance 🤝'
+          : '👎 pour contester une réponse : refusée si plus de la moitié des autres joueurs la contestent.'}
       </p>
+
+      {v.deadline && (
+        <p className="text-center font-bold text-muted">
+          {last ? 'Scores' : 'Catégorie suivante'} dans {Math.max(0, Math.ceil(left / 1000))} s
+        </p>
+      )}
 
       {isHost ? (
         <div className="flex flex-col gap-2">
@@ -668,13 +692,13 @@ function Validation({ s, meId, isPlayer, isHost, get, act, pending }: { s: Petit
             {last ? 'Voir les scores' : 'Catégorie suivante'}
           </Button>
           {!last && (
-            <button type="button" className="mx-auto flex items-center gap-1 font-display font-extrabold text-muted underline" onClick={() => void act(pbActions.closeValidation())}>
-              <FastForward className="size-4" /> Tout valider d’un coup
-            </button>
+            <Button variant="secondary" fullWidth icon={<FastForward className="size-5" />} onClick={() => void act(pbActions.closeValidation())}>
+              Tout valider d’un coup
+            </Button>
           )}
         </div>
       ) : (
-        <p className="text-center font-bold text-muted">L’hôte passe à la catégorie suivante…</p>
+        <p className="text-center font-bold text-muted">{v.deadline ? 'La suite arrive toute seule…' : 'L’hôte passe à la catégorie suivante…'}</p>
       )}
     </>
   )
@@ -685,6 +709,23 @@ function Validation({ s, meId, isPlayer, isHost, get, act, pending }: { s: Petit
 /* -------------------------------------------------------------------------- */
 
 function RoundScore({ s, meId, isHost, get, act, pending }: { s: PetitBacState; meId: string; isHost: boolean; get: Get; act: ActFn; pending: boolean }) {
+  const sd = (s as unknown as { score_deadline?: string }).score_deadline
+  const left = useCountdown(sd ?? null, 500)
+  const expired = !!sd && left <= 0 && new Date(sd).getTime() <= serverNow()
+  const isPlayerOrHost = isHost || s.players.includes(meId)
+  useEffect(() => {
+    if (!expired || !isPlayerOrHost) return
+    let sent = 0
+    const send = () => {
+      if (sent++ < 6) void act(pbActions.tick())
+    }
+    const first = window.setTimeout(send, 150 + Math.random() * 450)
+    const retry = window.setInterval(send, 2500)
+    return () => {
+      clearTimeout(first)
+      clearInterval(retry)
+    }
+  }, [expired, sd, act, isPlayerOrHost])
   const lr = s.last_round!
   const reduce = useReducedMotion()
   const [landed, setLanded] = useState(!!reduce)
@@ -804,6 +845,11 @@ function RoundScore({ s, meId, isHost, get, act, pending }: { s: PetitBacState; 
         </div>
       </details>
 
+      {sd && (
+        <p className="text-center font-bold text-muted">
+          {last ? 'Résultats finaux' : 'Manche suivante'} dans {Math.max(0, Math.ceil(left / 1000))} s
+        </p>
+      )}
       {isHost ? (
         <Button size="lg" fullWidth loading={pending} icon={last ? <Trophy className="size-6" /> : <ArrowRight className="size-6" />} onClick={() => void act(pbActions.nextRound())}>
           {last ? 'Résultats finaux' : 'Manche suivante'}

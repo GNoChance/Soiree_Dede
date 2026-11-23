@@ -340,6 +340,38 @@ for (const id of ['quatre-a-la-suite', 'morpion']) {
   const s4 = await actG(id, s3b, P[0], { type: 'tick' })
   ok(`${id} : coup auto à l’échéance, échéance suivante 30 s`, !s4.err && s4.state.duel.last_move?.auto === true && Math.abs(secsTo(s4.state.deadline) - 30) < 3, s4.err ?? '')
 }
+// Forfait : 3 coups automatiques consécutifs d'un même joueur = manche perdue.
+{
+  const id = 'quatre-a-la-suite'
+  const s0 = await startGame(id, { mode: 'duel', duel_players: [P[0], P[1]] })
+  const a = s0.state.duel.turn
+  const b = a === s0.state.duel.a ? s0.state.duel.b : s0.state.duel.a
+  let s = s0
+  const tickOnce = async (st) => {
+    const c = structuredClone(st)
+    c.state.deadline = ago(1)
+    return actG(id, c, P[0], { type: 'tick' })
+  }
+  s = await tickOnce(s) // auto de a (1)
+  ok('forfait : 1er coup auto, pas de forfait', s.state.phase === 'playing' && s.state.duel.auto_streak[a] === 1)
+  s = await actG(id, s, b, { type: 'move', move: { col: 0 } })
+  ok('forfait : coup manuel de b remet son compteur à 0', s.state.duel.auto_streak[b] === 0)
+  s = await tickOnce(s) // auto de a (2)
+  s = await actG(id, s, b, { type: 'move', move: { col: 1 } })
+  ok('forfait : 2 autos de a, toujours en jeu', s.state.phase === 'playing' && s.state.duel.auto_streak[a] === 2)
+  s = await tickOnce(s) // auto de a (3) -> forfait
+  ok('forfait : 3e coup auto consécutif = manche perdue', s.state.phase === 'result' && s.state.duel.outcome === 'win' && s.state.duel.winner === b && s.state.duel.forfeit === a, JSON.stringify(s.err ?? s.state.duel))
+  // Rétrocompatibilité : state sans compteur
+  const old = structuredClone(s0)
+  delete old.state.duel.auto_streak
+  const o = await tickOnce(old)
+  ok('forfait : state ancien sans compteur accepté', !o.err && o.state.duel.auto_streak[a] === 1, o.err ?? '')
+  // Tick tardif hors phase : sans erreur, état inchangé
+  const fin = structuredClone(s)
+  fin.state.phase = 'finished'
+  const t = await actG(id, fin, P[0], { type: 'tick' })
+  ok('tick sur partie finie : pas d’exception, état inchangé', !t.err && t.state.phase === 'finished', t.err ?? '')
+}
 {
   const s0 = await startGame('bataille-navale', { mode: 'duel', turn_seconds: 40 })
   ok('bataille-navale : phase setup', s0.state.phase === 'setup')

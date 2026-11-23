@@ -81,7 +81,7 @@ end $$;
 
 -- Écran « Au tour de X — prêt ? » pour l'équipe/orateur courants.
 create or replace function public._dee_ready(p_state jsonb, p_budget integer, p_carried boolean)
-returns jsonb language sql immutable
+returns jsonb language sql stable
 set search_path = public, extensions
 as $$
   select p_state || jsonb_build_object(
@@ -89,7 +89,8 @@ as $$
     'turn_no', coalesce((p_state->>'turn_no')::integer, 0) + 1,
     'budget', p_budget,
     'carried', p_carried,
-    'deadline', null,
+    -- Échéance ~45 s : orateur absent → le tick saute le passage (comme skip_turn de l'hôte).
+    'deadline', public._dee_iso(now() + make_interval(secs => coalesce((p_state->>'ready_seconds')::integer, 45))),
     'started_at', null,
     'turn_found', 0,
     'turn_passed', 0,
@@ -440,6 +441,9 @@ begin
   elsif v_type = 'tick' then
     if v_phase = 'playing' and now() >= (p_state->>'deadline')::timestamptz then
       return public._dee_end_passage(p_state, p_server, 'time');
+    elsif v_phase = 'ready' and nullif(p_state->>'deadline', '') is not null
+          and now() >= (p_state->>'deadline')::timestamptz then
+      return public._dee_end_passage(p_state, p_server, 'skip');
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 

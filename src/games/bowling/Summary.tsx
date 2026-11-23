@@ -12,7 +12,15 @@ export default function BowlingSummary({ state, players, meId }: GameSummaryProp
   if (!s.sheets || !s.players?.length) return null
   const get = (id: string) => playerOrPlaceholder(players, id)
   const ranked = [...s.players].sort((a, b) => (s.scores?.[b] ?? 0) - (s.scores?.[a] ?? 0))
-  const stats = Object.fromEntries(s.players.map((id) => [id, sheetStats(s.sheets[id] ?? [], s.frames)]))
+  // Gouttières : le serveur ne compte que les lancers réellement joués (les 0 de la fin forcée sont comblés).
+  const srvGut = new Map(s.results?.map((r) => [r.profile_id, r.stats?.gutters]) ?? [])
+  const stats = Object.fromEntries(
+    s.players.map((id) => {
+      const st = sheetStats(s.sheets[id] ?? [], s.frames)
+      const g = srvGut.get(id)
+      return [id, typeof g === 'number' ? { ...st, gutters: g } : st]
+    }),
+  )
 
   const best = <K extends 'strikes' | 'spares' | 'bestFrame' | 'gutters'>(k: K) => {
     const top = Math.max(0, ...s.players.map((id) => stats[id][k]))

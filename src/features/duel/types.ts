@@ -157,6 +157,10 @@ export interface DuelInfo<M = unknown> {
   winner: string | null
   /** Phase setup : duellistes prêts. */
   ready: string[]
+  /** Coups automatiques consécutifs par duelliste (3 = forfait). Absent des anciennes parties. */
+  auto_streak?: Record<string, number>
+  /** Duelliste ayant perdu la manche par forfait (absent), sinon null/undefined. */
+  forfeit?: string | null
   /** Renseigné quand le DUEL est terminé. */
   result: DuelResult | null
   /** Tournoi : position dans le tableau. */

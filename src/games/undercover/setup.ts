@@ -11,6 +11,7 @@ export const ucActions = {
   guess: (word: string) => ({ type: 'guess', word: word.trim().slice(0, 60) }),
   skipGuess: () => ({ type: 'skip_guess' }),
   next: () => ({ type: 'next' }),
+  tick: () => ({ type: 'tick' }),
 }
 
 export const UC_DEFAULT_OPTIONS = { misterWhite: true }

@@ -334,3 +334,8 @@ export const DUEL_FALLBACK_COLORS = { a: '#EF476F', b: '#FFB703' } as const
 export function pickSideColors(colorA: string, colorB: string): { a: string; b: string } {
   return colorsDistinct(colorA, colorB) ? { a: colorA, b: colorB } : { ...DUEL_FALLBACK_COLORS }
 }
+
+/** Le plateau gère sa propre pendule (échecs) : l'échéance n'est pas `turn_seconds`, pas d'anneau de chrono. */
+export function hasOwnClock(board: unknown): boolean {
+  return typeof board === 'object' && board !== null && 'clock' in board && !!(board as { clock?: unknown }).clock
+}

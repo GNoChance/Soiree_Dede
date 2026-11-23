@@ -14,7 +14,7 @@ import type { GamePlayProps, PlayerInfo } from '../types'
 import type { BamBroadcast, BamEvent, BamState } from './types'
 import { bamActions, checkWord, highlight, nextAlive, rejectLabel } from './setup'
 import { useBombeChannel, useThrottled } from './channel'
-import { useDictionary } from './useDictionary'
+import { preloadDictionary, useDictionary } from './useDictionary'
 import { DictIndicator } from './DictIndicator'
 
 type Get = (id: string) => PlayerInfo
@@ -129,6 +129,10 @@ interface Reject {
 
 export default function BombePlay({ matchId, state, meId, isHost, players, act }: GamePlayProps) {
   const s = state as unknown as BamState
+  // Précharge le dico chez TOUS les joueurs dès l'arrivée sur l'écran de jeu.
+  useEffect(() => {
+    void preloadDictionary()
+  }, [])
   const get: Get = useCallback((id: string) => playerOrPlaceholder(players, id), [players])
   const reduce = useReducedMotion()
   const [remote, setRemote] = useState<Remote | null>(null)

@@ -20,7 +20,8 @@ set search_path = public, extensions
 as $$ select to_char(p at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') $$;
 
 -- Tour p_turn : le devineur se prépare (pose le téléphone sur son front).
--- Pas d'échéance : le devineur envoie `ready` (l'hôte peut passer le tour).
+-- Échéance ~45 s (`placing_seconds`) : le devineur envoie `ready` ; sinon (absent) le tick
+-- saute le tour. L'hôte peut aussi passer le tour (`skip_turn`).
 create or replace function public._qsj_start_turn(p_state jsonb, p_server jsonb, p_turn integer)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -36,7 +37,7 @@ begin
     'card', null,
     'card_index', 0,
     'starts_at', null,
-    'deadline', null,
+    'deadline', public._qsj_iso(now() + make_interval(secs => coalesce((p_state->>'placing_seconds')::integer, 45))),
     'turn_found', 0,
     'turn_passed', 0,
     'turn_log', '[]'::jsonb);
@@ -219,6 +220,7 @@ begin
     'themes', v_themes,
     'turn_seconds', v_secs,
     'countdown_seconds', 4,
+    'placing_seconds', 45,
     'recap_seconds', 4,
     'scores', v_zero,
     'last_turn', null,
@@ -302,8 +304,14 @@ begin
         return public._qsj_finish(p_state, p_server);
       end if;
       return public._qsj_start_turn(p_state, p_server, v_turn + 1);
+    elsif v_phase = 'placing' then
+      -- devineur absent : échéance passée → on saute son tour (rétrocompat : pas d'échéance = ignoré)
+      if nullif(p_state->>'deadline', '') is null or now() < (p_state->>'deadline')::timestamptz then
+        return jsonb_build_object('state', p_state, 'server', p_server);
+      end if;
+      return public._qsj_end_turn(p_state, p_server, true);
     end if;
-    -- placing (pas d'échéance) ou autre : ignoré sans erreur.
+    -- autre phase : ignoré sans erreur.
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ------------------------------------------------------------------ skip_turn

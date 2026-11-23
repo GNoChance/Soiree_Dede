@@ -340,7 +340,7 @@ function PlayerRail({ s, seats, get, meId, left, total, canDenounce, onDenounce,
                   </span>
                 )}
               </div>
-              <span className={cn('max-w-full truncate text-xs font-extrabold', id === meId && 'text-grape')}>{id === meId ? 'Toi' : p.nickname}</span>
+              <span className={cn('max-w-full truncate text-xs font-extrabold', id === meId && 'text-grape')}>{id === meId ? 'Toi' : p.nickname}{s.absent?.[id] ? ' 💤 absent' : ''}</span>
               {canDenounce && lc === 'open' && id !== meId && (
                 <button type="button" disabled={busy} onClick={() => onDenounce(id)} className="rounded-full border-2 border-ink bg-tomato px-1.5 text-[10px] font-extrabold text-white shadow-sticker-sm">
                   Dénoncer !
@@ -693,7 +693,7 @@ function OpponentSeat({ s, id, index, get, left, total, cw, fanW, maxShow, canDe
           <span className={cn('absolute -top-1 -left-1 rounded-full border-2 border-ink px-1 text-[10px] leading-tight font-extrabold', lc === 'safe' ? 'bg-sun text-[#1f1b2e]' : 'bg-tomato text-white')}>{lc === 'safe' ? '1 !' : '1 ?'}</span>
         )}
       </div>
-      <span className={cn('max-w-full truncate text-xs font-extrabold', active && 'text-grape')}>{p.nickname}</span>
+      <span className={cn('max-w-full truncate text-xs font-extrabold', active && 'text-grape')}>{p.nickname}{s.absent?.[id] ? ' 💤 absent' : ''}</span>
       {/* dos de ses cartes : une qui part quand il joue, une qui arrive quand il pioche */}
       {k > 0 && (
         <div className="relative mt-1" style={{ width: cw + (k - 1) * step, height: Math.round(cw * 1.45) + 10 }}>

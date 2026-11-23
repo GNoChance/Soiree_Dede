@@ -150,6 +150,7 @@ export default function KartPlay({ matchId, state, meId, isHost, players, act }:
       localBots={localBots}
       botIds={s.bots}
       goAt={goAt}
+      resumeLaps={s.laps_done?.[meId] ?? 0}
       now={serverNow}
       showResults={false}
       onLap={onLap}

@@ -26,6 +26,7 @@ export type Splash =
   | { k: number; kind: 'denounce'; p: string; target: string }
   | { k: number; kind: 'announce'; p: string }
   | { k: number; kind: 'reshuffle' }
+  | { k: number; kind: 'back'; p: string }
 
 const DURATION: Record<Splash['kind'], number> = {
   pasdebol: 2300,
@@ -34,6 +35,7 @@ const DURATION: Record<Splash['kind'], number> = {
   denounce: 1900,
   announce: 1500,
   reshuffle: 1200,
+  back: 2200,
 }
 
 /** Transforme les nouvelles entrées du journal en sons + animations. */
@@ -71,6 +73,9 @@ export function useLogSplashes(s: PdbState, meId: string) {
           break
         case 'reshuffle':
           add.push({ k: e.n, kind: 'reshuffle' })
+          break
+        case 'back':
+          add.push({ k: e.n, kind: 'back', p: e.p })
           break
       }
     }
@@ -244,6 +249,14 @@ function SplashBody({ splash, get, meId }: { splash: Splash; get: Get; meId: str
         <ChibiImage slug={p.slug} expression={mood(p, 'sly')} size={120} />
         <p className="sticker -rotate-3 bg-sun px-4 py-1 font-display text-4xl font-extrabold text-[#1f1b2e]">Dernière carte !</p>
         <p className="font-bold text-white">{name(splash.p)} l’a annoncé à temps.</p>
+      </motion.div>
+    )
+  }
+
+  if (splash.kind === 'back') {
+    return (
+      <motion.div className="sticker relative bg-surface px-5 py-3 text-center" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}>
+        <p className="font-display text-2xl font-extrabold">👋 {name(splash.p)} {splash.p === meId ? 'es' : 'est'} de retour !</p>
       </motion.div>
     )
   }

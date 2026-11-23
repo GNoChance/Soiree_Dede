@@ -12,14 +12,20 @@ import { cn } from '@/lib/cn'
 import type { UndercoverSecret, UndercoverState } from '@/types/db'
 import { ConfirmModal, VoterStrip } from '@/features/soiree/components'
 import { mood, playerOrPlaceholder } from '@/features/soiree/players'
+import { useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { ROLE_INFO, ucActions } from './setup'
+import { NextIn, useDeadlineTick } from '../qui-de-nous/autoTick'
+
+/** Champs ajoutés par le serveur (absents des vieilles parties). */
+type UcS = UndercoverState & { deadline?: string | null; vote_unlock?: string | null }
 
 type Get = (id: string) => PlayerInfo
 type ActFn = GamePlayProps['act']
 
 export default function UndercoverPlay({ matchId, state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
-  const s = state as unknown as UndercoverState
+  const s = state as unknown as UcS
+  useDeadlineTick(s.phase === 'vote' || s.phase === 'elimination' || s.phase === 'mrwhite_guess' ? s.deadline : null, act)
   const sec = secret as UndercoverSecret | null
   const get = (id: string) => playerOrPlaceholder(players, id)
   const isPlayer = s.players.includes(meId)
@@ -139,9 +145,11 @@ function speakingOrder(s: UndercoverState): string[] {
   return [...alive.slice(i), ...alive.slice(0, i)]
 }
 
-function Describe({ s, get, meId, isHost, act, pending }: { s: UndercoverState; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
+function Describe({ s, get, meId, isHost, act, pending }: { s: UcS; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
   const order = speakingOrder(s)
   const reduce = useReducedMotion()
+  const unlockLeft = useCountdown(s.vote_unlock)
+  const canStart = isHost || (s.alive.includes(meId) && unlockLeft <= 0)
   return (
     <>
       <div className="sticker flex items-center gap-3 bg-sky p-3 text-[#1f1b2e]">
@@ -173,12 +181,15 @@ function Describe({ s, get, meId, isHost, act, pending }: { s: UndercoverState; 
           )
         })}
       </ol>
-      {isHost ? (
+      {canStart ? (
         <Button size="lg" fullWidth loading={pending} icon={<Vote className="size-6" />} onClick={() => void act(ucActions.startVote())}>
           Tout le monde a parlé : au vote !
         </Button>
       ) : (
-        <p className="text-center font-bold text-muted">L’hôte lancera le vote quand tout le monde aura parlé.</p>
+        <p className="text-center font-bold text-muted">
+          L’hôte lancera le vote quand tout le monde aura parlé.
+          {s.vote_unlock && unlockLeft > 0 && <> Sinon, tu pourras le lancer dans {Math.ceil(unlockLeft / 1000)} s.</>}
+        </p>
       )}
     </>
   )
@@ -188,7 +199,7 @@ function Describe({ s, get, meId, isHost, act, pending }: { s: UndercoverState; 
 /* Vote                                                                        */
 /* -------------------------------------------------------------------------- */
 
-function VotePhase({ s, get, meId, isHost, players, act, pending }: { s: UndercoverState; get: Get; meId: string; isHost: boolean; players: Record<string, PlayerInfo>; act: ActFn; pending: boolean }) {
+function VotePhase({ s, get, meId, isHost, players, act, pending }: { s: UcS; get: Get; meId: string; isHost: boolean; players: Record<string, PlayerInfo>; act: ActFn; pending: boolean }) {
   const key = `${s.round}-${s.revote ? 'r' : 'v'}`
   const [myVote, setMyVote] = useState<{ key: string; target: string } | null>(null)
   const chosen = myVote?.key === key ? myVote.target : null
@@ -249,6 +260,7 @@ function VotePhase({ s, get, meId, isHost, players, act, pending }: { s: Underco
         <p className="text-center font-bold text-muted">Les survivants votent…</p>
       )}
       <VoterStrip ids={s.alive} voters={s.voters} players={players} />
+      <NextIn deadline={s.deadline} label="Dépouillement dans" />
       {isHost && (
         <>
           <Button variant={allVoted ? 'primary' : 'secondary'} fullWidth loading={pending} icon={<Gavel className="size-5" />} onClick={() => (allVoted ? void act(ucActions.closeVote()) : setConfirmClose(true))}>
@@ -295,7 +307,7 @@ function markSeen(matchId: string, k: string) {
   }
 }
 
-function Elimination({ matchId, s, get, meId, isHost, act, pending }: { matchId: string; s: UndercoverState; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
+function Elimination({ matchId, s, get, meId, isHost, act, pending }: { matchId: string; s: UcS; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
   const elim = s.current_elimination!
   const p = get(elim.profile_id)
   const reduce = useReducedMotion()
@@ -381,12 +393,11 @@ function Elimination({ matchId, s, get, meId, isHost, act, pending }: { matchId:
               {s.mrwhite_guess.word ? `Mister White a proposé « ${s.mrwhite_guess.word} »… raté ! ❌` : 'Mister White n’a pas répondu. ❌'}
             </motion.div>
           )}
-          {isHost ? (
+          <NextIn deadline={s.deadline} />
+          {isHost && (
             <Button size="lg" fullWidth loading={pending} icon={<ArrowRight className="size-6" />} onClick={() => void act(ucActions.next())}>
-              Continuer
+              Continuer maintenant
             </Button>
-          ) : (
-            <p className="text-center font-bold text-muted">L’hôte va lancer la suite…</p>
           )}
         </>
       )}
@@ -394,7 +405,7 @@ function Elimination({ matchId, s, get, meId, isHost, act, pending }: { matchId:
   )
 }
 
-function MrWhiteGuess({ s, get, meId, isHost, act, pending }: { s: UndercoverState; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
+function MrWhiteGuess({ s, get, meId, isHost, act, pending }: { s: UcS; get: Get; meId: string; isHost: boolean; act: ActFn; pending: boolean }) {
   const elimId = s.current_elimination!.profile_id
   const mine = elimId === meId
   const [word, setWord] = useState('')
@@ -413,6 +424,7 @@ function MrWhiteGuess({ s, get, meId, isHost, act, pending }: { s: UndercoverSta
         }}
       >
         <p className="font-display text-xl font-extrabold">Dernière chance ! Quel est le mot des civils ?</p>
+        <NextIn deadline={s.deadline} label="Temps restant :" className="font-bold text-muted" />
         <input
           ref={inputRef}
           value={word}
@@ -433,6 +445,7 @@ function MrWhiteGuess({ s, get, meId, isHost, act, pending }: { s: UndercoverSta
       <motion.div className="sticker bg-white p-3 text-center text-[#1f1b2e]" animate={{ rotate: [-1, 1, -1] }} transition={{ repeat: Infinity, duration: 1.5 }}>
         <p className="font-display text-xl font-extrabold">{get(elimId).nickname} tente de deviner le mot des civils… 🤞</p>
         <p className="text-sm font-bold">S’il trouve, il gagne tout seul !</p>
+        <NextIn deadline={s.deadline} label="Temps restant :" className="text-sm font-bold" />
       </motion.div>
       {isHost && (
         <Button variant="secondary" fullWidth loading={pending} onClick={() => void act(ucActions.skipGuess())}>

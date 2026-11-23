@@ -9,6 +9,7 @@ import type { Difficulty, WordChoice } from './types'
 export const ddActions = {
   chooseWord: (index: number) => ({ type: 'choose_word', index }),
   guess: (text: string) => ({ type: 'guess', text: text.trim().slice(0, 40) }),
+  drawingStarted: () => ({ type: 'drawing_started' }),
   tick: () => ({ type: 'tick' }),
   skipTurn: () => ({ type: 'skip_turn' }),
 }

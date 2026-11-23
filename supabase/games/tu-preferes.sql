@@ -10,7 +10,8 @@
 --
 -- Phases : answering -> reveal -> (answering …) -> finished.
 -- Révélation : quand tous ont répondu, à l'échéance (`deadline` + {"type":"tick"}),
--- ou forcée par l'hôte ({"type":"reveal"}).
+-- ou forcée par l'hôte ({"type":"reveal"}). Après la révélation, une échéance (20 s) enchaîne
+-- automatiquement sur le dilemme suivant (tick) ; l'hôte peut aller plus vite ({"type":"next"}).
 --
 -- Points (calculés sur les joueurs ayant répondu) :
 --   * +1 si le pari = le choix majoritaire. Égalité parfaite (ou personne n'a
@@ -192,7 +193,8 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'reveal',
-    'deadline', null,
+    -- suite auto : verdict animé (~5 s) + ~15 s de lecture, puis tick -> dilemme suivant
+    'deadline', to_jsonb(now() + interval '20 seconds'),
     'scores', v_scores,
     'stats', v_stats,
     'last_reveal', jsonb_build_object(
@@ -280,11 +282,13 @@ declare
   v_res      jsonb;
 begin
   if v_type = 'tick' then
-    -- Idempotent : ignoré sans erreur si trop tôt ou hors phase de réponse.
-    if v_phase <> 'answering' or v_deadline is null or now() < v_deadline then
+    -- Idempotent : ignoré sans erreur si trop tôt, sans échéance ou hors phase.
+    if v_phase not in ('answering', 'reveal') or v_deadline is null or now() < v_deadline then
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
-    return public._tp_reveal(p_state, p_server);
+    if v_phase = 'answering' then return public._tp_reveal(p_state, p_server); end if;
+    if v_round >= v_total then return public._tp_finish(p_state, p_server); end if;
+    return public._tp_open_round(p_state, p_server, v_round + 1);
 
   elsif v_type = 'answer' then
     if v_phase <> 'answering' then raise exception 'wrong_phase'; end if;

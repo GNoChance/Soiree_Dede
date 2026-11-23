@@ -59,6 +59,18 @@ export default function BowlingPlay({ state, meId, isHost, players, act, pending
     }
   }, [left, s.deadline, s.phase, act])
 
+  // Fin auto quand il ne reste qu'un joueur (veille / plantage) : bandeau + tick.
+  const idleLeft = useCountdown(s.idle_deadline)
+  const idleTicked = useRef<string | null>(null)
+  useEffect(() => {
+    if (s.phase === 'playing' && s.idle_deadline && idleLeft <= 0 && idleTicked.current !== s.idle_deadline) {
+      idleTicked.current = s.idle_deadline
+      void act(bwActions.tick())
+    }
+  }, [idleLeft, s.idle_deadline, s.phase, act])
+  const stragglers = s.players.filter((id) => !s.done?.includes(id))
+  const idleSec = Math.ceil(idleLeft / 1000)
+
   // Coups d'éclat des autres joueurs.
   const [shout, setShout] = useState<{ key: string; text: string; player: string } | null>(null)
   const lastKey = useRef<string | null>(null)
@@ -87,6 +99,12 @@ export default function BowlingPlay({ state, meId, isHost, players, act, pending
   return (
     <div className="flex flex-col gap-3 pb-4">
       <MiniBoard s={s} ranked={ranked} meId={meId} get={get} left={s.deadline ? left : null} onOpen={() => setBoard(true)} />
+
+      {s.phase === 'playing' && s.idle_deadline && stragglers.length > 0 && (
+        <p className="sticker-sm bg-sun px-3 py-1.5 text-center text-sm font-extrabold text-[#1f1b2e]">
+          On attend {stragglers.map((id) => get(id).nickname).join(', ')}… fin dans {Math.floor(idleSec / 60)}:{String(idleSec % 60).padStart(2, '0')}
+        </p>
+      )}
 
       {isPlayer && (!myDone || busy) ? (
         <Lane s={s} meId={meId} me={get(meId)} serverSheet={serverSheet} act={act} onBusy={setBusy} />

@@ -18,7 +18,8 @@
  *   Un secret dont `turn` ≠ state.turn est périmé (les secrets ne sont jamais effacés).
  *
  * ACTIONS : choose_word {index 0-2} (dessinateur) · guess {text} (devineurs) ·
- *           tick · skip_turn (hôte).
+ *           drawing_started (dessinateur, 1er trait, idempotent) · tick · skip_turn (hôte).
+ *           Sans drawing_started 25 s après le début du dessin, tick passe le tour (last_turn.idle).
  *
  * BROADCAST (canal Realtime `match:<matchId>`, éphémère, voir channel.ts) : DrawMessage.
  */
@@ -50,6 +51,8 @@ export interface TurnSummary {
   found: string[]
   points?: Record<string, number>
   skipped: boolean
+  /** Tour passé parce que le dessinateur n'a rien dessiné (absent). */
+  idle?: boolean
 }
 
 export interface DrawState {
@@ -69,6 +72,10 @@ export interface DrawState {
   drawer: string
   deadline: string | null
   started_at: string | null
+  /** Premier trait posé ? (absent sur les anciennes parties). */
+  drawn?: boolean
+  /** Échéance de la vérification « le dessinateur dessine-t-il ? » (null = pas/plus de contrôle). */
+  draw_check_at?: string | null
   next_hint_at: string | null
   hint: string | null
   word_length: number | null

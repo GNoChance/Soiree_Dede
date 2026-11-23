@@ -13,7 +13,7 @@ import { DuelResultBanner } from './DuelResult'
 import { TimerRing } from './DuelStage'
 import { DuelTransition } from './DuelTransition'
 import { Bracket, ScoreStrip } from './SessionBoard'
-import { FIGHTER_MOODS, fighterMood, fmtTurnClock, pickSideColors, roundNameSingular, winsNeeded } from './logic'
+import { FIGHTER_MOODS, fighterMood, fmtTurnClock, hasOwnClock, pickSideColors, roundNameSingular, winsNeeded } from './logic'
 import { useDuel, useDuelTicker } from './useDuel'
 import type { DuelInfo, DuelSession, DuelState } from './types'
 
@@ -81,11 +81,12 @@ interface TvFighterProps {
   color: string
   size: number
   frac: number
+  ownClock?: boolean
   secLeft: number
   backers: number
 }
 
-function TvFighter({ s, duel, session, id, player, side, color, size, frac, secLeft, backers }: TvFighterProps) {
+function TvFighter({ s, duel, session, id, player, side, color, size, frac, ownClock, secLeft, backers }: TvFighterProps) {
   const reduce = useReducedMotion()
   const active = s.phase === 'playing' && duel.turn === id
   const m = fighterMood(s, id, s.phase === 'playing' ? frac : 1)
@@ -107,7 +108,7 @@ function TvFighter({ s, duel, session, id, player, side, color, size, frac, secL
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
       <div className="relative flex items-center justify-center" style={{ width: ring, height: ring }}>
-        {active && <TimerRing frac={frac} size={ring} stroke={Math.max(6, size * 0.06)} />}
+        {active && !ownClock && <TimerRing frac={frac} size={ring} stroke={Math.max(6, size * 0.06)} />}
         <motion.div
           className="relative rounded-full border-4 border-ink shadow-sticker"
           style={{ width: size, height: size, background: color }}
@@ -297,7 +298,8 @@ export function DuelTv<B, M>({ state, meId, isHost, players, act, Board, sideCol
   }, [duel, get, sideColors])
 
   const total = (session?.turn_seconds || 30) * 1000
-  const frac = v.left / total
+  const ownClock = hasOwnClock(s.board)
+  const frac = ownClock ? 1 : v.left / total
   const secLeft = Math.ceil(v.left / 1000)
   // Tic-tac pour toute la salle dans les 5 dernières secondes d'un coup.
   useEffect(() => {
@@ -347,7 +349,7 @@ export function DuelTv<B, M>({ state, meId, isHost, players, act, Board, sideCol
   const roomy = h >= 600
   const size = Math.round(landscape ? Math.max(72, Math.min(w * 0.17, (h - 52 - (roomy ? 130 : 80) - 90) / 1.25, 320)) : Math.min(w * 0.27, h * 0.15, 220))
   const fighter = (id: string, side: 'a' | 'b') => (
-    <TvFighter s={s} duel={duel} session={session} id={id} player={get(id)} side={side} color={colors[side]} size={size} frac={frac} secLeft={secLeft} backers={backers(id)} />
+    <TvFighter s={s} duel={duel} session={session} id={id} player={get(id)} side={side} color={colors[side]} size={size} frac={frac} ownClock={ownClock} secLeft={secLeft} backers={backers(id)} />
   )
   const wa = duel.wins[duel.a] ?? 0
   const wb = duel.wins[duel.b] ?? 0

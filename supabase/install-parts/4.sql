@@ -207,6 +207,9 @@ begin
   p_state := p_state || jsonb_build_object(
     'phase', 'drawing',
     'started_at', public._dd_iso(v_start),
+    -- dessinateur absent : s'il n'a pas posé un premier trait (drawing_started) d'ici là, le tour est passé
+    'drawn', false,
+    'draw_check_at', public._dd_iso(v_start + interval '25 seconds'),
     'deadline', public._dd_iso(v_start + make_interval(secs => v_secs)),
     'next_hint_at', p_server->'hints_left'->0->'at',
     'hint', public._dd_mask(v_text, '[]'::jsonb),
@@ -260,11 +263,13 @@ begin
     'phase', 'reveal',
     'deadline', public._dd_iso(now() + make_interval(secs => (p_state->>'reveal_seconds')::integer)),
     'next_hint_at', null,
+    'draw_check_at', null, 'idle_drawer', null,
     'hint', case when v_word is null then null else to_jsonb(v_word->>'word') end,
     'last_turn', jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
       'word', v_word->>'word', 'found', p_state->'found',
-      'points', p_state->'turn_points', 'skipped', p_skipped),
+      'points', p_state->'turn_points', 'skipped', p_skipped,
+      'idle', coalesce((p_state->>'idle_drawer')::boolean, false)),
     'history', coalesce(p_state->'history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
       'turn', p_state->'turn', 'drawer', p_state->'drawer',
       'word', v_word->>'word', 'found', p_state->'found', 'skipped', p_skipped,
@@ -531,6 +536,14 @@ begin
       return jsonb_build_object('state', p_state, 'server', p_server);
     end if;
 
+  -- ------------------------------------------------------------- drawing_started
+  elsif v_type = 'drawing_started' then
+    -- tardif / rejoué / pas le dessinateur : ignoré sans erreur (idempotent)
+    if v_phase <> 'drawing' or v_me <> p_state->>'drawer' then
+      return jsonb_build_object('state', p_state, 'server', p_server);
+    end if;
+    return jsonb_build_object('state', p_state || jsonb_build_object('drawn', true, 'draw_check_at', null), 'server', p_server);
+
   -- ----------------------------------------------------------------------- tick
   elsif v_type = 'tick' then
     if v_phase = 'choosing' then
@@ -541,6 +554,11 @@ begin
     elsif v_phase = 'drawing' then
       if now() >= (p_state->>'deadline')::timestamptz then
         return public._dd_end_turn(p_state, p_server, false);
+      end if;
+      -- dessinateur absent (parties en cours sans draw_check_at : ignoré)
+      if p_state->>'draw_check_at' is not null and not coalesce((p_state->>'drawn')::boolean, false)
+         and now() >= (p_state->>'draw_check_at')::timestamptz then
+        return public._dd_end_turn(p_state || jsonb_build_object('idle_drawer', true), p_server, true);
       end if;
       if p_state->>'next_hint_at' is not null and now() >= (p_state->>'next_hint_at')::timestamptz then
         return public._dd_apply_hints(p_state, p_server);
@@ -672,7 +690,7 @@ end $$;
 
 -- Écran « Au tour de X — prêt ? » pour l'équipe/orateur courants.
 create or replace function public._dee_ready(p_state jsonb, p_budget integer, p_carried boolean)
-returns jsonb language sql immutable
+returns jsonb language sql stable
 set search_path = public, extensions
 as $$
   select p_state || jsonb_build_object(
@@ -680,7 +698,8 @@ as $$
     'turn_no', coalesce((p_state->>'turn_no')::integer, 0) + 1,
     'budget', p_budget,
     'carried', p_carried,
-    'deadline', null,
+    -- Échéance ~45 s : orateur absent → le tick saute le passage (comme skip_turn de l'hôte).
+    'deadline', public._dee_iso(now() + make_interval(secs => coalesce((p_state->>'ready_seconds')::integer, 45))),
     'started_at', null,
     'turn_found', 0,
     'turn_passed', 0,
@@ -1031,6 +1050,9 @@ begin
   elsif v_type = 'tick' then
     if v_phase = 'playing' and now() >= (p_state->>'deadline')::timestamptz then
       return public._dee_end_passage(p_state, p_server, 'time');
+    elsif v_phase = 'ready' and nullif(p_state->>'deadline', '') is not null
+          and now() >= (p_state->>'deadline')::timestamptz then
+      return public._dee_end_passage(p_state, p_server, 'skip');
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
@@ -2329,7 +2351,8 @@ revoke all on function public.game_kems_start(uuid[], jsonb) from public, anon, 
 -- Phases : question -> reveal -> question ... -> finished.
 --   question : fin quand tous ont répondu (valeur ou « je ne sais pas »), à l'échéance
 --              (tick) ou par l'hôte (reveal).
---   reveal   : pas d'échéance, l'hôte enchaîne (next).
+--   reveal   : échéance auto (animation + 10 s) puis tick -> suite ; l'hôte peut enchaîner (next).
+--   Accélérateur : quand il ne manque qu'un joueur, la deadline passe à now()+8 s si elle est plus loin.
 -- Toute action portant un "round" différent de la manche courante est ignorée sans erreur.
 --
 -- Points d'une manche : classement par écart absolu |estimation - réponse| (ex-aequo =
@@ -2485,7 +2508,8 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'reveal',
-    'deadline', null,
+    -- Passage automatique à la suite : animation (~2,5 s + 0,4 s/joueur) + 10 s de lecture.
+    'deadline', to_jsonb(now() + make_interval(secs => 12.5 + 0.4 * jsonb_array_length(p_state->'players'))),
     'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
                  from jsonb_each_text(p_state->'scores')),
     'exacts', (select jsonb_object_agg(key, value::integer + coalesce((v_exact->>key)::integer, 0))
@@ -2591,8 +2615,10 @@ begin
   end if;
 
   if v_type = 'tick' then
-    if v_phase <> 'question' or v_deadline is null or now() < v_deadline then return v_same; end if;
-    return public._lpp_reveal(p_state, p_server);
+    if v_deadline is null or now() < v_deadline then return v_same; end if;
+    if v_phase = 'question' then return public._lpp_reveal(p_state, p_server); end if;
+    if v_round >= v_total then return public._lpp_finish(p_state, p_server); end if;
+    return public._lpp_open(p_state, p_server, v_round);
 
   elsif v_type = 'reveal' then
     if not p_is_host then raise exception 'not_host'; end if;
@@ -2632,6 +2658,12 @@ begin
                   where not (p_state->'answered' ? pl)) then
     v_res := public._lpp_reveal(p_state, p_server);
   else
+    -- Accélérateur : il ne manque plus qu'un joueur -> 8 s max (jamais allongé).
+    if (select count(*) from jsonb_array_elements_text(p_state->'players') pl
+         where not (p_state->'answered' ? pl)) = 1
+       and v_deadline > now() + interval '8 seconds' then
+      p_state := p_state || jsonb_build_object('deadline', to_jsonb(now() + interval '8 seconds'));
+    end if;
     v_res := jsonb_build_object('state', p_state, 'server', p_server);
   end if;
   return v_res || jsonb_build_object('secrets', jsonb_build_object(v_me, jsonb_build_object(
@@ -3680,7 +3712,9 @@ begin
     'bids', '[]'::jsonb,
     'total_dice', v_total,
     'reveal', null,
-    'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer + p_grace)));
+    'deadline', public._mtr_iso(now() + make_interval(secs => case
+      when coalesce((p_state->'absent'->>p_starter)::boolean, false) then 8   -- absent auto : tour express
+      else (p_state->>'turn_seconds')::integer + p_grace end)));
   return jsonb_build_object('state', p_state, 'server', p_server, 'secrets', v_secrets);
 end $$;
 
@@ -3922,7 +3956,10 @@ declare
   v_secrets jsonb := null;
   v_bids    jsonb;
 begin
-  if v_phase not in ('bidding', 'reveal') then raise exception 'wrong_phase'; end if;
+  if v_phase not in ('bidding', 'reveal') then
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
   if jsonb_typeof(v_bid) <> 'object' then v_bid := null; end if;
 
   -- ---------------------------------------------------------------- tick
@@ -3980,6 +4017,24 @@ begin
     raise exception 'unknown_action';
   end if;
 
+  -- Absent auto : 2 tours consécutifs joués par tick -> tours express ; une action du joueur le fait revenir.
+  if v_auto then
+    p_state := p_state || jsonb_build_object('idle', coalesce(p_state->'idle', '{}'::jsonb)
+      || jsonb_build_object(v_me, coalesce((p_state->'idle'->>v_me)::integer, 0) + 1));
+    if (p_state->'idle'->>v_me)::integer >= 2 and not coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', coalesce(p_state->'absent', '{}'::jsonb)
+        || jsonb_build_object(v_me, true));
+    end if;
+  elsif v_type in ('bid', 'liar', 'pile') then
+    if p_state->'idle' ? v_me then
+      p_state := p_state || jsonb_build_object('idle', (p_state->'idle') - v_me);
+    end if;
+    if coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', (p_state->'absent') - v_me,
+                                               'returned', v_me, 'returned_seq', coalesce((p_state->>'turn_seq')::integer, 0));
+    end if;
+  end if;
+
   -- ---------------------------------------------------------------- application
   if v_type = 'bid' then
     if not public._mtr_valid(v_q, v_f, v_bid, v_total) then raise exception 'bid_too_low'; end if;
@@ -3993,7 +4048,9 @@ begin
       'bids', v_bids || jsonb_build_array(v_bid),
       'turn', public._mtr_next(p_state, v_me),
       'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
-      'deadline', public._mtr_iso(now() + make_interval(secs => (p_state->>'turn_seconds')::integer)));
+      'deadline', public._mtr_iso(now() + make_interval(secs => case
+        when coalesce((p_state->'absent'->>public._mtr_next(p_state, v_me))::boolean, false) then 8
+        else (p_state->>'turn_seconds')::integer end)));
 
   elsif v_type in ('liar', 'pile') then
     p_state := public._mtr_resolve(p_state, p_server, v_me, v_type, v_auto);
@@ -4360,6 +4417,14 @@ begin
 
     if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') then
       return public._mg_close_hole(p_state, p_server);
+    end if;
+    -- Il ne reste qu'un joueur : le trou se clot 45 s apres (meme en « Sans chrono »),
+    -- sans rallonger un chrono deja plus court.
+    if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') - 1 then
+      p_state := p_state || jsonb_build_object('deadline', to_jsonb(
+        case when p_state->>'deadline' is not null
+             then least((p_state->>'deadline')::timestamptz, now() + interval '45 seconds')
+             else now() + interval '45 seconds' end));
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 

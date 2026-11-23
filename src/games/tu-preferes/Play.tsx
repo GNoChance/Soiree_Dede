@@ -15,6 +15,7 @@ import { AuthorBadge } from '@/features/cartes/AuthorBadge'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import type { TpDilemma, TpReveal, TpSecret, TpSide, TpState } from './types'
 import { percents, themeInfo, tpActions } from './setup'
+import { hash01, NextIn } from '../qui-de-nous/autoTick'
 
 type Get = (id: string) => PlayerInfo
 type ActFn = GamePlayProps['act']
@@ -56,7 +57,7 @@ function useDeadlineTick(deadline: string | null | undefined, act: ActFn) {
 export default function TuPreferesPlay({ state, secret, meId, isHost, players, act, pending }: GamePlayProps) {
   const s = state as unknown as TpState
   const get: Get = (id) => playerOrPlaceholder(players, id)
-  useDeadlineTick(s.phase === 'answering' ? s.deadline : null, act)
+  useDeadlineTick(s.phase === 'answering' || s.phase === 'reveal' ? s.deadline : null, act)
 
   return (
     <div className="flex flex-col gap-4 pb-6">
@@ -200,6 +201,19 @@ function Answering({
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const theme = themeInfo(d.theme)
   const allAnswered = s.answered.length >= s.players.length
+  const left = useCountdown(s.deadline, 100)
+
+  // Filet : choix fait mais pari pas encore envoyé à la dernière seconde -> envoi auto (pari = mon choix).
+  const autoSent = useRef(false)
+  useEffect(() => {
+    if (autoSent.current || !s.deadline || left > 1200 || left <= 0) return
+    if (!isPlayer || cur.step === 'done' || !cur.choice) return
+    autoSent.current = true
+    const choice = cur.choice
+    setDraft({ step: 'done', choice, bet: choice })
+    void act(tpActions.answer(s.round, choice, choice))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left])
 
   const pickChoice = (side: TpSide) => {
     if (cur.step !== 'choice') return
@@ -369,7 +383,10 @@ function Reveal({ s, lr, meId, isHost, get, act, pending }: { s: TpState; lr: Tp
   const reduce = useReducedMotion()
   // Ordre d'envol : alterné A / B (mélangé) pour garder le suspense. Calculé une fois par manche.
   const [order] = useState(() => {
-    const shuffled = (side: TpSide) => Object.keys(lr.choices).filter((id) => lr.choices[id] === side).sort(() => Math.random() - 0.5)
+    const shuffled = (side: TpSide) =>
+      Object.keys(lr.choices)
+        .filter((id) => lr.choices[id] === side)
+        .sort((x, y) => hash01(`${lr.round}:${x}`) - hash01(`${lr.round}:${y}`))
     const a = shuffled('a')
     const b = shuffled('b')
     const out: string[] = []
@@ -571,7 +588,7 @@ function Reveal({ s, lr, meId, isHost, get, act, pending }: { s: TpState; lr: Tp
           {last ? 'Voir les résultats' : 'Dilemme suivant'}
         </Button>
       )}
-      {!isHost && done && <p className="text-center font-bold text-muted">L’hôte va lancer la suite…</p>}
+      {done && <NextIn deadline={s.deadline} label={last ? 'Résultats dans' : 'Dilemme suivant dans'} />}
     </>
   )
 }

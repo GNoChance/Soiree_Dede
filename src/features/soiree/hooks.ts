@@ -325,14 +325,15 @@ export function useGameAction(matchId: string | undefined, onState?: (s: BaseGam
           p_action: action as unknown as GameAction,
         })
         if (error) {
-          toastError(error)
+          // Un tick est une relance automatique : jamais de toast (trop tôt / trop tard = normal).
+          if ((action as { type?: string }).type !== 'tick') toastError(error)
           return null
         }
         const state = data as unknown as BaseGameState
         onStateRef.current?.(state)
         return state
       } catch (e) {
-        toastError(e)
+        if ((action as { type?: string }).type !== 'tick') toastError(e)
         return null
       } finally {
         setPending((n) => n - 1)

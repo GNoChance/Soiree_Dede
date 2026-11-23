@@ -11,7 +11,8 @@
 -- Phases : question -> reveal -> question ... -> finished.
 --   question : fin quand tous ont répondu (valeur ou « je ne sais pas »), à l'échéance
 --              (tick) ou par l'hôte (reveal).
---   reveal   : pas d'échéance, l'hôte enchaîne (next).
+--   reveal   : échéance auto (animation + 10 s) puis tick -> suite ; l'hôte peut enchaîner (next).
+--   Accélérateur : quand il ne manque qu'un joueur, la deadline passe à now()+8 s si elle est plus loin.
 -- Toute action portant un "round" différent de la manche courante est ignorée sans erreur.
 --
 -- Points d'une manche : classement par écart absolu |estimation - réponse| (ex-aequo =
@@ -167,7 +168,8 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'reveal',
-    'deadline', null,
+    -- Passage automatique à la suite : animation (~2,5 s + 0,4 s/joueur) + 10 s de lecture.
+    'deadline', to_jsonb(now() + make_interval(secs => 12.5 + 0.4 * jsonb_array_length(p_state->'players'))),
     'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
                  from jsonb_each_text(p_state->'scores')),
     'exacts', (select jsonb_object_agg(key, value::integer + coalesce((v_exact->>key)::integer, 0))
@@ -273,8 +275,10 @@ begin
   end if;
 
   if v_type = 'tick' then
-    if v_phase <> 'question' or v_deadline is null or now() < v_deadline then return v_same; end if;
-    return public._lpp_reveal(p_state, p_server);
+    if v_deadline is null or now() < v_deadline then return v_same; end if;
+    if v_phase = 'question' then return public._lpp_reveal(p_state, p_server); end if;
+    if v_round >= v_total then return public._lpp_finish(p_state, p_server); end if;
+    return public._lpp_open(p_state, p_server, v_round);
 
   elsif v_type = 'reveal' then
     if not p_is_host then raise exception 'not_host'; end if;
@@ -314,6 +318,12 @@ begin
                   where not (p_state->'answered' ? pl)) then
     v_res := public._lpp_reveal(p_state, p_server);
   else
+    -- Accélérateur : il ne manque plus qu'un joueur -> 8 s max (jamais allongé).
+    if (select count(*) from jsonb_array_elements_text(p_state->'players') pl
+         where not (p_state->'answered' ? pl)) = 1
+       and v_deadline > now() + interval '8 seconds' then
+      p_state := p_state || jsonb_build_object('deadline', to_jsonb(now() + interval '8 seconds'));
+    end if;
     v_res := jsonb_build_object('state', p_state, 'server', p_server);
   end if;
   return v_res || jsonb_build_object('secrets', jsonb_build_object(v_me, jsonb_build_object(

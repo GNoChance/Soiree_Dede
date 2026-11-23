@@ -39,6 +39,8 @@ interface Saved {
   water: number
   mill: number
   pos: Vec3
+  /** Trou joué (rentré/ramassé) mais peut-être pas encore envoyé. */
+  fin?: { holed: boolean; strokes: number }
 }
 
 const saveKey = (matchId: string) => `mg:${matchId}`
@@ -191,6 +193,8 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
   const [updating, setUpdating] = useState(false)
   const [local, setLocal] = useState<Local>({ hole: -1, strokes: 0, water: 0, mill: 0, finished: null })
   const [rolling, setRolling] = useState(false)
+  /** Envoi du trou échoué après plusieurs essais : bouton « Réessayer ». */
+  const [sendFail, setSendFail] = useState<null | { hole: number; strokes: number; holed: boolean; stats: { water: number; mill_hits: number; bank_shot: 0 | 1 } }>(null)
   const [banner, setBanner] = useState<{ id: number; text: string; sub: string; tone: string } | null>(null)
   const def = holeAt(s, s.hole)
   const par = s.pars[s.hole] ?? def.par
@@ -230,6 +234,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
     const wait = minAt - serverNow()
     // laisse aussi le temps aux effets (le dernier envoi peut terminer la partie)
     await new Promise((r) => setTimeout(r, Math.max(wait, 1300)))
+    setSendFail(null)
     for (let attempt = 0; attempt < 4; attempt++) {
       const cur = live.current.s
       if (cur.hole !== hole || cur.phase !== 'playing' || cur.done.includes(meId)) return
@@ -237,6 +242,8 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
       if (res) return
       await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
     }
+    const cur = live.current.s
+    if (cur.hole === hole && cur.phase === 'playing' && !cur.done.includes(meId)) setSendFail({ hole, strokes, holed, stats })
   }, [act, meId])
 
   const onStrokeEnd = useCallback((r: StrokeResult) => {
@@ -277,7 +284,7 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
       publish(r.pos, 1, true)
     }
     setLocal({ hole, strokes, water, mill, finished })
-    writeSaved(matchId, { hole, strokes, water, mill, pos: r.pos })
+    writeSaved(matchId, { hole, strokes, water, mill, pos: r.pos, fin: finished ?? undefined })
   }, [matchId, publish, submit])
 
   const callbacks = useRef({ onStrokeEnd, publish })
@@ -351,9 +358,13 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
     sc.loadHole(d, mine ? resume?.pos ?? tee : null, serverNow() < new Date(s.hole_started_at).getTime())
     for (const id of s.players) sc.removeGhost(id)
     setRolling(false)
-    setLocal({ hole: s.hole, strokes: resume?.strokes ?? 0, water: resume?.water ?? 0, mill: resume?.mill ?? 0, finished: null })
+    setLocal({ hole: s.hole, strokes: resume?.strokes ?? 0, water: resume?.water ?? 0, mill: resume?.mill ?? 0, finished: resume?.fin ?? null })
+    // Rechargement entre le dernier coup et l'envoi : on renvoie le résultat (idempotent côté serveur).
+    if (mine && resume?.fin) {
+      void submit(s.hole, resume.fin.strokes, resume.fin.holed, { water: resume.water, mill_hits: resume.mill, bank_shot: 0 })
+    }
     if (mine && !resume) writeSaved(matchId, { hole: s.hole, strokes: 0, water: 0, mill: 0, pos: tee })
-  }, [flow, s, matchId, meId, isPlayer])
+  }, [flow, s, matchId, meId, isPlayer, submit])
 
   useEffect(() => {
     sceneRef.current?.setCanShoot(canShoot)
@@ -468,6 +479,15 @@ function Course({ s, matchId, meId, isPlayer, get, players, act, left, onBoard }
                 {s.done.length} / {s.players.length} ont fini
               </span>
             )}
+          </div>
+        )}
+
+        {sendFail && !serverDone && s.phase === 'playing' && sendFail.hole === s.hole && (
+          <div className="absolute inset-x-3 top-14 z-20 flex flex-col items-center gap-1 sticker bg-tomato p-2 text-center text-white">
+            <span className="text-sm font-extrabold">Ton résultat n’a pas pu être envoyé (connexion ?)</span>
+            <button type="button" className="sticker-sm bg-sun px-4 py-1 font-display font-extrabold text-[#1f1b2e]" onClick={() => void submit(sendFail.hole, sendFail.strokes, sendFail.holed, sendFail.stats)}>
+              Réessayer
+            </button>
           </div>
         )}
 

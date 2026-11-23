@@ -127,7 +127,7 @@ function NdcPlayScreen({ matchId, soireeId, state, secret, meId, isHost, players
             </motion.span>
           )
         })}
-        {live && s.deadline && (
+        {live && s.deadline && (s.timer !== 'relaxed' || secs <= 60) && (
           <span className={cn('sticker-sm rounded-full bg-surface px-3 py-1 font-display text-lg font-extrabold', secs <= 10 && 'text-tomato')}>
             ⏱️ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
           </span>

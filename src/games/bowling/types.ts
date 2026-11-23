@@ -37,6 +37,8 @@ export interface BowlingState {
   started_at: string
   /** Échéance globale ISO (null = aucune). */
   deadline: string | null
+  /** Échéance de fin auto quand il ne reste qu'un joueur (null = aucune). */
+  idle_deadline?: string | null
   /** uid -> feuille (frames de masques). */
   sheets: Record<string, Sheet>
   /** uid -> score total (bonus non joués comptés 0). */
@@ -51,7 +53,7 @@ export interface BowlingState {
   /** Fin forcée (hôte / échéance) : lancers manquants comptés 0. */
   forced: boolean
   winners: string[] | null
-  results: Array<{ profile_id: string; points: number; won: boolean; placement: number }> | null
+  results: Array<{ profile_id: string; points: number; won: boolean; placement: number; stats?: { gutters?: number } }> | null
 }
 
 export interface BwOptions {

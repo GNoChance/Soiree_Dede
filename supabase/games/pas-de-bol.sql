@@ -109,7 +109,9 @@ begin
     'turn', p_player,
     'turn_phase', 'play',
     'turn_seq', coalesce((p_state->>'turn_seq')::integer, 0) + 1,
-    'deadline', public._pdb_iso(now() + make_interval(secs => coalesce((p_state->>'turn_seconds')::integer, 30))));
+    'deadline', public._pdb_iso(now() + make_interval(secs => case
+      when coalesce((p_state->'absent'->>p_player)::boolean, false) then 6   -- absent auto : tour express
+      else coalesce((p_state->>'turn_seconds')::integer, 30) end)));
   if p_clear_open and p_state->'last_card'->>p_player = 'open' then
     p_state := p_state #- array['last_card', p_player];
   end if;
@@ -409,7 +411,21 @@ declare
   p          text;
   i          integer;
 begin
-  if p_state->>'phase' <> 'playing' then raise exception 'wrong_phase'; end if;
+  if p_state->>'phase' <> 'playing' then
+    if v_type = 'tick' then return jsonb_build_object('state', p_state, 'server', p_server); end if;
+    raise exception 'wrong_phase';
+  end if;
+
+  -- Toute action du joueur lui-même remet son compteur d'auto à zéro et le fait revenir s'il était absent.
+  if v_type <> 'tick' and (p_state->'players') ? v_me then
+    if coalesce((p_state->'absent'->>v_me)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', (p_state->'absent') - v_me);
+      p_state := public._pdb_log(p_state, jsonb_build_object('t', 'back', 'p', v_me));
+    end if;
+    if coalesce(p_state->'idle', '{}'::jsonb) ? v_me then
+      p_state := p_state || jsonb_build_object('idle', (p_state->'idle') - v_me);
+    end if;
+  end if;
 
   -- ---------------------------------------------------------------- tick
   if v_type = 'tick' then
@@ -426,6 +442,15 @@ begin
         't', 'draw', 'p', v_turn, 'count', jsonb_array_length(v_r->'drawn'), 'auto', true, 'cumul', v_pending > 0));
       if v_pending > 0 then p_server := public._pdb_cumul(p_server, v_turn, jsonb_array_length(v_r->'drawn')); end if;
       p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
+    end if;
+    -- Absent auto : 2 tours consécutifs joués par tick.
+    p_state := p_state || jsonb_build_object('idle', coalesce(p_state->'idle', '{}'::jsonb)
+      || jsonb_build_object(v_turn, coalesce((p_state->'idle'->>v_turn)::integer, 0) + 1));
+    if (p_state->'idle'->>v_turn)::integer >= 2
+       and not coalesce((p_state->'absent'->>v_turn)::boolean, false) then
+      p_state := p_state || jsonb_build_object('absent', coalesce(p_state->'absent', '{}'::jsonb)
+        || jsonb_build_object(v_turn, true));
+      p_state := public._pdb_log(p_state, jsonb_build_object('t', 'absent', 'p', v_turn));
     end if;
     p_state := public._pdb_start_turn(p_state, public._pdb_next(p_state, v_turn, 1), true);
 

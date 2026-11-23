@@ -340,6 +340,7 @@ begin
     'time_limit', v_limit,
     'started_at', now(),
     'deadline', case when v_limit > 0 then to_jsonb(now() + make_interval(mins => v_limit)) else 'null'::jsonb end,
+    'idle_deadline', null,
     'sheets', v_empty,
     'last_roll', null,
     'forced', false,
@@ -391,6 +392,10 @@ begin
     if v_late and now() > (p_state->>'deadline')::timestamptz + interval '3 seconds' then
       return public._bw_finish(p_state, p_server, true);
     end if;
+    if p_state->>'idle_deadline' is not null
+       and now() > (p_state->>'idle_deadline')::timestamptz + interval '3 seconds' then
+      return public._bw_finish(p_state, p_server, true);
+    end if;
 
     v_sheet := coalesce(p_state->'sheets'->v_me, '[]'::jsonb);
     v_prev := v_sheet->(v_frame - 1)->(v_roll - 1);
@@ -423,11 +428,17 @@ begin
     if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') then
       return public._bw_finish(p_state, p_server, false);
     end if;
+    -- Il ne reste qu'un joueur : fin automatique 90 s apres son dernier lancer
+    -- (veille, 3D plantee...). Chaque lancer du retardataire repousse l'echeance.
+    if jsonb_array_length(p_state->'done') >= jsonb_array_length(p_state->'players') - 1 then
+      p_state := p_state || jsonb_build_object('idle_deadline', to_jsonb(now() + interval '90 seconds'));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- tick
   elsif v_type = 'tick' then
-    if v_phase = 'playing' and v_late then
+    if v_phase = 'playing' and (v_late or (p_state->>'idle_deadline' is not null
+                                           and now() >= (p_state->>'idle_deadline')::timestamptz)) then
       return public._bw_finish(p_state, p_server, true);
     end if;
     return jsonb_build_object('state', p_state, 'server', p_server);

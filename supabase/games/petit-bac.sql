@@ -9,15 +9,26 @@
 -- =============================================================================
 
 -- Normalisation d'une réponse : minuscules, sans article de tête
--- (le/la/les/l'/un/une), sans accents, espaces ni ponctuation.
+-- (le/la/les/l'/un/une), sans accents, espaces ni ponctuation, et sans s/x final
+-- si le résultat fait plus de 3 caractères (lion = lions). Miroir : normalizeAnswer (logic.ts).
 create or replace function public._pb_norm(p text)
 returns text language sql immutable
 set search_path = public, extensions
 as $$
-  select public._normalize_word(
-    regexp_replace(lower(btrim(coalesce(p, ''))), '^(l\s*[''’`]\s*|(le|la|les|un|une)\s+)', ''))
+  select case when char_length(n) > 3 and n ~ '[sx]$' then left(n, -1) else n end
+    from (select public._normalize_word(
+            regexp_replace(lower(btrim(coalesce(p, ''))), '^(l\s*[''’`]\s*|(le|la|les|un|une)\s+)', '')) as n) t
 $$;
 
+-- Première lettre acceptée : celle du texte sans article OU du texte brut
+-- (« La Réunion », « L'Italie » valent pour la lettre L). Miroir : autoStatus (logic.ts).
+create or replace function public._pb_letter_ok(p text, p_letter text)
+returns boolean language sql immutable
+set search_path = public, extensions
+as $$
+  select left(public._pb_norm(p), 1) = lower(p_letter)
+      or left(public._normalize_word(lower(btrim(coalesce(p, '')))), 1) = lower(p_letter)
+$$;
 -- Nettoyage d'une saisie : espaces normalisés, 60 caractères max.
 create or replace function public._pb_clean(p text)
 returns text language sql immutable
@@ -59,7 +70,7 @@ as $$
              'text', x.t,
              'norm', public._pb_norm(x.t),
              'auto', case when public._pb_norm(x.t) = '' then 'empty'
-                          when left(public._pb_norm(x.t), 1) <> lower(p_state->>'letter') then 'letter'
+                          when not public._pb_letter_ok(x.t, p_state->>'letter') then 'letter'
                           else null end))
       from (select pl, coalesce(p_server->'answers'->pl->>(c->>'id'), '') as t
               from jsonb_array_elements_text(p_state->'players') pl) x)), '{}'::jsonb)
@@ -75,8 +86,25 @@ begin
     'phase', 'validation',
     'validation', jsonb_build_object(
       'cat_index', 0,
+      'deadline', to_jsonb(now() + interval '15 seconds'),
       'answers', public._pb_build_answers(p_state, p_server),
       'contests', '{}'::jsonb));
+  return jsonb_build_object('state', p_state, 'server', p_server);
+end $$;
+
+-- Catégorie suivante (ou scores après la dernière) : hôte (next_category) ou tick à l'échéance.
+create or replace function public._pb_advance(p_state jsonb, p_server jsonb)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_cur integer := (p_state#>>'{validation,cat_index}')::integer;
+begin
+  if v_cur + 1 >= jsonb_array_length(p_state->'categories') then
+    return public._pb_score(p_state, p_server);
+  end if;
+  p_state := jsonb_set(p_state, '{validation,cat_index}', to_jsonb(v_cur + 1));
+  p_state := jsonb_set(p_state, '{validation,deadline}', to_jsonb(now() + interval '15 seconds'), true);
   return jsonb_build_object('state', p_state, 'server', p_server);
 end $$;
 
@@ -90,7 +118,8 @@ as $$
 $$;
 
 -- Barème de la manche : unique valide 2, valide partagée 1, refusée/vide 0.
--- Refusée si contestée par la majorité stricte des AUTRES joueurs.
+-- Refusée si contestée par la majorité stricte des AUTRES joueurs (et au moins 2 contestations :
+-- à 2 joueurs, une contestation seule ne refuse rien).
 create or replace function public._pb_score(p_state jsonb, p_server jsonb)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -122,7 +151,7 @@ begin
       v_cnt := coalesce(jsonb_array_length(p_state#>array['validation', 'contests', v_cat, pl]), 0);
       if a is null or a->>'auto' is not null then
         v_status := coalesce(a->>'auto', 'empty');
-      elsif v_cnt * 2 > v_n - 1 then
+      elsif v_cnt >= 2 and v_cnt * 2 > v_n - 1 then   -- à 2 joueurs : jamais refusée par un seul 👎
         v_status := 'refused';
       else
         v_status := 'valid';
@@ -164,6 +193,7 @@ begin
 
   p_state := p_state || jsonb_build_object(
     'phase', 'round_score',
+    'score_deadline', to_jsonb(now() + interval '20 seconds'),  -- animation des scores + lecture, puis tick -> manche suivante
     'validation', null,
     'scores', (select jsonb_object_agg(key, value::integer + coalesce((v_points->>key)::integer, 0))
                  from jsonb_each_text(p_state->'scores')),
@@ -370,6 +400,18 @@ begin
     if v_phase = 'writing' and now() >= (p_state->>'deadline')::timestamptz then
       return public._pb_to_validation(p_state, p_server);
     end if;
+    -- Validation : la catégorie avance seule à son échéance (state anciens sans deadline : inchangés).
+    if v_phase = 'round_score' and p_state->>'score_deadline' is not null
+       and now() >= (p_state->>'score_deadline')::timestamptz then
+      if v_round >= (p_state->>'total_rounds')::integer then
+        return public._pb_finish(p_state, p_server);
+      end if;
+      return public._pb_start_round(p_state - 'forced' - 'score_deadline', p_server, v_round + 1);
+    end if;
+    if v_phase = 'validation' and p_state#>>'{validation,deadline}' is not null
+       and now() >= (p_state#>>'{validation,deadline}')::timestamptz then
+      return public._pb_advance(p_state, p_server);
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- end_round
@@ -420,18 +462,18 @@ begin
     v_contests := v_contests || jsonb_build_object(v_cat,
                     coalesce(v_contests->v_cat, '{}'::jsonb) || jsonb_build_object(v_target, v_list));
     p_state := jsonb_set(p_state, '{validation,contests}', v_contests);
+    -- Contestation sur la catégorie en cours : on laisse au moins 8 s pour en discuter (jamais raccourci).
+    if v_value and v_idx = v_cur and p_state#>>'{validation,deadline}' is not null then
+      p_state := jsonb_set(p_state, '{validation,deadline}', to_jsonb(greatest(
+        (p_state#>>'{validation,deadline}')::timestamptz, now() + interval '8 seconds')));
+    end if;
     return jsonb_build_object('state', p_state, 'server', p_server);
 
   -- ---------------------------------------------------------------- next_category
   elsif v_type = 'next_category' then
     if not p_is_host then raise exception 'not_host'; end if;
     if v_phase <> 'validation' then raise exception 'wrong_phase'; end if;
-    v_cur := (p_state#>>'{validation,cat_index}')::integer;
-    if v_cur + 1 >= v_ncat then
-      return public._pb_score(p_state, p_server);
-    end if;
-    p_state := jsonb_set(p_state, '{validation,cat_index}', to_jsonb(v_cur + 1));
-    return jsonb_build_object('state', p_state, 'server', p_server);
+    return public._pb_advance(p_state, p_server);
 
   -- ---------------------------------------------------------------- close_validation
   elsif v_type = 'close_validation' then
@@ -454,6 +496,8 @@ begin
 end $$;
 
 revoke all on function public._pb_norm(text) from public, anon, authenticated;
+revoke all on function public._pb_letter_ok(text, text) from public, anon, authenticated;
+revoke all on function public._pb_advance(jsonb, jsonb) from public, anon, authenticated;
 revoke all on function public._pb_clean(text) from public, anon, authenticated;
 revoke all on function public._pb_start_round(jsonb, jsonb, integer) from public, anon, authenticated;
 revoke all on function public._pb_build_answers(jsonb, jsonb) from public, anon, authenticated;

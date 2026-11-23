@@ -74,6 +74,11 @@ export function DuelResultBanner({ duel, session, meId, get, colors, left, isHos
     detail = `${get(duel.a).nickname} ${wa} – ${wb} ${get(duel.b).nickname} · manche suivante…`
   }
 
+  if (duel.forfeit) {
+    const quitter = duel.forfeit === meId ? 'Tu as' : `${get(duel.forfeit).nickname} a`
+    detail = `${quitter} décroché : forfait · ${detail}`
+  }
+
   return (
     <motion.div
       initial={reduce ? { opacity: 0 } : { y: 60, scale: 0.7, rotate: -4, opacity: 0 }}

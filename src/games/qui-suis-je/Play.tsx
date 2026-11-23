@@ -38,7 +38,8 @@ const PASS_BG = '#fb8500'
  * devineur d'abord, puis l'hôte, puis les autres (relance toutes les 3 s).
  */
 function useAutoTick(s: QsjState, act: ActFn, meId: string, isHost: boolean) {
-  const target = s.phase === 'playing' || s.phase === 'recap' ? (s.deadline ? new Date(s.deadline).getTime() : null) : null
+  const allowed = (s.players ?? []).includes(meId) || isHost
+  const target = allowed && (s.phase === 'playing' || s.phase === 'recap' || s.phase === 'placing') ? (s.deadline ? new Date(s.deadline).getTime() : null) : null
   const role = s.guesser === meId ? 0 : isHost ? 1 : 2
   const actRef = useRef(act)
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function QuiSuisJePlay({ state, meId, isHost, players, act, pendi
   // Recalculé à chaque rendu : useCountdown garde l'ancienne valeur au 1er rendu d'un
   // nouveau tour, ce qui afficherait la carte une image avant le 3-2-1.
   const startLeft = s.phase === 'playing' && s.starts_at ? Math.max(0, new Date(s.starts_at).getTime() - serverNow()) : 0
-  const left = useCountdown(s.phase === 'playing' || s.phase === 'recap' ? s.deadline : null)
+  const left = useCountdown(s.phase === 'playing' || s.phase === 'recap' || s.phase === 'placing' ? s.deadline : null)
   const started = s.phase === 'playing' && startLeft <= 0
   const timeUp = s.phase === 'playing' && started && left <= 0
 
@@ -208,9 +209,9 @@ export default function QuiSuisJePlay({ state, meId, isHost, players, act, pendi
         {s.phase === 'placing' && (
           <motion.div key={`placing-${s.turn}`} initial={{ opacity: 0, y: 40, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: -80, rotate: -6 }}>
             {isGuesser ? (
-              <PlacingGuesser s={s} me={guesser} tiltStatus={tilt.status} pitch={tilt.pitch} onEnableTilt={tilt.enable} testGesture={testGesture} act={act} pending={pending} />
+              <PlacingGuesser s={s} left={left} me={guesser} tiltStatus={tilt.status} pitch={tilt.pitch} onEnableTilt={tilt.enable} testGesture={testGesture} act={act} pending={pending} />
             ) : (
-              <PlacingWatcher s={s} guesser={guesser} />
+              <PlacingWatcher s={s} guesser={guesser} left={left} />
             )}
           </motion.div>
         )}
@@ -282,9 +283,10 @@ export default function QuiSuisJePlay({ state, meId, isHost, players, act, pendi
 /* -------------------------------------------------------------------------- */
 
 function PlacingGuesser({
-  s, me, tiltStatus, pitch, onEnableTilt, testGesture, act, pending,
+  s, left, me, tiltStatus, pitch, onEnableTilt, testGesture, act, pending,
 }: {
   s: QsjState
+  left: number
   me: PlayerInfo
   tiltStatus: TiltStatus
   pitch: number | null
@@ -332,6 +334,7 @@ function PlacingGuesser({
         <p className="mt-1 text-lg font-bold">
           Pose ton téléphone sur ton front, <span className="text-grape">écran vers les autres</span>.
         </p>
+        {s.deadline && <p className="mt-1 text-sm font-bold text-muted">Pose ton téléphone sur ton front… {Math.ceil(left / 1000)} s</p>}
       </div>
 
       <div className="grid w-full grid-cols-2 gap-2">
@@ -426,7 +429,7 @@ function TiltPanel({ status, pitch, onEnable }: { status: TiltStatus; pitch: num
   )
 }
 
-function PlacingWatcher({ s, guesser }: { s: QsjState; guesser: PlayerInfo }) {
+function PlacingWatcher({ s, guesser, left }: { s: QsjState; guesser: PlayerInfo; left: number }) {
   const reduce = useReducedMotion()
   return (
     <div className="sticker flex flex-col items-center gap-3 bg-surface p-5 text-center">
@@ -442,6 +445,7 @@ function PlacingWatcher({ s, guesser }: { s: QsjState; guesser: PlayerInfo }) {
       <p className="text-sm text-muted">
         Tour {s.turn}/{s.total_turns} · {s.turn_seconds} s
       </p>
+      {s.deadline && <p className="text-sm font-bold text-muted">Sinon on passe son tour dans {Math.ceil(left / 1000)} s</p>}
     </div>
   )
 }
