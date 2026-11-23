@@ -58,6 +58,17 @@ const G2 = j2.r.profile.id
 
 // ---- Ce qu'un invité ne peut pas faire
 ok('invité : pas de soirée à lui', (await call(UG, `select public.create_soiree('{}') r`)).err === 'guest_forbidden')
+// Un autre téléphone ne peut pas se connecter sur le profil invité (slug public, pas de PIN).
+const steal = await call(uid(12), `select public.login_profile($1, '0000') r`, [gRow.slug])
+ok('login_profile sur un invité : refusé', steal.r?.ok === false && steal.r?.error === 'unknown_profile', JSON.stringify(steal))
+ok('login_profile sur un invité : aucune session créée', !(await one(`select 1 x from public.device_sessions where auth_uid = $1`, [uid(12)])))
+ok('invité : pas de carte maison', (await call(UG, `select public.create_custom_card('tu-preferes', 'dilemma', '{"a":"x","b":"y"}') r`)).err === 'guest_forbidden')
+// Trophées : jamais pour un invité (pronos, stickers…), même si la règle est remplie.
+await db.query(`insert into public.trophies(id, name, description, rule, active) values ('t_test_guest', 'T', 'T', '{"agg":"all","rules":[]}', true)`)
+ok('invité : evaluate_trophy ne débloque rien', (await one(`select public.evaluate_trophy($1, 't_test_guest') r`, [G])).r === false)
+ok('invité : evaluate_trophies ne débloque rien', ((await one(`select public.evaluate_trophies($1) r`, [G])).r ?? []).length === 0)
+ok('membre : la règle débloque bien', ((await one(`select public.evaluate_trophies($1) r`, [A])).r ?? []).includes('t_test_guest'))
+await db.query(`delete from public.trophies where id = 't_test_guest'`)
 ok('invité : pas de join par code', (await call(UG, `select public.join_soiree_by_code($1) r`, [code])).err === 'guest_forbidden')
 ok('invité : pas d’amis', (await call(UG, `select public.send_friend_request($1) r`, [A])).err === 'guest_forbidden')
 ok('bande : pas d’ami invité', (await call(uid(0), `select public.send_friend_request($1) r`, [G])).err === 'guest_forbidden')

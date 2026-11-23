@@ -456,7 +456,8 @@ begin
   end if;
 
   select * into v_prof from public.profiles where slug = lower(btrim(p_slug)) for update;
-  if not found then
+  -- Profil invité : lié à son seul téléphone (pas de PIN), jamais accessible par connexion.
+  if not found or v_prof.is_guest then
     return jsonb_build_object('ok', false, 'error', 'unknown_profile');
   end if;
 

@@ -72,6 +72,8 @@ begin
   begin
     select host_id, status into v_host, v_status from public.soirees where id = new.soiree_id;
     if v_host is null or v_host = new.profile_id or v_status = 'ended' then return new; end if;
+    -- Rejoindre soi-même (code, lien invité) n'est pas une invitation : pas de notification.
+    if new.profile_id = public.current_profile_id() then return new; end if;
     insert into public.push_invites(soiree_id, profile_id, host_id) values (new.soiree_id, new.profile_id, v_host)
       on conflict do nothing;
     get diagnostics v_rows = row_count;

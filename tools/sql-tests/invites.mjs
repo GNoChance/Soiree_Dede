@@ -28,6 +28,12 @@ ok('claim idempotent', (await db.query(`select public.push_invite_claim() r`)).r
 await call(0, `select public.kick_soiree_player($1,$2)`, [sid, B])
 await call(0, `select public.invite_to_soiree($1,$2)`, [sid, B])
 ok('reinvitation: pas de doublon', (await db.query(`select count(*)::int n from public.push_invites where profile_id=$1`, [B])).rows[0].n === 1 && (await db.query(`select public.push_invite_claim() r`)).rows[0].r.length === 0)
+// Rejoindre seul par le code : ce n'est pas une invitation, pas de notification
+await call(2, `select public.leave_soiree($1)`, [sid])
+await db.query(`delete from public.push_invites where profile_id = $1`, [C])
+const jc = await call(2, `select public.join_soiree_by_code($1) r`, [s.r.code])
+ok('join par code', !jc.err, jc.err)
+ok('join par code : pas de notification d invitation', (await db.query(`select count(*)::int n from public.push_invites where profile_id=$1`, [C])).rows[0].n === 0)
 // face-a-face
 const m = (await db.query(`insert into public.matches(soiree_id, game_id, status, finished_at) values ($1,'morpion','finished',now()) returning id`, [sid])).rows[0].id
 await db.query(`insert into public.match_players(match_id, profile_id, game_id, placement, won) values ($1,$2,'morpion',1,true), ($1,$3,'morpion',2,false)`, [m, A, B])

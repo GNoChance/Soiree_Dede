@@ -71,7 +71,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me uuid := public._require_profile();
+  v_me uuid := public._require_member();  -- invités : pas de cartes permanentes pour la bande
   v_clean jsonb;
   v_row public.custom_cards;
 begin

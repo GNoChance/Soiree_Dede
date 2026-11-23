@@ -459,7 +459,8 @@ begin
   end if;
 
   select * into v_prof from public.profiles where slug = lower(btrim(p_slug)) for update;
-  if not found then
+  -- Profil invité : lié à son seul téléphone (pas de PIN), jamais accessible par connexion.
+  if not found or v_prof.is_guest then
     return jsonb_build_object('ok', false, 'error', 'unknown_profile');
   end if;
 
@@ -2866,7 +2867,7 @@ returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
-  v_me uuid := public._require_profile();
+  v_me uuid := public._require_member();  -- invités : pas de cartes permanentes pour la bande
   v_clean jsonb;
   v_row public.custom_cards;
 begin
@@ -6106,6 +6107,8 @@ begin
   begin
     select host_id, status into v_host, v_status from public.soirees where id = new.soiree_id;
     if v_host is null or v_host = new.profile_id or v_status = 'ended' then return new; end if;
+    -- Rejoindre soi-même (code, lien invité) n'est pas une invitation : pas de notification.
+    if new.profile_id = public.current_profile_id() then return new; end if;
     insert into public.push_invites(soiree_id, profile_id, host_id) values (new.soiree_id, new.profile_id, v_host)
       on conflict do nothing;
     get diagnostics v_rows = row_count;
@@ -8003,6 +8006,8 @@ declare
   v_new  text[] := '{}';
   v_rows integer;
 begin
+  -- Invités : jamais de trophée (ni tenue de récompense), quelle que soit la voie (pronos, stickers…).
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest) then return v_new; end if;
   for t in
     select x.* from public.trophies x
      where x.active and x.rule is not null
@@ -8029,6 +8034,7 @@ declare
   t      record;
   v_rows integer;
 begin
+  if exists (select 1 from public.profiles where id = p_profile_id and is_guest) then return false; end if;
   select * into t from public.trophies where id = p_trophy_id and active and rule is not null;
   if not found then return false; end if;
   if exists (select 1 from public.trophy_unlocks u where u.profile_id = p_profile_id and u.trophy_id = t.id) then
