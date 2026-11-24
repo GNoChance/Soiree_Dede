@@ -19,11 +19,13 @@ import { useSession } from '@/store/session'
 import { toast } from '@/store/toast'
 import type { FriendRequestResult, FriendshipRow, ProfileRow, UUID } from '@/types/db'
 import { useFriendsPlaying } from '@/features/spectate/api'
+import { OnlineDot, PresenceText, useBandPresence } from '@/features/presence/presence'
 import { getGame } from '@/games/registry'
 
 export function FriendsPage() {
   const navigate = useNavigate()
   const { playing } = useFriendsPlaying()
+  const seen = useBandPresence()
   const me = useSession((s) => s.profile?.id)
   const [profiles, setProfiles] = useState<ProfileRow[] | null>(null)
   const [links, setLinks] = useState<FriendshipRow[]>([])
@@ -135,7 +137,7 @@ export function FriendsPage() {
         <>
           <Section title="Demandes reçues" count={received.length} hideWhenEmpty>
             {received.map((p) => (
-              <PersonRow key={p.id} p={p}>
+              <PersonRow key={p.id} p={p} lastSeen={seen[p.id]}>
                 <Button size="sm" variant="primary" loading={busyId === p.id} icon={<Check className="size-5" />} onClick={() => void respond(p, true)}>
                   Accepter
                 </Button>
@@ -148,7 +150,7 @@ export function FriendsPage() {
 
           <Section title="Mes amis" count={friends.length} empty="Pas encore d'amis. Ajoute-en ci-dessous !">
             {friends.map((p) => (
-              <PersonRow key={p.id} p={p}>
+              <PersonRow key={p.id} p={p} lastSeen={seen[p.id]}>
                 {playing[p.id] && (
                   <button
                     type="button"
@@ -169,7 +171,7 @@ export function FriendsPage() {
 
           <Section title="Demandes envoyées" count={sent.length} hideWhenEmpty>
             {sent.map((p) => (
-              <PersonRow key={p.id} p={p}>
+              <PersonRow key={p.id} p={p} lastSeen={seen[p.id]}>
                 <Badge tone="neutral"><Clock className="size-3.5" /> En attente</Badge>
                 <Button size="sm" variant="ghost" aria-label="Annuler la demande" loading={busyId === p.id} onClick={() => void remove(p)} icon={<X className="size-5" />} />
               </PersonRow>
@@ -178,7 +180,7 @@ export function FriendsPage() {
 
           <Section title="Ajouter" count={others.length} empty="Tu es déjà en lien avec tout le monde !">
             {others.map((p) => (
-              <PersonRow key={p.id} p={p}>
+              <PersonRow key={p.id} p={p} lastSeen={seen[p.id]}>
                 <Button size="sm" loading={busyId === p.id} icon={<UserPlus className="size-5" />} onClick={() => void send(p)}>
                   Ajouter
                 </Button>
@@ -243,15 +245,19 @@ function Section({
   )
 }
 
-function PersonRow({ p, children }: { p: ProfileRow; children: ReactNode }) {
+function PersonRow({ p, lastSeen, children }: { p: ProfileRow; lastSeen?: number; children: ReactNode }) {
   return (
     <StaggerItem>
       <motion.div layout className="sticker flex items-center gap-3 rounded-card bg-surface p-3">
         <Link to={`/profil/${p.id}`} aria-label={`Voir le profil de ${p.nickname}`} className="flex min-h-11 min-w-0 flex-1 items-center gap-3">
-          <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={52} />
+          <span className="relative shrink-0">
+            <Avatar slug={p.slug} expression={p.equipped_expression} tenue={p.equipped_tenue} size={52} />
+            <OnlineDot lastSeen={lastSeen} />
+          </span>
           <div className="min-w-0 flex-1">
             <p className="truncate font-display text-lg font-extrabold">{p.nickname}</p>
             <p className="truncate text-xs font-bold text-muted">{p.first_name}</p>
+            <PresenceText lastSeen={lastSeen} />
           </div>
         </Link>
         <div className="flex items-center gap-2">{children}</div>

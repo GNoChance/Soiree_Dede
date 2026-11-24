@@ -19,6 +19,7 @@ import { gameLabel, useProfileStats } from './api'
 import { WeeklyMedals } from './WeeklyMedals'
 import { FunStatsSection } from './FunStats'
 import { WrappedButton } from '@/features/wrapped/WrappedBanner'
+import { PresenceText, useBandPresence } from '@/features/presence/presence'
 
 function Stat({ label, value, suffix, tone }: { label: string; value: number; suffix?: string; tone: string }) {
   return (
@@ -52,6 +53,7 @@ export function ProfilePage() {
   const { data, error, loading } = useProfileStats(id)
   const trophies = useProfileTrophies(id)
   const mine = id === me
+  const seen = useBandPresence()
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -69,7 +71,10 @@ export function ProfilePage() {
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-3xl">{data.profile.nickname}</h2>
                   <PlayerTitle slug={data.profile.slug} className="mb-1 block text-sm" />
-                  <Badge tone="grape">Niveau {data.profile.level}</Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="grape">Niveau {data.profile.level}</Badge>
+                    {!mine && <PresenceText lastSeen={seen[data.profile.id]} className="text-sm" />}
+                  </div>
                 </div>
               </div>
               <XpBar xp={data.profile.xp} />
