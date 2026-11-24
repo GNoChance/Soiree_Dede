@@ -6,6 +6,7 @@ import { GAMES } from '@/games/registry'
 import type { GameDefinition } from '@/games/types'
 import { GameInfoModal } from '@/features/tutos/GameInfoModal'
 import { DailyCard } from '@/features/daily/DailyCard'
+import { NoelHubCard } from '@/features/noel/NoelHubCard'
 import { ChallengeHubCard } from '@/features/mises/ChallengeHubCard'
 import { WrappedBanner } from '@/features/wrapped/WrappedBanner'
 import { SoireeLauncher } from '@/features/soiree/SoireeLauncher'
@@ -54,6 +55,9 @@ export function HubPage() {
       )}
       <StaggerItem className="empty:hidden">
         <WrappedBanner />
+      </StaggerItem>
+      <StaggerItem className="empty:hidden">
+        <NoelHubCard />
       </StaggerItem>
       <StaggerItem>
         <DailyCard />

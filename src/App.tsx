@@ -17,6 +17,8 @@ import { AlbumPage } from '@/features/album/AlbumPage'
 import { AlbumPrintPage } from '@/features/album/AlbumPrintPage'
 import { AdventPage } from '@/features/advent/AdventPage'
 import { ChallengesPage } from '@/features/mises/ChallengesPage'
+import { NoelPage } from '@/features/noel/NoelPage'
+import { HottePage } from '@/features/noel/HottePage'
 import { SoloRoute } from '@/features/solo/SoloRoute'
 import { TrainingRoute } from '@/features/entrainement/TrainingRoute'
 import { IdeasPage } from '@/features/idees/IdeasPage'
@@ -52,6 +54,7 @@ const router = createBrowserRouter([
               { path: '/profil/:id', element: <ProfilePage /> },
               { path: '/face-a-face/:id', element: <HeadToHeadPage /> },
               { path: '/defis-potes', element: <ChallengesPage /> },
+              { path: '/noel', element: <NoelPage /> },
               { path: '/parametres', element: <SettingsPage /> },
             ],
           },
@@ -61,6 +64,7 @@ const router = createBrowserRouter([
               { path: '/soiree/:id', element: <SoireePage /> },
               { path: '/partie/:matchId', element: <MatchPage /> },
               { path: '/defi', element: <DailyPage /> },
+              { path: '/noel/hotte', element: <HottePage /> },
               { path: '/avent', element: <AdventPage /> },
               { path: '/solo/:gameId', element: <SoloRoute /> },
               { path: '/entrainement/:gameId', element: <TrainingRoute /> },
