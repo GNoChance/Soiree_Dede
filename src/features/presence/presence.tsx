@@ -17,7 +17,8 @@ export function PresencePinger() {
   useEffect(() => {
     if (!meId) return
     const ping = () => {
-      if (document.visibilityState === 'visible') void loose.rpc('ping_presence', {})
+      // await obligatoire : le client Supabase n'envoie la requête qu'au then() (sinon rien ne part).
+      if (document.visibilityState === 'visible') void (async () => { await loose.rpc('ping_presence', {}) })()
     }
     ping()
     const t = window.setInterval(ping, PING_MS)
