@@ -1,6 +1,6 @@
 # Événement de Noël « Noël chez Dédé » — spec de conception
 
-Date : 2026-11-24 · Statut : conception validée en discussion, à relire · Aucune ligne de code dans ce document.
+Date : 2026-11-24 · Statut : validée ; **lot 1 livré le 2026-11-24** (moteur, missions, Hotte, pass, Grande Hotte, app, rappel, vidéo) ; lots 2-3 à venir · Aucune ligne de code dans ce document.
 
 ## 0. Résumé
 
