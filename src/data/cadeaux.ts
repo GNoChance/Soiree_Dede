@@ -41,6 +41,10 @@ export interface ItemDef {
   season?: SeasonId
   /** Palier du passe de saison (5, 10, 15 ou 20) qui offre cet article (jamais vendu). */
   passTier?: number
+  /** Événement (noel.sql) : exclusif du Pass de Noël (`eventTier`, 1-30) ou de la Grande Hotte (`bandTier`, 1-5), jamais vendu. */
+  event?: 'noel'
+  eventTier?: number
+  bandTier?: number
   frame?: FrameStyle
   /** Dédé Kart : forme (3 = traîneau) et / ou couleur de carrosserie. */
   kart?: { variant?: number; body?: string }
@@ -227,6 +231,18 @@ export const ITEMS: ItemDef[] = [
   { id: 'f_citrouilles', slot: 'frame', label: 'Champ de citrouilles', emoji: '🎃', season: 'automne', passTier: 10, frame: { ring: 'linear-gradient(135deg, #F77F00, #FFB703 50%, #D65A00)', emojis: ['🎃', '👻'], count: 6, top: '🕯️' } },
   { id: 'd_champignon', slot: 'dice', label: 'Dés champignon', emoji: '🍄', season: 'automne', passTier: 15, dice: { face: '#E63946', edge: '#9D0208', pip: '#FFFFFF' } },
   { id: 't_terreur_soirees', slot: 'title', label: 'Terreur des soirées', emoji: '🧛', season: 'automne', passTier: 20 },
+  // Événement de Noël (miroir de supabase/features/cadeaux.sql) : Pass de Noël et Grande Hotte de la bande.
+  { id: 't_lutin_chef', slot: 'title', label: 'Lutin en chef', emoji: '🧝', event: 'noel', eventTier: 3, howTo: 'Pass de Noël, palier 3.' },
+  { id: 'cb_papier_cadeau', slot: 'card_back', label: 'Papier cadeau', emoji: '🎁', event: 'noel', eventTier: 6, howTo: 'Pass de Noël, palier 6.', cardBack: { bg: 'repeating-linear-gradient(45deg, #C1121F 0 14px, #2D6A4F 14px 28px)', emoji: '🎁' } },
+  { id: 'd_sucre_orge', slot: 'dice', label: 'Dés sucre d’orge', emoji: '🍭', event: 'noel', eventTier: 9, howTo: 'Pass de Noël, palier 9.', dice: { face: '#FFFFFF', edge: '#E63946', pip: '#C1121F' } },
+  { id: 'k_noel_traineau', slot: 'kart', label: 'Traîneau rouge', emoji: '🛷', event: 'noel', eventTier: 12, howTo: 'Pass de Noël, palier 12.', kart: { body: '#C1121F' } },
+  { id: 'gb_boule_noel', slot: 'golf_ball', label: 'Boule de Noël', emoji: '🔴', event: 'noel', eventTier: 15, howTo: 'Pass de Noël, palier 15.', golf: { color: '#D4AF37', stripe: '#C1121F' } },
+  { id: 'bb_buche', slot: 'bowling_ball', label: 'Bûche de Noël', emoji: '🪵', event: 'noel', eventTier: 20, howTo: 'Pass de Noël, palier 20.', bowling: { color: '#6B3E26', band: '#FFF3E0' } },
+  { id: 'm_guirlande', slot: 'marks', label: 'Guirlande lumineuse', emoji: '💡', event: 'noel', eventTier: 22, howTo: 'Pass de Noël, palier 22.', marks: { outline: '#FFD166', glow: '#FF4D6D', dash: true } },
+  { id: 'f_noel_houx', slot: 'frame', label: 'Couronne de houx', emoji: '🌿', event: 'noel', eventTier: 27, howTo: 'Pass de Noël, palier 27.', frame: { ring: '#2D6A4F', emojis: ['🍒', '🌿'], count: 8, top: '🎀' } },
+  { id: 't_acharne_noel', slot: 'title', label: 'Acharné de Noël', emoji: '🎅', event: 'noel', eventTier: 30, howTo: 'Pass de Noël, palier 30 (le dernier !).' },
+  { id: 'f_noel_aurore', slot: 'frame', label: 'Aurore de la bande', emoji: '🌌', event: 'noel', bandTier: 3, howTo: 'Grande Hotte de la bande, palier 3.', frame: { ring: 'conic-gradient(#06D6A0, #118AB2, #7B2CBF, #EF476F, #06D6A0)', spin: true, emojis: ['✨'], count: 6, top: '🌌' } },
+  { id: 't_bande_noel', slot: 'title', label: 'La Bande de Noël', emoji: '🎄', event: 'noel', bandTier: 4, howTo: 'Grande Hotte de la bande, palier 4.' },
 ]
 
 const BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]))

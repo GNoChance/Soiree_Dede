@@ -19,6 +19,7 @@ import { SeasonCelebrations } from '@/features/cadeaux/SeasonCelebrations'
 import { NoelDecor } from '@/features/noel/NoelDecor'
 import { isGuestProfile } from '@/features/guest/api'
 import { PresencePinger } from '@/features/presence/presence'
+import { NoelCelebrations } from '@/features/noel/NoelCelebrations'
 
 /** Écrans ouverts aux invités (mode invité) : leur salon, ses parties, le mode télé. Le reste -> /invite. */
 const GUEST_PATHS = /^\/(soiree\/[^/]+(\/tele)?|partie\/[^/]+)\/?$/
@@ -70,6 +71,7 @@ export function RequireProfile() {
     <>
       <Outlet />
       <SeasonCelebrations />
+      <NoelCelebrations />
     </>
   )
 }
