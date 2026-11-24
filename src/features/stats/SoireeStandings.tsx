@@ -6,7 +6,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { victoryConfetti } from '@/components/ui/confetti'
-import { fx } from '@/lib/feedback'
+import { fx, playSound } from '@/lib/feedback'
 import { DevinLine } from '@/features/pronos/DevinLine'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/store/session'
@@ -145,8 +145,12 @@ export function SoireePodium({ soireeId, onDone }: { soireeId: string; onDone: (
   }, [soireeId])
   useEffect(() => {
     if (!data) return
-    fx.fanfare()
-    const t = window.setTimeout(() => victoryConfetti(2600), 1700)
+    // roulement de tambour, puis fanfare + confettis quand le titre apparaît (1,7 s)
+    playSound('drumroll')
+    const t = window.setTimeout(() => {
+      fx.fanfare()
+      victoryConfetti(2600)
+    }, 1700)
     return () => window.clearTimeout(t)
   }, [data])
   if (!data) return null

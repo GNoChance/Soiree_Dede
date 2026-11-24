@@ -6,6 +6,7 @@ import { burst } from '@/components/ui/confetti'
 import { cn } from '@/lib/cn'
 import { mood } from '@/features/soiree/players'
 import { useCountdown } from '@/features/soiree/useServerClock'
+import { useUrgentTicks } from '@/hooks/useUrgentTicks'
 import { useViewport } from '@/features/tv/tv'
 import type { PlayerInfo } from '@/games/types'
 
@@ -21,6 +22,7 @@ const MEDALS = ['🥇', '🥈', '🥉']
 export function TvTimer({ deadline, totalMs }: { deadline: string | null; totalMs: number }) {
   const left = useCountdown(deadline, 100)
   const secs = Math.ceil(left / 1000)
+  useUrgentTicks(secs, Boolean(deadline))
   const pct = Math.max(0, Math.min(100, (left / totalMs) * 100))
   const urgent = secs <= 5
   const color = pct > 50 ? 'bg-mint' : pct > 25 ? 'bg-sun' : 'bg-tomato'

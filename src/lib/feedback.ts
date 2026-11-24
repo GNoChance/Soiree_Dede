@@ -78,6 +78,24 @@ function noiseSweep(c: AudioContext, dur: number, from: number, to: number, gain
   src.start(t0)
 }
 
+/** Coup de bruit filtré (caisse claire, cymbale) à `start` secondes. */
+function noiseHit(c: AudioContext, { start = 0, dur, freq, gain = 0.2, type = 'bandpass' as BiquadFilterType }: { start?: number; dur: number; freq: number; gain?: number; type?: BiquadFilterType }) {
+  const t0 = c.currentTime + start
+  const buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate)
+  const data = buf.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  const src = c.createBufferSource()
+  src.buffer = buf
+  const filter = c.createBiquadFilter()
+  filter.type = type
+  filter.frequency.value = freq
+  const g = c.createGain()
+  g.gain.setValueAtTime(gain, t0)
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+  src.connect(filter).connect(g).connect(c.destination)
+  src.start(t0)
+}
+
 /** Suite de notes courtes (arpège), douces par défaut. */
 function arp(c: AudioContext, freqs: number[], { step = 0.09, dur = 0.16, type = 'triangle' as OscillatorType, gain = 0.16, start = 0 } = {}) {
   freqs.forEach((f, i) => tone(c, { freq: f, start: start + i * step, dur, type, gain }))
@@ -85,6 +103,8 @@ function arp(c: AudioContext, freqs: number[], { step = 0.09, dur = 0.16, type =
 
 export type SoundName =
   | 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare' | 'cash'
+  // suspense : roulement de tambour (1,6 s + cymbale), tic-tac des 5 dernières secondes
+  | 'drumroll' | 'clock' | 'clock_last'
   // cartes (Pas de bol)
   | 'slap' | 'deal' | 'shuffle' | 'plus2' | 'plus4' | 'reverse' | 'skip' | 'wild' | 'bell'
   | 'perso_kevin' | 'perso_cycy' | 'perso_dede' | 'perso_manon' | 'perso_mika' | 'perso_cecile' | 'perso_carole' | 'perso_marius' | 'perso_nini'
@@ -152,6 +172,20 @@ const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
     tone(c, { freq: 196, start: 0.12, slideTo: 70, dur: 0.38, type: 'sawtooth', gain: 0.1 })
   },
   whoosh: (c) => noiseSweep(c, 0.3, 300, 2400),
+  drumroll: (c) => {
+    // coups de caisse claire de plus en plus forts pendant 1,6 s, puis cymbale
+    for (let i = 0; i < 36; i++) noiseHit(c, { start: i * 0.045, dur: 0.06, freq: 1800, gain: 0.04 + 0.16 * (i / 35) })
+    noiseHit(c, { start: 1.62, dur: 0.9, freq: 6500, gain: 0.22, type: 'highpass' })
+    tone(c, { freq: 98, start: 1.62, dur: 0.35, type: 'sine', gain: 0.25 })
+  },
+  clock: (c) => {
+    tone(c, { freq: 1050, dur: 0.05, type: 'square', gain: 0.07 })
+    tone(c, { freq: 70, dur: 0.12, type: 'sine', gain: 0.22 })
+  },
+  clock_last: (c) => {
+    tone(c, { freq: 1400, dur: 0.07, type: 'square', gain: 0.09 })
+    tone(c, { freq: 60, dur: 0.2, type: 'sine', gain: 0.3 })
+  },
   // billets / caisse : froissement bref puis petit « ding »
   cash: (c) => {
     noiseSweep(c, 0.12, 2200, 5200, 0.07)

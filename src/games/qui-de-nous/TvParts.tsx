@@ -4,6 +4,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { mood } from '@/features/soiree/players'
 import { useCountdown } from '@/features/soiree/useServerClock'
+import { useUrgentTicks } from '@/hooks/useUrgentTicks'
 import { useViewport } from '@/features/tv/tv'
 import type { PlayerInfo } from '../types'
 
@@ -17,8 +18,9 @@ export const vh = (n: number) => `${n}vh`
 /** Gros chrono : barre (si `totalMs`) + secondes en grand, qui rougit dans les 5 dernières secondes. */
 export function TvTimer({ deadline, totalMs, label }: { deadline: string | null | undefined; totalMs?: number; label?: string }) {
   const left = useCountdown(deadline, 100)
-  if (!deadline) return null
   const secs = Math.max(0, Math.ceil(left / 1000))
+  useUrgentTicks(secs, Boolean(deadline))
+  if (!deadline) return null
   const pct = totalMs ? Math.max(0, Math.min(100, (left / totalMs) * 100)) : 100
   const urgent = secs <= 5
   const color = pct > 50 ? 'bg-mint' : pct > 25 ? 'bg-sun' : 'bg-tomato'
