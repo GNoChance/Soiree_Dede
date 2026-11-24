@@ -11,6 +11,7 @@ const MESSAGES: Record<string, string> = {
   player_busy: 'Déjà dans 5 soirées',
   soiree_not_found: 'Aucune soirée avec ce code…',
   soiree_ended: 'Cette soirée est terminée.',
+  invalid_music_link: 'Ce n’est pas un lien Spotify. Copie le lien de ta Jam (« Partager le lien ») et colle-le.',
   soiree_not_ended: 'Le récap sera disponible quand la soirée sera terminée.',
   profile_not_found: 'Ce joueur est introuvable.',
   not_in_soiree:'Tu n’es plus dans cette soirée.',

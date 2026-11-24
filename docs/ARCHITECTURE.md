@@ -446,3 +446,7 @@ Une personne de passage joue depuis son téléphone **sans profil ni PIN**, dans
 
 - Table `presence(profile_id, last_seen_at)` à part de `profiles` (un ping par minute ne réveille pas le Realtime des profils), sans policy RLS : accès par RPC. `ping_presence()` (membres, `_require_member`) écrit au plus une fois toutes les 20 s ; `band_presence()` → `[{profile_id, last_seen_at}]` des membres déjà vus (jamais les invités).
 - Front : `PresencePinger` (monté dans `Root`) pingue à louverture,
+## Musique de la soirée : Spotify Jam (`supabase/features/musique.sql`, `src/features/soiree/SoireeMusic.tsx`)
+
+- Simple lien, **aucune API Spotify** (leurs règles développeurs interdisent leur contenu dans un jeu ou calé sur des images ; accès dev limité à quelques comptes Premium). L'hôte (Premium) lance une Jam dans Spotify et colle le lien d'invitation : `set_soiree_music(soiree, url)` (hôte, soirée en cours ; extrait le lien `https://open.spotify.com/…`, `spotify.link/…` ou `spotify.app.link/…` d'un texte de partage, 300 car. max ; vide/null = retirer ; erreur `invalid_music_link`) → `soirees.music_url`.
+- Salon : `SoireeMusicCard` = « Ajouter une musique » pour tous (invités compris : ouvre la Jam, Spotify gratuit suffit pour ajouter des sons), « Mettre la musique (Spotify) » + modale d'aide pour l'hôte. Télé : `TvMusicQr` (QR code dans un coin) entre deux parties.

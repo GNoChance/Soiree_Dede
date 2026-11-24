@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { useSession } from '@/store/session'
 import { getGame } from '@/games/registry'
 import type { BaseGameState } from '@/games/types'
+import { TvMusicQr, soireeMusicUrl } from '@/features/soiree/SoireeMusic'
 import { useCurrentMatch, useGameAction, useMatch, useSoiree, useViewingSoiree } from '@/features/soiree/hooks'
 import { mood, playerOrPlaceholder, useEnsurePlayers, usePlayers } from '@/features/soiree/players'
 import { TvContext, TV_VIEWER_ID, readOnlyAct } from '@/features/tv/tv'
@@ -211,7 +212,10 @@ export function TvPage() {
           <X className="size-5" strokeWidth={3} />
         </button>
       </header>
-      <main className={cn('relative min-h-0 flex-1')}>{body}</main>
+      <main className={cn('relative min-h-0 flex-1')}>
+        {body}
+        {!shownId && !soireeEnded && soireeMusicUrl(soireeData?.soiree) && <TvMusicQr url={soireeMusicUrl(soireeData?.soiree)!} />}
+      </main>
       {shownId && !finished && <Reactions matchId={shownId} meId={TV_VIEWER_ID} interactive={false} big />}
       {!fs.on && !shownId && loaded && !notFound && !soireeEnded && (
         <div className="shrink-0 p-3 text-center">

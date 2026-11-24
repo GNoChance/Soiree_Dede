@@ -27,6 +27,7 @@ import { closePronos, openPronos, usePronos } from '@/features/pronos/api'
 import { PronosCard } from '@/features/pronos/PronosCard'
 import { PronosPicker } from '@/features/pronos/PronosPicker'
 import { PRONOS_TTL_MS } from '@/features/pronos/types'
+import { SoireeMusicCard, soireeMusicUrl } from '@/features/soiree/SoireeMusic'
 import { invitePlayer, kickPlayer, spinWheel, useBannedPlayers, useWheelSpins, type WheelSpin } from '@/features/soiree/hostTools'
 import { IdleCountdown, SoireeEndedOverlay, SoireeSwitcher } from '@/features/soiree/SoireeLive'
 import { errorCode, toastError } from '@/features/soiree/errors'
@@ -174,6 +175,8 @@ export function SoireePage() {
       <CodeCard code={soiree.code} />
 
       {isHost && <GuestInviteButton soireeId={soiree.id} code={soiree.code} />}
+
+      <SoireeMusicCard soireeId={soiree.id} url={soireeMusicUrl(soiree)} isHost={isHost} />
 
       <PlayersGrid ids={playerIds} hostId={soiree.host_id} meId={meId} byId={byId} onKick={isHost ? setKickTarget : undefined} noLinks={isGuest} />
 
