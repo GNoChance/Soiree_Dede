@@ -34,11 +34,17 @@ export function PassTrack({ tier, flakes }: { tier: number; flakes: number }) {
               {it ? <ItemPreview it={it} size={56} /> : <span>{r.emoji}</span>}
             </div>
             <span className="text-xs leading-tight font-bold">{r.label}</span>
-            {r.soon && !got && <span className="text-[10px] font-bold text-muted">bientôt dispo</span>}
+            {r.soon && <span className="text-[10px] font-bold text-muted">{got ? 'atteint : livré très bientôt !' : 'bientôt dispo'}</span>}
             <span className="text-[10px] font-bold text-muted">{t * NOEL_TIER_FLAKES} ❄️</span>
             {got && (
-              <span className="absolute -top-2 -right-2 flex size-7 items-center justify-center rounded-full border-2 border-ink bg-mint">
-                <Check className="size-4" strokeWidth={4} />
+              <span
+                className={cn(
+                  'absolute -top-2 -right-2 flex size-7 items-center justify-center rounded-full border-2 border-ink',
+                  r.soon ? 'bg-sun text-sm' : 'bg-mint',
+                )}
+                aria-label={r.soon ? 'Atteint, récompense en préparation' : 'Obtenu'}
+              >
+                {r.soon ? '⏳' : <Check className="size-4" strokeWidth={4} />}
               </span>
             )}
             {next && <span className="text-[10px] font-extrabold">encore {t * NOEL_TIER_FLAKES - flakes} ❄️</span>}

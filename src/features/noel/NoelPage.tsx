@@ -36,7 +36,7 @@ export function NoelBanner({ st }: { st: NoelState }) {
 /** Page « Noël » : missions du jour, Pass de Noël, Grande Hotte de la bande. */
 export function NoelPage() {
   const navigate = useNavigate()
-  const { state } = useNoelState()
+  const { state } = useNoelState(true)
   const [tab, setTab] = useState<Tab>('missions')
   const replay = useNoelIntro((s) => s.replay)
 

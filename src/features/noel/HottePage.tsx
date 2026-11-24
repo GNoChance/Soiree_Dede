@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Clock } from 'lucide-react'
 import { useNavigate } from 'react-router'
@@ -8,20 +8,21 @@ import { Card } from '@/components/ui/Card'
 import { victoryConfetti } from '@/components/ui/confetti'
 import { errorCode, toastError } from '@/features/soiree/errors'
 import { playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
-import { useCountdown } from '@/features/soiree/useServerClock'
+import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import { fx } from '@/lib/feedback'
 import { useSession } from '@/store/session'
 import { useHoldUpdate } from '@/store/updateHold'
 import { useNoelState } from './api'
 import { hotteAnswer, hotteBoard, hotteFlakes, hotteStart, type HotteBoardRow, type HotteRun } from './hotteApi'
 import { HotteRoundView, type RoundFeedback } from './hotte/Rounds'
+import { hotteTimeUp, parisDay } from './hotteTime'
 
 type Phase = 'intro' | 'loading' | 'play' | 'end'
 
 /** La Hotte du jour : 5 manches de Noël, un seul essai, classement du jour de la bande. */
 export function HottePage() {
   const navigate = useNavigate()
-  const { state, refetch } = useNoelState()
+  const { state, refetch } = useNoelState(true)
   const [phase, setPhase] = useState<Phase>('intro')
   const [run, setRun] = useState<HotteRun | null>(null)
   const [feedback, setFeedback] = useState<RoundFeedback | null>(null)
@@ -31,6 +32,9 @@ export function HottePage() {
 
   const idx = run ? run.answers.length : 0
   const left = useCountdown(phase === 'play' ? run?.deadline : null, 500)
+  // Une réponse en cours d'envoi / une fin déjà déclenchée : on ignore les doubles appuis.
+  const sending = useRef(false)
+  const ended = useRef(false)
 
   const loadBoard = async () => {
     try {
@@ -41,6 +45,8 @@ export function HottePage() {
   }
 
   const finish = async (final: number) => {
+    if (ended.current) return
+    ended.current = true
     setScore(final)
     setPhase('end')
     if (final >= 4) victoryConfetti(1800)
@@ -48,21 +54,23 @@ export function HottePage() {
     await Promise.all([loadBoard(), refetch()])
   }
 
-  // Hotte déjà faite aujourd'hui : directement le résultat et le classement.
-  const doneToday = state?.hotte.status === 'done'
+  // Hotte déjà faite AUJOURD'HUI (pas l'état d'hier resté en mémoire) : directement le résultat.
+  const doneToday = state?.hotte.status === 'done' && state.day === parisDay(serverNow())
   useEffect(() => {
     if (doneToday && phase === 'intro') {
+      ended.current = true
       setScore(state?.hotte.score ?? 0)
       setPhase('end')
       void loadBoard()
     }
   }, [doneToday, phase, state?.hotte.score])
 
-  // Temps écoulé : l'essai est clos par le serveur avec les réponses déjà données.
+  // Temps écoulé (vraie échéance, pas la valeur initiale du compte à rebours) : l'essai est clos
+  // par le serveur avec les réponses déjà données. Relu aussi à la fin d'un retour juste/faux.
   useEffect(() => {
-    if (phase === 'play' && run && left <= 0 && !feedback) void finish(run.score)
+    if (phase === 'play' && run && !feedback && hotteTimeUp(run.deadline, serverNow())) void finish(run.score)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, left])
+  }, [phase, left, feedback])
 
   const start = async () => {
     setPhase('loading')
@@ -83,7 +91,8 @@ export function HottePage() {
   }
 
   const answer = async (a: string) => {
-    if (!run || feedback) return
+    if (!run || feedback || sending.current || ended.current) return
+    sending.current = true
     const round = idx + 1
     try {
       const res = await hotteAnswer(round, a)
@@ -92,11 +101,13 @@ export function HottePage() {
       else fx.fail()
       setScore(res.score)
       window.setTimeout(() => {
+        sending.current = false
         setFeedback(null)
         setRun((r) => (r ? { ...r, score: res.score, answers: [...r.answers, { round, answer: a, ok: res.ok }] } : r))
         if (res.finished) void finish(res.score)
       }, 1300)
     } catch (e) {
+      sending.current = false
       toastError(e)
     }
   }

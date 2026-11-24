@@ -46,10 +46,13 @@ export { NOEL_PASS_REWARDS, NOEL_BAND_REWARDS, type NoelPassReward } from './rew
 interface NoelStore {
   state: NoelState | null
   loading: boolean
-  /** Récompenses à célébrer (modale NoelCelebrations), une par une. */
+  /** Dernière lecture réussie (ms), pour ne pas rappeler le serveur à chaque retour au premier plan. */
+  fetchedAt: number
+  /** Récompenses à célébrer : toutes présentées ensemble dans une seule modale (NoelCelebrations). */
   queue: NoelClaim[]
-  shift: () => void
-  refresh: () => Promise<void>
+  clearQueue: () => void
+  /** Relit l'état, sauf si la dernière lecture date de moins de minAgeMs (0 = toujours). */
+  refresh: (minAgeMs?: number) => Promise<void>
 }
 
 let inflight: Promise<void> | null = null
@@ -57,17 +60,19 @@ let inflight: Promise<void> | null = null
 export const useNoelStore = create<NoelStore>((set, get) => ({
   state: null,
   loading: false,
+  fetchedAt: 0,
   queue: [],
-  shift: () => set((s) => ({ queue: s.queue.slice(1) })),
-  refresh: () => {
+  clearQueue: () => set({ queue: [] }),
+  refresh: (minAgeMs = 0) => {
     if (inflight) return inflight
+    if (minAgeMs > 0 && Date.now() - get().fetchedAt < minAgeMs) return Promise.resolve()
     inflight = (async () => {
       set({ loading: true })
       try {
         const { data, error } = await loose.rpc('noel_state', {})
         if (error || !data) return
         const st = data as NoelState
-        set({ state: st, queue: [...get().queue, ...(st.new_claims ?? [])] })
+        set({ state: st, fetchedAt: Date.now(), queue: [...get().queue, ...(st.new_claims ?? [])] })
       } finally {
         set({ loading: false })
         inflight = null
@@ -77,18 +82,24 @@ export const useNoelStore = create<NoelStore>((set, get) => ({
   },
 }))
 
-/** État de l'événement (membres seulement), relu au montage et au retour au premier plan. */
-export function useNoelState(): { state: NoelState | null; refetch: () => Promise<void> } {
+/** Hors des pages Noël : au plus une lecture toutes les 30 s (noel_state calcule toute la bande). */
+const BACKGROUND_MIN_AGE = 30_000
+
+/**
+ * État de l'événement (membres seulement). fresh : relu à chaque montage (pages Noël) ; sinon au plus
+ * toutes les 30 s (accueil, vidéo d'annonce). Relu aussi au retour au premier plan (même limite).
+ */
+export function useNoelState(fresh = false): { state: NoelState | null; refetch: () => Promise<void> } {
   const member = useSession((s) => Boolean(s.profile) && !isGuestProfile(s.profile))
   const state = useNoelStore((s) => (member ? s.state : null))
   const refresh = useNoelStore((s) => s.refresh)
   useEffect(() => {
-    if (member) void refresh()
-  }, [member, refresh])
+    if (member) void refresh(fresh ? 0 : BACKGROUND_MIN_AGE)
+  }, [member, refresh, fresh])
   useResync(() => {
-    if (member) void refresh()
+    if (member) void refresh(BACKGROUND_MIN_AGE)
   })
-  return { state, refetch: refresh }
+  return { state, refetch: () => refresh(0) }
 }
 
 /** Jours restants avant la fin de l'édition (inclus le jour courant). */

@@ -11,28 +11,44 @@ import { fx } from '@/lib/feedback'
 import { toast } from '@/store/toast'
 import { useNoelStore, type NoelClaim } from './api'
 
-/** Récompenses de Noël tout juste gagnées (pass + Grande Hotte), présentées une par une. */
+/** Nouvelles récompenses de Noël (pass + Grande Hotte) : UNE modale qui les liste toutes (spec §8.4). */
 export function NoelCelebrations() {
-  const current = useNoelStore((s) => s.queue[0])
-  const shift = useNoelStore((s) => s.shift)
+  const queue = useNoelStore((s) => s.queue)
+  const clear = useNoelStore((s) => s.clearQueue)
+  const open = queue.length > 0
   useEffect(() => {
-    if (current) {
+    if (open) {
       fx.fanfare()
       victoryConfetti(1600)
     }
-  }, [current])
+  }, [open])
+  const pass = queue.filter((c) => c.kind === 'pass')
+  const band = queue.filter((c) => c.kind === 'band')
+  const title = band.length && !pass.length
+    ? '🛷 La Grande Hotte avance !'
+    : pass.length === 1 && !band.length
+      ? `🎄 Pass de Noël : palier ${pass[0].tier} !`
+      : '🎁 Nouveaux cadeaux de Noël !'
+  const coins = queue.reduce((n, c) => n + c.coins, 0)
   return (
-    <Modal open={Boolean(current)} onClose={shift} title={current ? titleOf(current) : ''}>
-      {current && <Body c={current} onClose={shift} />}
+    <Modal open={open} onClose={clear} title={title}>
+      <div className="flex flex-col gap-3">
+        <div className="flex max-h-[50dvh] flex-col gap-2 overflow-y-auto">
+          {queue.map((c) => (
+            <ClaimRow key={`${c.kind}-${c.tier}`} c={c} />
+          ))}
+        </div>
+        {coins > 0 && <p className="text-center font-display text-xl font-extrabold">Total : +{coins} 🪙</p>}
+        {band.length > 0 && <p className="text-center font-bold">Merci la bande ! 🛷</p>}
+        <Button fullWidth size="lg" onClick={clear}>
+          Super !
+        </Button>
+      </div>
     </Modal>
   )
 }
 
-function titleOf(c: NoelClaim) {
-  return c.kind === 'band' ? `🛷 Grande Hotte : palier ${c.tier} !` : `🎄 Pass de Noël : palier ${c.tier} !`
-}
-
-function Body({ c, onClose }: { c: NoelClaim; onClose: () => void }) {
+function ClaimRow({ c }: { c: NoelClaim }) {
   const it = getItem(c.item_id)
   const equip = async () => {
     if (!it) return
@@ -40,35 +56,34 @@ function Body({ c, onClose }: { c: NoelClaim; onClose: () => void }) {
       await equipItem(it.slot, it.id)
       fx.pop()
       toast.success(`${it.emoji} ${it.label} équipé !`)
-      onClose()
     } catch (e) {
       toastError(e)
     }
   }
   return (
-    <div className="flex flex-col items-center gap-4 text-center">
-      {it ? (
-        <motion.div initial={{ scale: 0, rotate: -20 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 260, damping: 10 }}>
-          <ItemPreview it={it} size={96} />
-        </motion.div>
-      ) : (
-        <motion.span className="text-7xl" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 10 }}>
-          🪙
-        </motion.span>
-      )}
-      <p className="font-bold">
-        {it ? `${it.label} rejoint ta collection : un exclusif de Noël !` : `+${c.coins} pièces dans ta tirelire.`}
-        {c.compensated ? ` Tu l’avais déjà : ${c.coins} pièces à la place.` : ''}
-        {c.kind === 'band' ? ' Merci la bande !' : ''}
-      </p>
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      className="sticker-sm flex items-center gap-3 rounded-card bg-surface p-2"
+    >
+      <div className="flex size-14 shrink-0 items-center justify-center text-4xl">
+        {it ? <ItemPreview it={it} size={52} /> : '🪙'}
+      </div>
+      <div className="min-w-0 flex-1 text-left">
+        <p className="font-display font-extrabold">{c.kind === 'band' ? `Grande Hotte · palier ${c.tier}` : `Pass · palier ${c.tier}`}</p>
+        <p className="text-sm font-bold">
+          {c.compensated
+            ? `Objet déjà à toi : ${c.coins} pièces à la place`
+            : it
+              ? `${it.label}${c.coins > 0 ? ` + ${c.coins} pièces` : ''}`
+              : `${c.coins} pièces`}
+        </p>
+      </div>
       {it && (
-        <Button fullWidth onClick={() => void equip()}>
-          L’équiper
+        <Button size="sm" variant="secondary" onClick={() => void equip()}>
+          Équiper
         </Button>
       )}
-      <Button variant={it ? 'ghost' : 'primary'} fullWidth onClick={onClose}>
-        {it ? 'Plus tard' : 'Super !'}
-      </Button>
-    </div>
+    </motion.div>
   )
 }
