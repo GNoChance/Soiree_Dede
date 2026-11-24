@@ -8,6 +8,6 @@ const S = (name) => ({ name, file: `kevin-${name}.png`, n: 12, dir: name, map: M
 export default {
   slug: 'kevin',
   src: 'assets-source/costumes/kevin-v3',
-  sheets: 'student star coach philosopher archer painter pyro tycoon actor bowler admiral werewolf pirate teacher tictactoe racer cinema spy croupier strategist hacker chess golfer host cowboy elf'.split(' ').map(S),
-  portraits: 'admiral archer coach actor student croupier spy bowler werewolf tycoon tictactoe pyro painter philosopher pirate teacher cinema strategist star racer hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `kevin-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'student star coach philosopher archer painter pyro tycoon actor bowler admiral werewolf pirate teacher tictactoe racer cinema spy croupier strategist hacker chess golfer host cowboy elf santa'.split(' ').map(S),
+  portraits: 'admiral archer coach actor student croupier spy bowler werewolf tycoon tictactoe pyro painter philosopher pirate teacher cinema strategist star racer hacker chess golfer host cowboy elf santa'.split(' ').map((n) => ({ file: `kevin-${n}-portrait.png`, dir: n, cutout: true })),
 };
