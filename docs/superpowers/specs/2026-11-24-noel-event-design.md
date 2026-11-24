@@ -151,11 +151,11 @@ Champ nouveau : `event: 'noel'` + `eventTier` (palier), comme `season` / `passTi
 { id: 't_lutin_chef', slot: 'title', label: 'Lutin en chef', emoji: '🧝', event: 'noel', eventTier: 3 },
 { id: 'cb_papier_cadeau', slot: 'card_back', label: 'Papier cadeau', emoji: '🎁', event: 'noel', eventTier: 6, cardBack: { bg: 'repeating-linear-gradient(45deg, #C1121F 0 14px, #2D6A4F 14px 28px)', emoji: '🎁' } },
 { id: 'd_sucre_orge', slot: 'dice', label: 'Dés sucre d’orge', emoji: '🍭', event: 'noel', eventTier: 9, dice: { face: '#FFFFFF', edge: '#E63946', pip: '#C1121F' } },
-{ id: 'k_traineau', slot: 'kart', label: 'Traîneau rouge', emoji: '🛷', event: 'noel', eventTier: 12, kart: { body: '#C1121F' } },
+{ id: 'k_noel_traineau', slot: 'kart', label: 'Traîneau rouge', emoji: '🛷', event: 'noel', eventTier: 12, kart: { body: '#C1121F' } },
 { id: 'gb_boule_noel', slot: 'golf_ball', label: 'Boule de Noël', emoji: '🔴', event: 'noel', eventTier: 15, golf: { color: '#D4AF37', stripe: '#C1121F' } },
 { id: 'bb_buche', slot: 'bowling_ball', label: 'Bûche de Noël', emoji: '🪵', event: 'noel', eventTier: 20, bowling: { color: '#6B3E26', band: '#FFF3E0' } },
 { id: 'm_guirlande', slot: 'marks', label: 'Guirlande lumineuse', emoji: '💡', event: 'noel', eventTier: 22, marks: { outline: '#FFD166', glow: '#FF4D6D', dash: true } },
-{ id: 'f_houx', slot: 'frame', label: 'Couronne de houx', emoji: '🌿', event: 'noel', eventTier: 27, frame: { ring: '#2D6A4F', emojis: ['🍒', '🌿'], count: 8, top: '🎀' } },
+{ id: 'f_noel_houx', slot: 'frame', label: 'Couronne de houx', emoji: '🌿', event: 'noel', eventTier: 27, frame: { ring: '#2D6A4F', emojis: ['🍒', '🌿'], count: 8, top: '🎀' } },
 { id: 't_acharne_noel', slot: 'title', label: 'Acharné de Noël', emoji: '🎅', event: 'noel', eventTier: 30 },
 ```
 
@@ -186,7 +186,7 @@ Chaque effet a **son propre slot** (on peut tous les équiper en même temps) ; 
 | 5 | 38 000 ❄️ | 🎁 **Gros Lot** (ci-dessous) |
 
 ```ts
-{ id: 'f_aurore', slot: 'frame', label: 'Aurore boréale', emoji: '🌌', event: 'noel', bandTier: 3, frame: { ring: 'conic-gradient(#06D6A0, #118AB2, #7B2CBF, #EF476F, #06D6A0)', spin: true, emojis: ['✨'], count: 6, top: '🌌' } },
+{ id: 'f_noel_aurore', slot: 'frame', label: 'Aurore boréale', emoji: '🌌', event: 'noel', bandTier: 3, frame: { ring: 'conic-gradient(#06D6A0, #118AB2, #7B2CBF, #EF476F, #06D6A0)', spin: true, emojis: ['✨'], count: 6, top: '🌌' } },
 { id: 't_bande_noel', slot: 'title', label: 'La Bande de Noël', emoji: '🎄', event: 'noel', bandTier: 4 },
 ```
 
@@ -262,7 +262,7 @@ Bandeau festif (style sticker book, rouge/vert/or, flocons qui flottent, compte 
 
 ## 9. Notes pour l'implémentation
 
-- **SQL** : un fichier `supabase/features/evenements.sql` (moteur : dates d'édition, tirage des missions, vérification, ❄️, série, synchro des récompenses pass + Grande Hotte) et la Hotte du jour (essais + banques). Tables nouvelles : essais de Hotte (profil, jour, début, réponses, score, fin) ; récompenses attribuées (profil, édition, type pass|bande, palier). Pas de policy RLS ouverte : tout passe par des RPC `_require_member()`.
+- **SQL** : `supabase/features/hotte.sql` (essais de la Hotte + RPC) et `hotte_banques.sql` (contenu), puis `supabase/features/noel.sql` (moteur : dates d'édition, tirage des missions, vérification, ❄️, série, synchro des récompenses pass + Grande Hotte ; chargé après hotte.sql, ordre alphabétique). Tables nouvelles : essais de Hotte (profil, jour, début, réponses, score, fin) ; récompenses attribuées (profil, édition, type pass|bande, palier). Pas de policy RLS ouverte : tout passe par des RPC `_require_member()`.
 - **RPC** (noms indicatifs) : `noel_state()` → missions du jour et leur état, Hotte du jour, ❄️, palier, série, Grande Hotte (total, palier, contributeurs, mes ❄️, éligible), nouvelles récompenses attribuées ; `hotte_start()`, `hotte_answer(manche, réponse)`, `hotte_board()` (classement du jour).
 - **Récompenses** : pièces via `coin_ledger` (raison `event_pass` / `event_band`, ref `noel-2026:<type>:<palier>`) ; objets via `profile_items` ; tenues via le système de tenues ; trophée via `trophy_unlocks`. Synchro idempotente, appelée par `noel_state()`.
 - **Front** : `src/features/noel/` (carte d'accueil, page, Hotte, célébrations) ; nouveaux slots `fx_*` dans `src/data/cadeaux.ts` + rendu (avatar, grille du salon, écran de résultats, salon/télé) ; tenues dans `src/data/tenues.ts` ; thème « bande » dans `src/features/reveillon/themes.ts` (visible seulement pour un hôte éligible, info venue de `noel_state()`).
