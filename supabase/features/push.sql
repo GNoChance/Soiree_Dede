@@ -93,7 +93,20 @@ end $$;
 -- Abonnements des joueurs SANS tentative aujourd'hui (une tentative commencee mais
 -- non terminee ne peut plus etre rejouee : inutile de rappeler) et pas encore rappeles
 -- aujourd'hui. p_claim = true : marque last_reminded_day (anti-doublon, atomique).
--- -> [{endpoint, p256dh, auth, profile_id, nickname, streak}]
+-- -> [{endpoint, p256dh, auth, profile_id, nickname, streak, noel_streak}]
+-- noel_streak : série de l'événement de Noël (noel.sql) pendant une édition, sinon null (texte du rappel adapté).
+create or replace function public._push_noel_streak(p_profile uuid)
+returns integer language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_key text;
+begin
+  -- noel.sql est chargé après push.sql : appel dynamique résolu à l'exécution (plpgsql).
+  v_key := public._noel_key_for(public._noel_day());
+  if v_key is null then return null; end if;
+  return (public._noel_flakes(p_profile, v_key)->'streak'->>'current')::int;
+end $$;
+
 create or replace function public.push_daily_reminder_targets(p_claim boolean default true)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -112,7 +125,8 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
              'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
-             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id)))
+             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id),
+             'noel_streak', public._push_noel_streak(s.profile_id)))
       from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
      where s.id = any(v_ids)), '[]'::jsonb);
 end $$;
@@ -124,7 +138,8 @@ set search_path = public, extensions
 as $$
   select coalesce(jsonb_agg(jsonb_build_object(
            'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
-           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id))), '[]'::jsonb)
+           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id),
+           'noel_streak', public._push_noel_streak(s.profile_id))), '[]'::jsonb)
     from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
    where p.slug = lower(btrim(p_slug))
 $$;
@@ -170,6 +185,7 @@ end $$;
 
 revoke all on function public.save_push_subscription(text, text, text, text) from public, anon;
 revoke all on function public.delete_push_subscription(text) from public, anon;
+revoke all on function public._push_noel_streak(uuid) from public, anon, authenticated;
 revoke all on function public.push_daily_reminder_targets(boolean) from public, anon, authenticated;
 revoke all on function public.push_test_targets(text) from public, anon, authenticated;
 revoke all on function public.push_report(text[], text[]) from public, anon, authenticated;

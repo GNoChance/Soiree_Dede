@@ -20,6 +20,8 @@ interface Target {
   profile_id: string
   nickname: string
   streak: number
+  /** Série de l’événement de Noël (null hors événement) : le rappel devient celui des missions de Noël. */
+  noel_streak?: number | null
 }
 
 const TITLES = [
@@ -49,6 +51,17 @@ function pick<T>(a: readonly T[]): T {
 
 function buildMessage(t: Target, test: boolean) {
   const nick = t.nickname || 'toi'
+  if (typeof t.noel_streak === 'number') {
+    const n = t.noel_streak
+    return {
+      title: (test ? '🧪 Test : ' : '') + '🎄 Tes missions de Noël t’attendent !',
+      body: n > 0
+        ? `Série 🔥 ${n} jour${n > 1 ? 's' : ''} : la Hotte du jour et 3 missions t’attendent.`
+        : `La Hotte du jour et 3 missions t’attendent, ${nick} !`,
+      url: '/noel',
+      tag: 'noel',
+    }
+  }
   const body = (t.streak > 1 ? pick(STREAK_BODIES) : pick(BODIES))
     .replaceAll('{n1}', String(t.streak + 1))
     .replaceAll('{n}', String(t.streak))
