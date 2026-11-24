@@ -124,3 +124,21 @@ Style sticker : contour noir épais autour du personnage, y compris sur le bonne
 ```
 Illustration portrait du personnage de référence (même visage, mêmes proportions, même style chibi que l'image jointe), en lutin de Noël : grand bonnet pointu vert à bout rouge avec un grelot doré, oreilles pointues, col blanc en zigzag, tunique rouge et verte, ceinture noire à boucle dorée, chaussons à bout recourbé. Pose : debout sur la pointe des pieds, un énorme cadeau rouge à ruban doré dans les bras, un grand sourire espiègle, un clin d'œil. Décor : atelier du Père Noël, sapin décoré, pile de cadeaux, guirlande lumineuse, flocons et petites étoiles dorées. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, y compris sur le col blanc et les cadeaux blancs, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
 ```
+
+---
+
+## 🎅 Père Noël — palier 30 du Pass de Noël (événement 2026)
+
+Dossier : `santa`. Même prompt pour les 9 persos (joindre une planche V3 du perso comme référence). Kéké : livré le 2026-11-24. Pour Karo, remplacer « 10 amoureux » par « 10 charmée : cœurs dans les yeux, rougit, serre contre elle un cadeau noué d'un ruban rose ». Si le perso porte des lunettes ou une barbe, garder la mention « (on voit encore ses lunettes) » ; sinon la retirer.
+
+### Planche
+```
+Planche de 12 stickers chibi du personnage de référence (même visage, même coiffure visible sous le bonnet, mêmes proportions, même style chibi que l'image jointe), grille 4 colonnes × 3 lignes, 12 cases bien séparées, BUSTES uniquement (tête, épaules, haut du torse), en Père Noël : bonnet rouge à pompon blanc bien visible, grande fausse barbe blanche bouclée accrochée aux oreilles (on voit encore ses lunettes), manteau rouge à col de fourrure blanche, gros boutons dorés, ceinture noire à boucle dorée, gants blancs. Chaque sticker a une pose différente. Ordre de gauche à droite, ligne par ligne :
+1 joie : bras levés, « Ho ho ho », pluie de flocons et de confettis · 2 colère : secoue une hotte vide, petit nuage rouge · 3 pleurs : pleure à chaudes larmes, sa fausse barbe qui se décroche · 4 boude : bras croisés, dos tourné à un sapin, petit nuage noir · 5 réflexion : main au menton, lit une très longue liste de cadeaux qui déroule jusqu'en bas · 6 dodo : endormi sur une pile de cadeaux, bonnet de travers, « Zzz » · 7 bisou : envoie un bisou, petit cœur et une branche de gui · 8 clin d'œil : clin d'œil malicieux, un doigt sur les lèvres, un cadeau caché derrière le dos · 9 surprise : yeux écarquillés, un renne qui surgit à côté · 10 amoureux : cœurs dans les yeux, serre contre lui un cadeau noué d'un ruban rose · 11 cool : lunettes de soleil, appuyé sur un traîneau rouge, bras croisés · 12 champion : brandit une étoile de sapin dorée géante, l'autre main faisant le V de la victoire.
+Style sticker : contour noir épais autour du personnage, y compris sur la barbe blanche, la fourrure blanche et les gants blancs, couleurs vives et flat, GROSSE BORDURE BLANCHE épaisse autour de chaque buste. Fond noir uni #000000, sans dégradé ni ombre. Pas de texte.
+```
+
+### Portrait
+```
+Illustration portrait du personnage de référence (même visage, même coiffure visible sous le bonnet, mêmes proportions, même style chibi que l'image jointe), en Père Noël : bonnet rouge à pompon blanc, grande fausse barbe blanche bouclée accrochée aux oreilles, manteau rouge à col de fourrure blanche, boutons dorés, ceinture noire à boucle dorée, gants blancs, bottes noires. Pose : debout, une énorme hotte pleine de cadeaux sur l'épaule, l'autre bras tendu vers l'avant comme pour présenter quelque chose, grand sourire, un clin d'œil. Décor : traîneau rouge, sapin décoré, flocons, petites étoiles dorées, un renne qui passe la tête. Composition verticale, personnage entier. Style sticker die-cut : contour noir épais, y compris sur la barbe et la fourrure blanches, couleurs vives et flat, ombre décalée, grosse bordure blanche épaisse autour de toute la silhouette. Fond noir uni #000000, sans dégradé. Pas de texte.
+```

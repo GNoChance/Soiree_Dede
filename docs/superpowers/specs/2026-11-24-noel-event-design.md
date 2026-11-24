@@ -207,7 +207,7 @@ Ordre de grandeur : 38 000 ❄️ ≈ 4 200 ❄️ par personne pour 9 membres :
 
 | Tenue | Obtention | Expressions | Art |
 |---|---|---|---|
-| **Noël** (Père Noël / Mère Noël selon le perso, à décider avec les planches) | palier 30 du Pass de Noël | les 12 d'office (exception à la règle « une expression par trophée de jeu » : pas de jeu associé) | 9 planches V3 + 9 portraits, fournies par l'utilisateur **vers le 20 décembre** |
+| **Père Noël** (dossier d'art `santa` ; même costume pour les 9, prompt dans `docs/PROMPTS-TENUES-V3.md`) | palier 30 du Pass de Noël | les 12 d'office (exception à la règle « une expression par trophée de jeu » : pas de jeu associé) | Kéké livré le 2026-11-24 ; les 8 autres **vers le 20 décembre** |
 | **Pyjama de Noël** | palier 5 de la Grande Hotte | les 12 d'office | 9 planches V3 + 9 portraits **vers le 28 décembre** |
 
 - Ajout au catalogue `src/data/tenues.ts` **et** `supabase/features/tenues.sql` (règle de déblocage = palier d'événement), puis le circuit habituel des planches (CLAUDE.md).
@@ -232,12 +232,18 @@ Bandeau festif (style sticker book, rouge/vert/or, flocons qui flottent, compte 
 2. **Pass** : piste horizontale des 30 paliers (acquis cochés, palier suivant mis en avant, tenue visible au bout), total ❄️, ❄️ manquants pour le prochain palier.
 3. **La Grande Hotte** : jauge, paliers, contributeurs, statut d'éligibilité.
 
-### 8.3 Célébrations et rappel
+### 8.3 Vidéo d'annonce
+
+- À la **première ouverture de l'app à partir du 1er décembre** (une fois par appareil et par profil, mémorisé localement), une vidéo plein écran présente l'événement ; bouton « Passer » visible dès le début, son coupé par défaut si le navigateur l'exige (bouton 🔊). Rejouable depuis la page Noël (« Revoir la vidéo »). Pas pour les invités.
+- Contenu (~30-40 s, vertical 720 × 1280, mp4 < 3 Mo, même outil que les tutos : `promo-video/`) : **Kéké en Père Noël** (planche et portrait `kevin/santa`) présente l'événement : les missions du jour, la Hotte du jour, le Pass de Noël et la tenue au bout, la Grande Hotte de la bande et son Gros Lot, puis « Rendez-vous chaque jour ! ». Pas de voix off : textes courts à l'écran, bruitages, musique libre de droits légère.
+- Script et mise en scène écrits par Fable, rendu avec Remotion ; fichier servi depuis `public/` (mis en cache par la PWA seulement à la lecture).
+
+### 8.4 Célébrations et rappel
 
 - Palier atteint (pass ou Grande Hotte) : modale de récompense avec confettis, comme le passe d'hiver ; plusieurs paliers d'un coup = une seule modale qui les liste.
 - Notification de 18 h : pendant l'événement, le rappel du défi du jour devient « 🎄 Tes missions de Noël t'attendent ! (série 🔥 N) » ; pas de notification en plus.
 
-### 8.4 Textes principaux
+### 8.5 Textes principaux
 
 | Endroit | Texte |
 |---|---|
@@ -266,9 +272,9 @@ Bandeau festif (style sticker book, rouge/vert/or, flocons qui flottent, compte 
 
 ### 9.1 Livraison en 3 lots
 
-1. **Avant le 1er décembre** : moteur, missions, Hotte et ses banques, pass (pièces + déco), Grande Hotte (paliers 1, 3, 4 : pièces, cadre, titre), carte d'accueil, page Noël, célébrations, texte du rappel.
+1. **Avant le 1er décembre** : moteur, missions, Hotte et ses banques, pass (pièces + déco), Grande Hotte (paliers 1, 3, 4 : pièces, cadre, titre), carte d'accueil, page Noël, célébrations, texte du rappel, **vidéo d'annonce**.
 2. **Avant le 10 décembre** : les 4 effets spéciaux (slots `fx_*` et leurs rendus).
-3. **À l'arrivée des planches** : tenue Noël (~20 déc.), tenue Pyjama (~28 déc.), thème « Réveillon de la Bande », trophée « Esprit d'équipe 2026 », plaque souvenir de l'album.
+3. **À l'arrivée des planches** : tenue Père Noël des 8 autres persos (~20 déc.), tenue Pyjama (~28 déc.), thème « Réveillon de la Bande », trophée « Esprit d'équipe 2026 », plaque souvenir de l'album.
 
 Les paliers dont la récompense n'est pas encore livrée sont attribués dès qu'elle l'est (la synchro rattrape).
 
