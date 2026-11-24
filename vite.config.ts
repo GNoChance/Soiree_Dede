@@ -51,7 +51,7 @@ export default defineConfig({
         // Notifications push (rappel du défi du jour) : public/push-sw.js, chargé par le SW généré.
         importScripts: ['push-sw.js'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/tutos\//],
+        navigateFallbackDenylist: [/^\/tutos\//, /^\/videos\//],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
