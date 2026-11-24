@@ -208,5 +208,107 @@ await setNow('2026-12-11T20:00:00Z')
   ok('invité : 0 ❄️', !!g && (await one(`select public._noel_flakes($1, $2) r`, [g, KEY])).r.total === 0)
 }
 
+// =============================================================================
+// 4. Pass de Noël, Grande Hotte, récompenses, noel_state()
+// =============================================================================
+{
+  const more = (await db.query(`select id from public.profiles where not is_guest order by sort_order offset 6 limit 3`)).rows.map((r) => r.id)
+  const [G, H, I] = more
+  for (const [i, p] of more.entries()) await db.query(`insert into public.device_sessions(auth_uid, profile_id) values ($1, $2)`, [uid(20 + i), p])
+  const perfect = async (p, from, n) => {
+    for (const [i, day] of days.slice(from, from + n).entries()) {
+      for (const m of await missions(day)) await satisfy(p, m, day, 100 + from + i)
+      await hotte(p, day, 5, 40)
+    }
+  }
+  const claims = async (p, kind = 'pass') => (await db.query(`select tier, coins, item_id from public.noel_claims where profile_id = $1 and event_key = $2 and kind = $3 order by tier`, [p, KEY, kind])).rows
+  const ledger = async (p, reason) => (await one(`select coalesce(sum(delta), 0)::int n from public.coin_ledger where profile_id = $1 and reason = $2`, [p, reason])).n
+  const owns = async (p, item) => !!(await one(`select 1 x from public.profile_items where profile_id = $1 and item_id = $2`, [p, item]))
+  const state = async (u) => call(u, `select public.noel_state() r`)
+  await setNow('2026-12-31T20:00:00Z')
+
+  // G : 11 jours parfaits = 1 320 + 100 de série = 1 420 ❄️ -> palier 9
+  await perfect(G, 0, 11)
+  ok('G : 1 420 ❄️', (await flakes(G)).total === 1420, String((await flakes(G)).total))
+  const sg = await state(uid(20))
+  ok('noel_state : live, palier 9', !sg.err && sg.r.phase === 'live' && sg.r.tier === 9 && sg.r.flakes === 1420 && sg.r.next_at === 1500, sg.err ?? JSON.stringify({ ...sg.r, band: undefined }))
+  const cg = await claims(G)
+  ok('paliers 1..9 attribués', cg.map((c) => c.tier).join(',') === '1,2,3,4,5,6,7,8,9', JSON.stringify(cg))
+  ok('pièces des paliers 1..9 = 240', (await ledger(G, 'event_pass')) === 240, String(await ledger(G, 'event_pass')))
+  ok('objets des paliers 3, 6, 9', (await owns(G, 't_lutin_chef')) && (await owns(G, 'cb_papier_cadeau')) && (await owns(G, 'd_sucre_orge')))
+  ok('new_claims renvoyés une seule fois', sg.r?.new_claims.filter((c) => c.kind === 'pass').length === 9 && (await state(uid(20))).r.new_claims.length === 0)
+  // Palier 10 (effet, lot 2) pas prêt : sauté, le 11 est attribué
+  await perfect(G, 11, 2)
+  await state(uid(20))
+  const cg2 = (await claims(G)).map((c) => c.tier)
+  ok('palier 10 pas prêt : non attribué, 11 attribué', !cg2.includes(10) && cg2.includes(11), cg2.join(','))
+  // Idempotence
+  const before = [await ledger(G, 'event_pass'), (await claims(G)).length]
+  await state(uid(20))
+  await one(`select public._noel_claim($1, $2) r`, [G, KEY])
+  ok('aucune récompense en double', JSON.stringify([await ledger(G, 'event_pass'), (await claims(G)).length]) === JSON.stringify(before))
+
+  // H : objet déjà possédé -> 100 pièces à la place
+  await db.query(`insert into public.profile_items(profile_id, item_id) values ($1, 'cb_papier_cadeau') on conflict do nothing`, [H])
+  await perfect(H, 0, 8)
+  const sh = await state(uid(21))
+  const c6 = sh.r?.new_claims.find((c) => c.kind === 'pass' && c.tier === 6)
+  ok('déjà possédé : compensé par 100 pièces', c6?.compensated === true && c6.coins === 100 && c6.item_id === null, JSON.stringify(c6))
+
+  // Grande Hotte : vrai total = somme des membres hors invités
+  const members = (await db.query(`select id from public.profiles where not is_guest`)).rows.map((r) => r.id)
+  let sum = 0
+  for (const p of members) sum += (await flakes(p)).total
+  const band = (await one(`select public._noel_band($1) r`, [KEY])).r
+  ok('Grande Hotte : total = somme des membres', band.total === sum, `${band.total} vs ${sum}`)
+  ok('contributeurs : triés, sans les membres à 0', band.contributors.every((c, i, a) => c.flakes > 0 && (i === 0 || a[i - 1].flakes >= c.flakes)) && !band.contributors.some((c) => c.profile_id === I), JSON.stringify(band.contributors))
+  ok('paliers collectifs', JSON.stringify(await Promise.all([0, 5999, 6000, 14000, 22000, 38000, 99999].map(async (t) => (await one(`select public._noel_band_tier($1) r`, [t])).r))) === '[0,0,1,2,3,5,5]')
+
+  // Total simulé à 22 000 : paliers 1 et 3 pour les éligibles (≥ 400 ❄️), le 2 pas prêt
+  await db.query(`create or replace function public._noel_band_total(p_key text) returns integer language sql stable as $$ select 22000 $$`)
+  await state(uid(20))
+  const bg = (await claims(G, 'band')).map((c) => c.tier).join(',')
+  ok('éligible : paliers collectifs 1 et 3 (2 pas prêt)', bg === '1,3' && (await ledger(G, 'event_band')) === 100 && (await owns(G, 'f_noel_aurore')), bg)
+  // I : 3 jours parfaits = 390 ❄️ -> pas éligible, puis 402 -> rattrapage
+  await perfect(I, 20, 3)
+  const si = await state(uid(22))
+  ok('I à 390 ❄️ : non éligible, rien reçu', si.r?.flakes === 390 && si.r.band.eligible === false && (await claims(I, 'band')).length === 0, JSON.stringify(si.r?.band ?? si.err))
+  await hotte(I, days[23], 2, 100)
+  const si2 = await state(uid(22))
+  ok('I à 402 ❄️ : éligible, paliers déjà atteints rattrapés', si2.r?.flakes === 402 && si2.r.band.eligible && (await claims(I, 'band')).map((c) => c.tier).join(',') === '1,3', JSON.stringify(si2.r?.band))
+  await db.query(`create or replace function public._noel_band_total(p_key text) returns integer language sql stable as $$ select 30000 $$`)
+  await state(uid(20))
+  ok('palier collectif 4 : 250 pièces + titre', (await ledger(G, 'event_band')) === 350 && (await owns(G, 't_bande_noel')))
+
+  // Phases
+  await setNow('2026-11-30T12:00:00Z')
+  const pb = await state(uid(20))
+  ok('30 nov : before, aucune récompense', pb.r?.phase === 'before' && pb.r.new_claims.length === 0 && pb.r.missions.length === 0, JSON.stringify(pb.r ?? pb.err))
+  await setNow('2026-12-10T12:00:00Z')
+  const pl = await state(uid(20))
+  ok('10 déc : live, 3 missions du jour', pl.r?.phase === 'live' && pl.r.missions.length === 3 && pl.r.day === '2026-12-10' && typeof pl.r.missions[0].done === 'boolean' && ['todo', 'running', 'done'].includes(pl.r.hotte.status), JSON.stringify(pl.r ?? pl.err))
+  await setNow('2027-01-10T12:00:00Z')
+  const po = await state(uid(20))
+  ok('10 janv : over, pass conservé, plus de missions', po.r?.phase === 'over' && po.r.key === KEY && po.r.missions.length === 0 && po.r.tier >= 11, JSON.stringify(po.r ?? po.err))
+  await setNow('2027-01-14T12:00:00Z')
+  ok('14 janv : off', (await state(uid(20))).r?.phase === 'off')
+  ok('invité : refusé', (await state(uid(10))).err === 'guest_forbidden')
+}
+
+// =============================================================================
+// 5. Rappel push de 18 h : série de Noël pendant l'événement
+// =============================================================================
+{
+  await db.query(`insert into public.push_subscriptions(profile_id, endpoint, p256dh, auth) values ($1, 'https://push.test/a', 'k', 'a')`, [A])
+  await setNow('2026-12-02T17:00:00Z')
+  const dec = (await one(`select public.push_test_targets((select slug from public.profiles where id = $1)) r`, [A])).r
+  ok('rappel en décembre : noel_streak numérique', dec.length === 1 && typeof dec[0].noel_streak === 'number', JSON.stringify(dec))
+  const tgt = (await one(`select public.push_daily_reminder_targets(false) r`)).r
+  ok('cibles du rappel : champ noel_streak présent', tgt.every((t) => 'noel_streak' in t), JSON.stringify(tgt))
+  await setNow('2026-11-20T17:00:00Z')
+  const nov = (await one(`select public.push_test_targets((select slug from public.profiles where id = $1)) r`, [A])).r
+  ok('rappel en novembre : noel_streak null', nov.length === 1 && nov[0].noel_streak === null, JSON.stringify(nov))
+}
+
 console.log(failed ? '\nDES TESTS ONT ÉCHOUÉ' : '\nTous les tests passent')
 process.exit(failed ? 1 : 0)

@@ -1440,6 +1440,211 @@ begin
                             'streak', jsonb_build_object('current', v_cur, 'best', v_best), 'streak_bonus', v_sb);
 end $$;
 
+-- =============================================================================
+-- PASS DE NOËL (30 paliers de 150 ❄️) ET GRANDE HOTTE DE LA BANDE (5 paliers collectifs)
+-- Récompenses attribuées par _noel_claim (idempotent) ; un palier dont la récompense n'est pas
+-- encore livrée (effets du lot 2, tenues du lot 3) n'est PAS inscrit : la synchro le rattrapera.
+-- Tenues attendues (lot 3) : 'pere_noel' (palier 30 du pass), 'pyjama_noel' (palier 5 collectif).
+-- =============================================================================
+
+create table if not exists public.noel_claims (
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  event_key  text not null,
+  kind       text not null check (kind in ('pass', 'band')),
+  tier       integer not null,
+  coins      integer not null default 0,
+  item_id    text references public.items(id) on delete set null,
+  claimed_at timestamptz not null default now(),
+  primary key (profile_id, event_key, kind, tier)
+);
+alter table public.noel_claims enable row level security;
+
+-- Récompense d'un palier du pass -> {coins, item_id, ready}
+create or replace function public._noel_pass_reward(p_tier integer)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_coins integer := case p_tier
+    when 1 then 30 when 2 then 30 when 4 then 40 when 5 then 40 when 7 then 50 when 8 then 50
+    when 11 then 60 when 13 then 60 when 14 then 70 when 16 then 70 when 17 then 80 when 19 then 80
+    when 21 then 90 when 23 then 90 when 24 then 100 when 26 then 100 when 28 then 100 when 29 then 100
+    when 30 then 200 else 0 end;
+  v_item text := case p_tier
+    when 3 then 't_lutin_chef' when 6 then 'cb_papier_cadeau' when 9 then 'd_sucre_orge' when 10 then 'fx_neige'
+    when 12 then 'k_noel_traineau' when 15 then 'gb_boule_noel' when 18 then 'fx_traineau' when 20 then 'bb_buche'
+    when 22 then 'm_guirlande' when 25 then 'fx_sapins' when 27 then 'f_noel_houx' when 30 then 't_acharne_noel' end;
+  v_ready boolean;
+begin
+  v_ready := p_tier between 1 and 30
+    and (v_item is null or exists (select 1 from public.items where id = v_item))
+    and (p_tier <> 30 or exists (select 1 from public.tenues where id = 'pere_noel'));
+  return jsonb_build_object('coins', v_coins, 'item_id', v_item, 'ready', v_ready);
+end $$;
+
+create or replace function public._noel_band_tier(p_total integer)
+returns integer language sql immutable
+as $$
+  select case when p_total >= 38000 then 5 when p_total >= 30000 then 4 when p_total >= 22000 then 3
+              when p_total >= 14000 then 2 when p_total >= 6000 then 1 else 0 end
+$$;
+
+-- Récompense d'un palier collectif -> {coins, item_id, ready}
+create or replace function public._noel_band_reward(p_tier integer)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_coins integer := case p_tier when 1 then 100 when 4 then 250 when 5 then 500 else 0 end;
+  v_item text := case p_tier when 2 then 'fx_salon_neige' when 3 then 'f_noel_aurore' when 4 then 't_bande_noel' end;
+begin
+  return jsonb_build_object('coins', v_coins, 'item_id', v_item,
+    'ready', p_tier between 1 and 5
+             and (v_item is null or exists (select 1 from public.items where id = v_item))
+             and (p_tier <> 5 or exists (select 1 from public.tenues where id = 'pyjama_noel')));
+end $$;
+
+-- Total de la Grande Hotte (membres hors invités). Fonction à part : les tests la remplacent.
+create or replace function public._noel_band_total(p_key text)
+returns integer language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(sum((public._noel_flakes(p.id, p_key)->>'total')::int), 0)::int
+    from public.profiles p where not p.is_guest
+$$;
+
+-- -> {total, tier, contributors:[{profile_id, flakes}] (> 0, du plus grand au plus petit)}
+create or replace function public._noel_band(p_key text)
+returns jsonb language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  v_total integer := public._noel_band_total(p_key);
+begin
+  return jsonb_build_object('total', v_total, 'tier', public._noel_band_tier(v_total),
+    'contributors', coalesce((
+      select jsonb_agg(jsonb_build_object('profile_id', x.id, 'flakes', x.f) order by x.f desc, x.id)
+        from (select p.id, (public._noel_flakes(p.id, p_key)->>'total')::int f
+                from public.profiles p where not p.is_guest) x
+       where x.f > 0), '[]'::jsonb));
+end $$;
+
+-- Attribue les paliers atteints et prêts (pass + Grande Hotte si ≥ 400 ❄️ apportés).
+-- -> [{kind, tier, coins, item_id, compensated}] des NOUVELLES récompenses.
+create or replace function public._noel_claim(p_profile uuid, p_key text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_new   jsonb := '[]'::jsonb;
+  v_flk   integer;
+  v_kind  text;
+  v_top   integer;
+  t       integer;
+  v_rw    jsonb;
+  v_coins integer;
+  v_item  text;
+  v_comp  boolean;
+begin
+  if exists (select 1 from public.profiles where id = p_profile and is_guest) then return v_new; end if;
+  v_flk := (public._noel_flakes(p_profile, p_key)->>'total')::int;
+  foreach v_kind in array array['pass', 'band'] loop
+    if v_kind = 'pass' then
+      v_top := least(30, v_flk / 150);
+    elsif v_flk >= 400 then
+      v_top := public._noel_band_tier(public._noel_band_total(p_key));
+    else
+      v_top := 0;
+    end if;
+    for t in 1..v_top loop
+      continue when exists (select 1 from public.noel_claims c where c.profile_id = p_profile and c.event_key = p_key
+                                                                 and c.kind = v_kind and c.tier = t);
+      v_rw := case when v_kind = 'pass' then public._noel_pass_reward(t) else public._noel_band_reward(t) end;
+      continue when not (v_rw->>'ready')::boolean;
+      v_coins := (v_rw->>'coins')::int;
+      v_item := v_rw->>'item_id';
+      v_comp := false;
+      if v_item is not null and not public._grant_item(p_profile, v_item) then
+        v_item := null;
+        v_comp := true;
+        v_coins := v_coins + 100;
+      end if;
+      insert into public.noel_claims(profile_id, event_key, kind, tier, coins, item_id)
+      values (p_profile, p_key, v_kind, t, v_coins, v_item) on conflict do nothing;
+      continue when not found;
+      perform public._ledger_add(p_profile, v_coins, 'event_' || v_kind, p_key || ':' || t);
+      v_new := v_new || jsonb_build_object('kind', v_kind, 'tier', t, 'coins', v_coins, 'item_id', v_item, 'compensated', v_comp);
+    end loop;
+  end loop;
+  return v_new;
+end $$;
+
+-- État de l'événement pour le joueur (synchro des récompenses incluse).
+-- phase : before (novembre) | live (1er déc → 6 janv) | over (7 → 13 janv) | off.
+create or replace function public.noel_state()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me    uuid := public._require_member();
+  v_day   date := public._noel_day();
+  v_key   text := public._noel_key_for(v_day);
+  v_phase text;
+  b       record;
+  v_flk   jsonb;
+  v_tot   integer;
+  v_tier  integer;
+  v_band  jsonb;
+  v_ms    jsonb := '[]'::jsonb;
+  v_new   jsonb := '[]'::jsonb;
+  h       public.hotte_runs%rowtype;
+  m       text;
+begin
+  if v_key is not null then
+    v_phase := 'live';
+  elsif extract(month from v_day) = 1 and extract(day from v_day) between 7 and 13 then
+    v_phase := 'over';
+    v_key := 'noel-' || (extract(year from v_day)::int - 1);
+  elsif extract(month from v_day) = 11 then
+    v_phase := 'before';
+    v_key := 'noel-' || extract(year from v_day)::int;
+  else
+    v_phase := 'off';
+  end if;
+  select * into b from public._noel_bounds(v_key);
+
+  if v_phase in ('live', 'over') then
+    v_new := public._noel_claim(v_me, v_key);
+    v_flk := public._noel_flakes(v_me, v_key);
+    v_band := public._noel_band(v_key);
+  else
+    v_flk := jsonb_build_object('total', 0, 'streak', jsonb_build_object('current', 0, 'best', 0));
+    v_band := jsonb_build_object('total', 0, 'tier', 0, 'contributors', '[]'::jsonb);
+  end if;
+  v_tot := (v_flk->>'total')::int;
+  v_tier := least(30, v_tot / 150);
+
+  if v_phase = 'live' then
+    foreach m in array public._noel_missions(v_key, v_day) loop
+      v_ms := v_ms || jsonb_build_object('id', m, 'done', public._noel_mission_done(v_me, m, v_day));
+    end loop;
+    perform public._hotte_close_expired();
+    select * into h from public.hotte_runs where profile_id = v_me and day = v_day;
+  end if;
+
+  return jsonb_build_object(
+    'phase', v_phase, 'key', v_key, 'day', v_day, 'starts_on', b.starts_on, 'ends_on', b.ends_on,
+    'missions', v_ms,
+    'soiree_bonus', v_phase = 'live' and public._noel_soiree_bonus(v_me, v_day),
+    'hotte', jsonb_build_object(
+      'status', case when h.profile_id is null then 'todo' when h.finished_at is null then 'running' else 'done' end,
+      'score', coalesce(h.score, 0), 'flakes', 6 * coalesce(h.score, 0)),
+    'flakes', v_tot, 'tier', v_tier, 'next_at', case when v_tier < 30 then (v_tier + 1) * 150 end,
+    'streak', v_flk->'streak',
+    'band', v_band || jsonb_build_object('me', v_tot, 'eligible', v_tot >= 400),
+    'new_claims', v_new);
+end $$;
+
 revoke all on function public._noel_day() from public, anon, authenticated;
 revoke all on function public._noel_key_for(date) from public, anon, authenticated;
 revoke all on function public._noel_bounds(text) from public, anon, authenticated;
@@ -1450,6 +1655,14 @@ revoke all on function public._noel_missions(text, date) from public, anon, auth
 revoke all on function public._noel_mission_done(uuid, text, date) from public, anon, authenticated;
 revoke all on function public._noel_soiree_bonus(uuid, date) from public, anon, authenticated;
 revoke all on function public._noel_flakes(uuid, text) from public, anon, authenticated;
+revoke all on function public._noel_pass_reward(integer) from public, anon, authenticated;
+revoke all on function public._noel_band_tier(integer) from public, anon, authenticated;
+revoke all on function public._noel_band_reward(integer) from public, anon, authenticated;
+revoke all on function public._noel_band_total(text) from public, anon, authenticated;
+revoke all on function public._noel_band(text) from public, anon, authenticated;
+revoke all on function public._noel_claim(uuid, text) from public, anon, authenticated;
+revoke all on function public.noel_state() from public, anon;
+grant execute on function public.noel_state() to authenticated;
 
 
 -- ===== features\presence.sql =====
@@ -1839,7 +2052,20 @@ end $$;
 -- Abonnements des joueurs SANS tentative aujourd'hui (une tentative commencee mais
 -- non terminee ne peut plus etre rejouee : inutile de rappeler) et pas encore rappeles
 -- aujourd'hui. p_claim = true : marque last_reminded_day (anti-doublon, atomique).
--- -> [{endpoint, p256dh, auth, profile_id, nickname, streak}]
+-- -> [{endpoint, p256dh, auth, profile_id, nickname, streak, noel_streak}]
+-- noel_streak : série de l'événement de Noël (noel.sql) pendant une édition, sinon null (texte du rappel adapté).
+create or replace function public._push_noel_streak(p_profile uuid)
+returns integer language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare v_key text;
+begin
+  -- noel.sql est chargé après push.sql : appel dynamique résolu à l'exécution (plpgsql).
+  v_key := public._noel_key_for(public._noel_day());
+  if v_key is null then return null; end if;
+  return (public._noel_flakes(p_profile, v_key)->'streak'->>'current')::int;
+end $$;
+
 create or replace function public.push_daily_reminder_targets(p_claim boolean default true)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -1858,7 +2084,8 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
              'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
-             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id)))
+             'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id),
+             'noel_streak', public._push_noel_streak(s.profile_id)))
       from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
      where s.id = any(v_ids)), '[]'::jsonb);
 end $$;
@@ -1870,7 +2097,8 @@ set search_path = public, extensions
 as $$
   select coalesce(jsonb_agg(jsonb_build_object(
            'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'profile_id', s.profile_id,
-           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id))), '[]'::jsonb)
+           'nickname', p.nickname, 'streak', public._daily_streak(s.profile_id),
+           'noel_streak', public._push_noel_streak(s.profile_id))), '[]'::jsonb)
     from public.push_subscriptions s join public.profiles p on p.id = s.profile_id
    where p.slug = lower(btrim(p_slug))
 $$;
@@ -1916,6 +2144,7 @@ end $$;
 
 revoke all on function public.save_push_subscription(text, text, text, text) from public, anon;
 revoke all on function public.delete_push_subscription(text) from public, anon;
+revoke all on function public._push_noel_streak(uuid) from public, anon, authenticated;
 revoke all on function public.push_daily_reminder_targets(boolean) from public, anon, authenticated;
 revoke all on function public.push_test_targets(text) from public, anon, authenticated;
 revoke all on function public.push_report(text[], text[]) from public, anon, authenticated;

@@ -189,6 +189,26 @@ insert into public.items(id, slot, label, price, season, pass_tier) values
 on conflict (id) do update set slot = excluded.slot, label = excluded.label, price = excluded.price,
   season = excluded.season, pass_tier = excluded.pass_tier;
 
+-- Événement de Noël (noel.sql) : exclusifs du Pass de Noël (event_tier) et de la Grande Hotte (band_tier),
+-- jamais vendus. Miroir de src/data/cadeaux.ts.
+alter table public.items add column if not exists event text;
+alter table public.items add column if not exists event_tier integer;
+alter table public.items add column if not exists band_tier integer;
+insert into public.items(id, slot, label, event, event_tier, band_tier) values
+  ('t_lutin_chef', 'title', 'Lutin en chef', 'noel', 3, null),
+  ('cb_papier_cadeau', 'card_back', 'Papier cadeau', 'noel', 6, null),
+  ('d_sucre_orge', 'dice', 'Dés sucre d’orge', 'noel', 9, null),
+  ('k_noel_traineau', 'kart', 'Traîneau rouge', 'noel', 12, null),
+  ('gb_boule_noel', 'golf_ball', 'Boule de Noël', 'noel', 15, null),
+  ('bb_buche', 'bowling_ball', 'Bûche de Noël', 'noel', 20, null),
+  ('m_guirlande', 'marks', 'Guirlande lumineuse', 'noel', 22, null),
+  ('f_noel_houx', 'frame', 'Couronne de houx', 'noel', 27, null),
+  ('t_acharne_noel', 'title', 'Acharné de Noël', 'noel', 30, null),
+  ('f_noel_aurore', 'frame', 'Aurore de la bande', 'noel', null, 3),
+  ('t_bande_noel', 'title', 'La Bande de Noël', 'noel', null, 4)
+on conflict (id) do update set slot = excluded.slot, label = excluded.label, event = excluded.event,
+  event_tier = excluded.event_tier, band_tier = excluded.band_tier;
+
 create table if not exists public.profile_items (
   profile_id  uuid not null references public.profiles(id) on delete cascade,
   item_id     text not null references public.items(id) on delete cascade,

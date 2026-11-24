@@ -181,7 +181,7 @@ Chaque effet a **son propre slot** (on peut tous les équiper en même temps) ; 
 |---|---|---|
 | 1 | 6 000 ❄️ | 100 🪙 |
 | 2 | 14 000 ❄️ | ✨ effet **Salon enneigé** (`fx_salon_neige`) |
-| 3 | 22 000 ❄️ | 🌌 cadre animé **Aurore boréale** (exclusif, jamais vendu) |
+| 3 | 22 000 ❄️ | 🌌 cadre animé **Aurore de la bande** (exclusif, jamais vendu) |
 | 4 | 30 000 ❄️ | 250 🪙 + titre **« La Bande de Noël »** |
 | 5 | 38 000 ❄️ | 🎁 **Gros Lot** (ci-dessous) |
 
