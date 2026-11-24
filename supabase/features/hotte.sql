@@ -108,7 +108,7 @@ begin
 end $$;
 
 -- Les 5 manches du jour, AVEC les réponses (interne). Choix dans les banques : élément de rang
--- (c mod n) de la banque triée par md5(id || 'noel'), c = nombre de manches de ce type depuis le
+-- (c mod n) de la banque triée par md5(texte || 'noel') (stable si on recolle le SQL : ids serial changent), c = nombre de manches de ce type depuis le
 -- 1er décembre de l'édition (cycle sans répétition tant que la banque n'est pas épuisée).
 create or replace function public._hotte_rounds(p_day date)
 returns jsonb language plpgsql stable security definer
@@ -147,19 +147,19 @@ begin
     if v_t = 'quiz' then
       select count(*) into v_n from public.hotte_quiz;
       if v_n = 0 then raise exception 'hotte_empty'; end if;
-      select * into q from public.hotte_quiz order by md5(id::text || 'noel') offset (v_c % v_n) limit 1;
+      select * into q from public.hotte_quiz order by md5(prompt || 'noel'), id offset (v_c % v_n) limit 1;
       select jsonb_agg(o order by md5(v_seed || v_i || o)) into v_opts from unnest(q.distractors || q.answer) o;
       v_out := v_out || jsonb_build_object('type', 'quiz', 'prompt', q.prompt, 'options', v_opts, 'answer', q.answer);
     elsif v_t = 'chanson' then
       select count(*) into v_n from public.hotte_songs;
       if v_n = 0 then raise exception 'hotte_empty'; end if;
-      select * into q from public.hotte_songs order by md5(id::text || 'noel') offset (v_c % v_n) limit 1;
+      select * into q from public.hotte_songs order by md5(line || 'noel'), id offset (v_c % v_n) limit 1;
       select jsonb_agg(o order by md5(v_seed || v_i || o)) into v_opts from unnest(q.distractors || q.answer) o;
       v_out := v_out || jsonb_build_object('type', 'chanson', 'line', q.line, 'options', v_opts, 'answer', q.answer);
     elsif v_t = 'proche' then
       select count(*) into v_n from public.hotte_estimates;
       if v_n = 0 then raise exception 'hotte_empty'; end if;
-      select * into q from public.hotte_estimates order by md5(id::text || 'noel') offset (v_c % v_n) limit 1;
+      select * into q from public.hotte_estimates order by md5(prompt || 'noel'), id offset (v_c % v_n) limit 1;
       v_out := v_out || jsonb_build_object('type', 'proche', 'prompt', q.prompt, 'unit', q.unit,
                                            'answer', trim_scale(q.answer)::text);
     elsif v_t = 'memoire' then

@@ -182,6 +182,9 @@ declare
   v_cur    integer := 0;
   v_sb     integer := 0;
   v_isday  boolean := false;
+  v_soir   date[];
+  v_act    date[];
+  v_hot    jsonb;
 begin
   select * into b from public._noel_bounds(p_key);
   if b.starts_on is null or exists (select 1 from public.profiles where id = p_profile and is_guest) then
@@ -189,15 +192,33 @@ begin
   end if;
   v_last := least(v_today, b.ends_on);
   v_sur := public._noel_surprises(p_key);
+  -- Préchargements (une requête chacun au lieu d'une par jour) : jours à bonus soirée, scores de Hotte,
+  -- jours où le joueur a fait quelque chose qui peut valider une mission (les autres jours valent 0).
+  select coalesce(array_agg(distinct (m.finished_at at time zone 'Europe/Paris')::date), '{}') into v_soir
+    from public.match_players mp join public.matches m on m.id = mp.match_id
+   where mp.profile_id = p_profile and m.status = 'finished' and m.finished_at is not null
+     and (m.finished_at at time zone 'Europe/Paris')::date between b.starts_on and v_last
+     and (select count(*) from public.match_players x where x.match_id = m.id) >= 2;
+  select coalesce(jsonb_object_agg(h.day::text, h.score), '{}'::jsonb) into v_hot
+    from public.hotte_runs h where h.profile_id = p_profile and h.finished_at is not null and h.day between b.starts_on and v_last;
+  select coalesce(array_agg(distinct x.d), '{}') into v_act from (
+    select day d from public.daily_runs where profile_id = p_profile and finished_at is not null and day between b.starts_on and v_last
+    union select day from public.hotte_runs where profile_id = p_profile and finished_at is not null and day between b.starts_on and v_last
+    union select day from public.advent_opens where profile_id = p_profile and day between b.starts_on and v_last
+    union select (created_at at time zone 'Europe/Paris')::date from public.custom_cards where author_id = p_profile
+    union select (created_at at time zone 'Europe/Paris')::date from public.coin_challenges where challenger_id = p_profile
+    union select (bought_at at time zone 'Europe/Paris')::date from public.item_purchases where profile_id = p_profile) x
+   where x.d between b.starts_on and v_last;
   d := b.starts_on;
   while d <= v_last loop
     v_n := 0;
-    foreach m in array (public._noel_slot12(p_key, d) || v_sur[d - b.starts_on + 1]) loop
-      if public._noel_mission_done(p_profile, m, d) then v_n := v_n + 1; end if;
-    end loop;
-    v_bonus := public._noel_soiree_bonus(p_profile, d);
-    v_day := 30 * v_n + case when v_bonus then 30 else 0 end
-           + 6 * coalesce((select h.score from public.hotte_runs h where h.profile_id = p_profile and h.day = d and h.finished_at is not null), 0);
+    if d = any(v_act) then
+      foreach m in array (public._noel_slot12(p_key, d) || v_sur[d - b.starts_on + 1]) loop
+        if public._noel_mission_done(p_profile, m, d) then v_n := v_n + 1; end if;
+      end loop;
+    end if;
+    v_bonus := d = any(v_soir);
+    v_day := 30 * v_n + case when v_bonus then 30 else 0 end + 6 * coalesce((v_hot->>d::text)::int, 0);
     if v_day > 0 then v_by := v_by || jsonb_build_object(d::text, v_day); end if;
     v_sum := v_sum + v_day;
     v_isday := v_n > 0 or v_bonus;
@@ -278,40 +299,61 @@ begin
              and (p_tier <> 5 or exists (select 1 from public.tenues where id = 'pyjama_noel')));
 end $$;
 
--- Total de la Grande Hotte (membres hors invités). Fonction à part : les tests la remplacent.
-create or replace function public._noel_band_total(p_key text)
-returns integer language sql stable security definer
+-- Ancienne version (remplacée par _noel_all_flakes / _noel_band_override).
+drop function if exists public._noel_band_total(text);
+
+-- ❄️ de chaque membre de la bande, calculés UNE fois : {profile_id: total} (membres à 0 omis).
+create or replace function public._noel_all_flakes(p_key text)
+returns jsonb language sql stable security definer
 set search_path = public, extensions
 as $$
-  select coalesce(sum((public._noel_flakes(p.id, p_key)->>'total')::int), 0)::int
-    from public.profiles p where not p.is_guest
+  select coalesce(jsonb_object_agg(x.id, x.f) filter (where x.f > 0), '{}'::jsonb)
+    from (select p.id, (public._noel_flakes(p.id, p_key)->>'total')::int f
+            from public.profiles p where not p.is_guest) x
 $$;
 
+-- Total imposé de la Grande Hotte (null = vraie somme). Crochet pour les tests (remplacé par eux).
+create or replace function public._noel_band_override(p_key text)
+returns integer language sql stable
+as $$ select null::integer $$;
+
 -- -> {total, tier, contributors:[{profile_id, flakes}] (> 0, du plus grand au plus petit)}
-create or replace function public._noel_band(p_key text)
+create or replace function public._noel_band(p_key text, p_all jsonb)
 returns jsonb language plpgsql stable security definer
 set search_path = public, extensions
 as $$
 declare
-  v_total integer := public._noel_band_total(p_key);
+  v_total integer := coalesce(public._noel_band_override(p_key),
+                              (select coalesce(sum(v::int), 0)::int from jsonb_each_text(p_all) e(k, v)));
 begin
   return jsonb_build_object('total', v_total, 'tier', public._noel_band_tier(v_total),
     'contributors', coalesce((
-      select jsonb_agg(jsonb_build_object('profile_id', x.id, 'flakes', x.f) order by x.f desc, x.id)
-        from (select p.id, (public._noel_flakes(p.id, p_key)->>'total')::int f
-                from public.profiles p where not p.is_guest) x
-       where x.f > 0), '[]'::jsonb));
+      select jsonb_agg(jsonb_build_object('profile_id', e.k, 'flakes', e.v::int) order by e.v::int desc, e.k)
+        from jsonb_each_text(p_all) e(k, v)), '[]'::jsonb));
+end $$;
+drop function if exists public._noel_band(text);
+
+-- Version autonome (recalcule tout) : pour les appels isolés et les tests.
+create or replace function public._noel_claim(p_profile uuid, p_key text)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  return public._noel_claim(p_profile, p_key,
+    (public._noel_flakes(p_profile, p_key)->>'total')::int,
+    (public._noel_band(p_key, public._noel_all_flakes(p_key))->>'total')::int);
 end $$;
 
--- Attribue les paliers atteints et prêts (pass + Grande Hotte si ≥ 400 ❄️ apportés).
+-- Attribue les paliers atteints et prêts (pass + Grande Hotte si ≥ 400 ❄️ apportés), à partir des
+-- totaux déjà calculés par l'appelant (mes ❄️, total de la bande).
 -- -> [{kind, tier, coins, item_id, compensated}] des NOUVELLES récompenses.
-create or replace function public._noel_claim(p_profile uuid, p_key text)
+create or replace function public._noel_claim(p_profile uuid, p_key text, p_me integer, p_band integer)
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
 as $$
 declare
   v_new   jsonb := '[]'::jsonb;
-  v_flk   integer;
+  v_flk   integer := coalesce(p_me, 0);
   v_kind  text;
   v_top   integer;
   t       integer;
@@ -321,12 +363,11 @@ declare
   v_comp  boolean;
 begin
   if exists (select 1 from public.profiles where id = p_profile and is_guest) then return v_new; end if;
-  v_flk := (public._noel_flakes(p_profile, p_key)->>'total')::int;
   foreach v_kind in array array['pass', 'band'] loop
     if v_kind = 'pass' then
       v_top := least(30, v_flk / 150);
     elsif v_flk >= 400 then
-      v_top := public._noel_band_tier(public._noel_band_total(p_key));
+      v_top := public._noel_band_tier(coalesce(p_band, 0));
     else
       v_top := 0;
     end if;
@@ -388,9 +429,12 @@ begin
   select * into b from public._noel_bounds(v_key);
 
   if v_phase in ('live', 'over') then
-    v_new := public._noel_claim(v_me, v_key);
+    -- Une Hotte qui vient d'expirer compte tout de suite (avant le calcul des ❄️).
+    perform public._hotte_close_expired();
+    -- Chaque membre n'est calculé qu'une fois : mes ❄️ détaillés + le total de chacun.
     v_flk := public._noel_flakes(v_me, v_key);
-    v_band := public._noel_band(v_key);
+    v_band := public._noel_band(v_key, public._noel_all_flakes(v_key));
+    v_new := public._noel_claim(v_me, v_key, (v_flk->>'total')::int, (v_band->>'total')::int);
   else
     v_flk := jsonb_build_object('total', 0, 'streak', jsonb_build_object('current', 0, 'best', 0));
     v_band := jsonb_build_object('total', 0, 'tier', 0, 'contributors', '[]'::jsonb);
@@ -402,7 +446,6 @@ begin
     foreach m in array public._noel_missions(v_key, v_day) loop
       v_ms := v_ms || jsonb_build_object('id', m, 'done', public._noel_mission_done(v_me, m, v_day));
     end loop;
-    perform public._hotte_close_expired();
     select * into h from public.hotte_runs where profile_id = v_me and day = v_day;
   end if;
 
@@ -432,8 +475,10 @@ revoke all on function public._noel_flakes(uuid, text) from public, anon, authen
 revoke all on function public._noel_pass_reward(integer) from public, anon, authenticated;
 revoke all on function public._noel_band_tier(integer) from public, anon, authenticated;
 revoke all on function public._noel_band_reward(integer) from public, anon, authenticated;
-revoke all on function public._noel_band_total(text) from public, anon, authenticated;
-revoke all on function public._noel_band(text) from public, anon, authenticated;
+revoke all on function public._noel_all_flakes(text) from public, anon, authenticated;
+revoke all on function public._noel_band_override(text) from public, anon, authenticated;
+revoke all on function public._noel_band(text, jsonb) from public, anon, authenticated;
 revoke all on function public._noel_claim(uuid, text) from public, anon, authenticated;
+revoke all on function public._noel_claim(uuid, text, integer, integer) from public, anon, authenticated;
 revoke all on function public.noel_state() from public, anon;
 grant execute on function public.noel_state() to authenticated;

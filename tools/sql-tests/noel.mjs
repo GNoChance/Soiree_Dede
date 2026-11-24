@@ -259,13 +259,13 @@ await setNow('2026-12-11T20:00:00Z')
   const members = (await db.query(`select id from public.profiles where not is_guest`)).rows.map((r) => r.id)
   let sum = 0
   for (const p of members) sum += (await flakes(p)).total
-  const band = (await one(`select public._noel_band($1) r`, [KEY])).r
+  const band = (await one(`select public._noel_band($1, public._noel_all_flakes($1)) r`, [KEY])).r
   ok('Grande Hotte : total = somme des membres', band.total === sum, `${band.total} vs ${sum}`)
   ok('contributeurs : triés, sans les membres à 0', band.contributors.every((c, i, a) => c.flakes > 0 && (i === 0 || a[i - 1].flakes >= c.flakes)) && !band.contributors.some((c) => c.profile_id === I), JSON.stringify(band.contributors))
   ok('paliers collectifs', JSON.stringify(await Promise.all([0, 5999, 6000, 14000, 22000, 38000, 99999].map(async (t) => (await one(`select public._noel_band_tier($1) r`, [t])).r))) === '[0,0,1,2,3,5,5]')
 
   // Total simulé à 22 000 : paliers 1 et 3 pour les éligibles (≥ 400 ❄️), le 2 pas prêt
-  await db.query(`create or replace function public._noel_band_total(p_key text) returns integer language sql stable as $$ select 22000 $$`)
+  await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 22000 $$`)
   await state(uid(20))
   const bg = (await claims(G, 'band')).map((c) => c.tier).join(',')
   ok('éligible : paliers collectifs 1 et 3 (2 pas prêt)', bg === '1,3' && (await ledger(G, 'event_band')) === 100 && (await owns(G, 'f_noel_aurore')), bg)
@@ -276,9 +276,25 @@ await setNow('2026-12-11T20:00:00Z')
   await hotte(I, days[23], 2, 100)
   const si2 = await state(uid(22))
   ok('I à 402 ❄️ : éligible, paliers déjà atteints rattrapés', si2.r?.flakes === 402 && si2.r.band.eligible && (await claims(I, 'band')).map((c) => c.tier).join(',') === '1,3', JSON.stringify(si2.r?.band))
-  await db.query(`create or replace function public._noel_band_total(p_key text) returns integer language sql stable as $$ select 30000 $$`)
+  await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 30000 $$`)
   await state(uid(20))
   ok('palier collectif 4 : 250 pièces + titre', (await ledger(G, 'event_band')) === 350 && (await owns(G, 't_bande_noel')))
+
+  // Performance : les ❄️ de chaque membre sont calculés une fois par appel
+  const all = (await one(`select public._noel_all_flakes($1) r`, [KEY])).r
+  let same = true
+  for (const p of members) {
+    const t = (await flakes(p)).total
+    if ((all[p] ?? 0) !== t) same = false
+  }
+  ok('_noel_all_flakes = ❄️ de chaque membre (sans les 0)', same && Object.values(all).every((n) => n > 0), JSON.stringify(all))
+  const cf = await one(`select public._noel_claim($1, $2, 450, 22000) r`, [F, KEY])
+  ok('_noel_claim(profil, clé, mes ❄️, total bande) utilise les totaux passés', cf.r.filter((c) => c.kind === 'band').map((c) => c.tier).join(',') === '1,3', JSON.stringify(cf.r))
+  const t0 = Date.now()
+  await state(uid(20))
+  const ms = Date.now() - t0
+  console.log(`      (noel_state : ${ms} ms en PGlite)`)
+  ok('noel_state assez rapide (< 1,5 s en PGlite)', ms < 1500, `${ms} ms`)
 
   // Phases
   await setNow('2026-11-30T12:00:00Z')

@@ -56,6 +56,19 @@ for (let i = 1; i <= 6; i++) await db.query(`insert into public.hotte_quiz(promp
 for (let i = 1; i <= 4; i++) await db.query(`insert into public.hotte_songs(line, answer, distractors) values ($1, $2, $3)`, [`Mon beau ___ ${i}`, `sapin${i}`, [`x${i}`, `y${i}`, `z${i}`]])
 for (let i = 1; i <= 4; i++) await db.query(`insert into public.hotte_estimates(prompt, answer, unit) values ($1, $2, 'rennes')`, [`Combien ${i} ?`, 10 * i])
 
+// ---- Recoller le SQL (banques vidées puis remplies : nouveaux ids) ne change pas les Hottes
+{
+  const before = JSON.stringify([await roundsOf('2026-12-10'), await roundsOf('2026-12-20')])
+  const q = (await db.query(`select prompt, answer, distractors from public.hotte_quiz order by id`)).rows
+  const so = (await db.query(`select line, answer, distractors from public.hotte_songs order by id`)).rows
+  const es = (await db.query(`select prompt, answer, unit from public.hotte_estimates order by id`)).rows
+  await db.exec(`delete from public.hotte_quiz; delete from public.hotte_songs; delete from public.hotte_estimates`)
+  for (const r of q) await db.query(`insert into public.hotte_quiz(prompt, answer, distractors) values ($1, $2, $3)`, [r.prompt, r.answer, r.distractors])
+  for (const r of so) await db.query(`insert into public.hotte_songs(line, answer, distractors) values ($1, $2, $3)`, [r.line, r.answer, r.distractors])
+  for (const r of es) await db.query(`insert into public.hotte_estimates(prompt, answer, unit) values ($1, $2, $3)`, [r.prompt, r.answer, r.unit])
+  ok('banques recollées (nouveaux ids) : mêmes Hottes', JSON.stringify([await roundsOf('2026-12-10'), await roundsOf('2026-12-20')]) === before)
+}
+
 // ---- Hors période
 await setNow('2026-11-30T12:00:00Z')
 ok('avant le 1er décembre : fermée', (await start(uid(0))).err === 'hotte_closed')
