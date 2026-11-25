@@ -387,7 +387,8 @@
       "host",
       "cowboy",
       "irma",
-      "elf"
+      "elf",
+      "santa"
     ],
     "portraits": [
       "painter",
@@ -415,7 +416,8 @@
       "golfer",
       "host",
       "cowboy",
-      "elf"
+      "elf",
+      "santa"
     ]
   },
   "mika": {

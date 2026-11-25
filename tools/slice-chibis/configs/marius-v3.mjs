@@ -1,6 +1,8 @@
 // Marius — planches V3 (novembre 2026), 4 colonnes x 3 rangées, bustes sur fond noir (liseré blanc).
 // Ordre de lecture : joie colère pleurs boude / réflexion dodo bisou clin d'œil / surprise, amoureux, cool, champion (= gamer).
 const MAP = 'joie colere pleurs boude reflexion dodo bisou clin_oeil surprise amoureux cool gamer'.split(' ');
+// santa : image unique (portrait à gauche + grille à droite) séparée par composantes en marius-santa.png / marius-santa-portrait.png
+// (source : marius-santa-source.png), découpée une fois en grille puis bout de renne gommé à la main dans amoureux : hors de sheets.
 // Stickers serrés (liserés qui se touchent) -> découpe en grille.
 const GRID = ['tictactoe', 'archer', 'werewolf', 'painter'];
 // painter : sans « pockets » (sinon le contour noir du dessin est pris pour du fond).
@@ -11,5 +13,5 @@ export default {
   slug: 'marius',
   src: 'assets-source/costumes/marius-v3',
   sheets: 'admiral tycoon tictactoe coach strategist actor archer cinema philosopher bowler pirate pyro werewolf painter student teacher croupier spy star racer hacker chess golfer host cowboy elf'.split(' ').map(S),
-  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
+  portraits: 'painter student teacher croupier spy star strategist racer tycoon admiral tictactoe coach actor archer werewolf pyro pirate bowler philosopher cinema hacker chess golfer host cowboy elf santa'.split(' ').map((n) => ({ file: `marius-${n}-portrait.png`, dir: n, cutout: true })),
 };
