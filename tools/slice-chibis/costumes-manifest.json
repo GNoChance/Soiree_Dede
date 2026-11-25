@@ -86,7 +86,8 @@
       "host",
       "cowboy",
       "irma",
-      "elf"
+      "elf",
+      "santa"
     ],
     "portraits": [
       "tycoon",
@@ -114,7 +115,8 @@
       "host",
       "cowboy",
       "golfer",
-      "elf"
+      "elf",
+      "santa"
     ]
   },
   "cycy": {
