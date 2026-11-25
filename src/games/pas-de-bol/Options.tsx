@@ -22,7 +22,7 @@ export function PasDeBolOptions({ options, onChange }: GameOptionsProps) {
         <p className="text-sm leading-snug text-muted">108 cartes : chiffres, +2, Inversion, Passe, Jokers et Jokers +4.</p>
       ) : (
         <>
-          <p className="text-sm leading-snug text-muted">Le paquet classique + 9 cartes perso aux pouvoirs spéciaux :</p>
+          <p className="text-sm leading-snug text-muted">Le paquet classique + 10 cartes perso aux pouvoirs spéciaux :</p>
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
             {(Object.keys(PERSOS) as PersoSlug[]).map((slug) => (
               <div key={slug} className="flex w-16 shrink-0 flex-col items-center gap-0.5" title={`${PERSOS[slug].title} : ${PERSOS[slug].effect}`}>

@@ -12,7 +12,7 @@ import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import type { GamePlayProps, PlayerInfo } from '../types'
 import { ColorGlyph, PdbCardView } from './Card'
 import { DrawFlights, PeekModal, SplashLayer, useLogSplashes } from './Effects'
-import { COLOR_META, PDB_COLORS, PERSOS, hashOf, isPlayable, needsColor, needsTarget, pdbActions, sortHand } from './rules'
+import { COLOR_META, PDB_COLORS, PERSOS, cardLabel, hashOf, isPlayable, needsColor, needsPick, needsTarget, pdbActions, sortHand } from './rules'
 import type { PdbAction, PdbCard, PdbColor, PdbSecret, PdbState } from './types'
 
 type Get = (id: string) => PlayerInfo
@@ -57,7 +57,7 @@ function useMySecret(matchId: string, propSecret: unknown, ver: number | undefin
 /* Écran de jeu                                                                */
 /* -------------------------------------------------------------------------- */
 
-type Choice = { card: PdbCard; step: 'color' | 'target' }
+type Choice = { card: PdbCard; step: 'color' | 'target' | 'pick' }
 
 /** Gros symbole qui éclate sur la défausse quand une carte spéciale est posée. */
 const IMPACT: Partial<Record<PdbCard['kind'], string>> = { plus2: '+2', wild4: '+4', reverse: '⇄', skip: '⊘', wild: '🌈' }
@@ -124,7 +124,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
   const canPlay = (c: PdbCard) => myTurn && !busy && (drawnId ? c.id === drawnId : true) && isPlayable(s, c)
   const anyPlayable = myTurn && hand.some((c) => canPlay(c))
 
-  const play = async (c: PdbCard, extra: { color?: PdbColor; target?: string } = {}) => {
+  const play = async (c: PdbCard, extra: { color?: PdbColor; target?: string; pick?: string } = {}) => {
     if (!canPlay(c)) {
       if (myTurn) {
         fx.fail()
@@ -134,6 +134,8 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
     }
     if (needsColor(c) && !extra.color) return setChoice({ card: c, step: 'color' })
     if (needsTarget(c) && !extra.target) return setChoice({ card: c, step: 'target' })
+    // Va chercher ! : rien à reprendre si c'est la dernière carte (le joueur sort).
+    if (needsPick(c) && !extra.pick && hand.length > 1) return setChoice({ card: c, step: 'pick' })
     setChoice(null)
     setGhost(c.id)
     fx.slap()
@@ -294,6 +296,7 @@ export default function PasDeBolPlay({ matchId, state, secret, meId, players, ac
         onClose={() => setChoice(null)}
         onColor={(c, color) => void play(c, { color })}
         onTarget={(c, target) => void play(c, { target })}
+        onPick={(c, pick) => void play(c, { pick })}
       />
       <PeekModal peek={sec?.peek} get={get} />
       <DrawFlights s={s} meId={meId} />
@@ -752,7 +755,7 @@ function OpponentSeat({ s, id, index, get, left, total, cw, fanW, maxShow, canDe
 /* Choix de couleur / de cible                                                 */
 /* -------------------------------------------------------------------------- */
 
-function ChoiceSheets({ choice, s, get, meId, hand, onClose, onColor, onTarget }: { choice: Choice | null; s: PdbState; get: Get; meId: string; hand: PdbCard[]; onClose: () => void; onColor: (c: PdbCard, color: PdbColor) => void; onTarget: (c: PdbCard, target: string) => void }) {
+function ChoiceSheets({ choice, s, get, meId, hand, onClose, onColor, onTarget, onPick }: { choice: Choice | null; s: PdbState; get: Get; meId: string; hand: PdbCard[]; onClose: () => void; onColor: (c: PdbCard, color: PdbColor) => void; onTarget: (c: PdbCard, target: string) => void; onPick: (c: PdbCard, pick: string) => void }) {
   const card = choice?.card
   const perso = card?.kind === 'perso' && card.perso ? PERSOS[card.perso] : null
   const colorTitle = perso?.slug === 'cecile' ? 'Quelle couleur défausser ?' : 'Choisis la couleur'
@@ -811,6 +814,26 @@ function ChoiceSheets({ choice, s, get, meId, hand, onClose, onColor, onTarget }
               </motion.button>
             )
           })}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet open={choice?.step === 'pick'} onClose={onClose} title="Quelle carte ton chien rapporte ?">
+        {perso && <p className="mb-3 text-sm font-bold text-muted">{perso.emoji} {perso.title} : {perso.effect}</p>}
+        <div className="flex flex-wrap justify-center gap-3">
+          {[...s.pile].reverse().map((c, i) => (
+            <motion.button
+              key={c.id}
+              type="button"
+              initial={{ scale: 0, rotate: i % 2 ? 8 : -8 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ delay: i * 0.06, type: 'spring', stiffness: 400, damping: 15 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => card && onPick(card, c.id)}
+              aria-label={cardLabel(c)}
+            >
+              <PdbCardView card={c} w={84} />
+            </motion.button>
+          ))}
         </div>
       </BottomSheet>
     </>

@@ -20,7 +20,7 @@ as $$
                                               'value', p_value, 'perso', p_perso));
 $$;
 
--- Paquet complet (non mélangé). 108 cartes classiques + 9 cartes perso en mode « persos ».
+-- Paquet complet (non mélangé). 108 cartes classiques + 10 cartes perso en mode « persos ».
 create or replace function public._pdb_deck(p_persos boolean)
 returns jsonb language plpgsql immutable
 set search_path = public, extensions
@@ -51,7 +51,7 @@ begin
                                 public._pdb_card('wild4-' || k, null, 'wild4'));
   end loop;
   if p_persos then
-    foreach s in array array['kevin', 'cycy', 'dede', 'manon', 'mika', 'cecile', 'carole', 'marius', 'nini'] loop
+    foreach s in array array['kevin', 'cycy', 'dede', 'manon', 'mika', 'cecile', 'carole', 'marius', 'nini', 'cycy2'] loop
       v := v || jsonb_build_array(public._pdb_card('perso-' || s, null, 'perso', null, s));
     end loop;
   end if;
@@ -408,6 +408,8 @@ declare
   v_sidx     integer;
   v_stolen   jsonb;
   v_nd       text;
+  v_pick     text;
+  v_fetched  jsonb;
   p          text;
   i          integer;
 begin
@@ -531,6 +533,15 @@ begin
         raise exception 'invalid_color';
       end if;
     end if;
+    -- Va chercher ! (Cycy 2) : la carte à reprendre doit être visible sur la défausse (state.pile),
+    -- sauf si c'est la dernière carte du joueur (il sort, rien n'est rapporté).
+    if v_perso = 'cycy2' and jsonb_array_length(v_hand) > 1 then
+      v_pick := p_action->>'pick';
+      if v_pick is null or not exists (select 1 from jsonb_array_elements(coalesce(p_state->'pile', '[]'::jsonb)) e
+                                        where e->>'id' = v_pick) then
+        raise exception 'invalid_fetch';
+      end if;
+    end if;
     if v_perso in ('cycy', 'manon', 'carole') then
       v_target := p_action->>'target';
       if v_target is null or v_target = v_me or not ((p_state->'active') ? v_target) then
@@ -647,6 +658,24 @@ begin
         end if;
         p_state := p_state || jsonb_build_object('pending_draw', 0, 'pending_kind', null);
         p_server := p_server - 'pend_src';
+      elsif v_perso = 'cycy2' then
+        -- Va chercher ! : reprend en main la carte choisie, si elle est encore dans la défausse
+        -- (une carte visible a pu être remélangée dans la pioche : alors sans effet).
+        if v_pick is not null then
+          select (o - 1)::integer, e into v_sidx, v_fetched
+            from jsonb_array_elements(p_server->'discard') with ordinality as t(e, o)
+           where e->>'id' = v_pick order by o desc limit 1;
+          if v_fetched is not null then
+            p_server := jsonb_set(p_server, '{discard}', (p_server->'discard') - v_sidx);
+            v_hand := v_hand || jsonb_build_array(v_fetched);
+            p_server := jsonb_set(p_server, array['hands', v_me], v_hand);
+            p_state := jsonb_set(p_state, array['counts', v_me], to_jsonb(jsonb_array_length(v_hand)));
+            v_entry := v_entry || jsonb_build_object('fetched', v_fetched);
+            select coalesce(jsonb_agg(e order by o), '[]'::jsonb) into v_disc
+              from jsonb_array_elements(p_state->'pile') with ordinality as t(e, o) where e->>'id' <> v_pick;
+            p_state := p_state || jsonb_build_object('pile', v_disc);
+          end if;
+        end if;
       elsif v_perso = 'nini' then
         -- Glissade : chaque joueur (qui a encore des cartes) passe sa main au voisin, dans le sens du jeu.
         v_act := array(select a from jsonb_array_elements_text(p_state->'active') as t(a)

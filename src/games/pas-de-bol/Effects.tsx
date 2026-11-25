@@ -10,7 +10,7 @@ import { mood } from '@/features/soiree/players'
 import { serverNow } from '@/features/soiree/useServerClock'
 import type { PlayerInfo } from '../types'
 import { PdbCardView } from './Card'
-import { COLOR_META, PERSOS, sortHand } from './rules'
+import { COLOR_META, PERSOS, cardLabel, sortHand } from './rules'
 import type { PdbLogEntry, PdbPeek, PdbState } from './types'
 
 type Get = (id: string) => PlayerInfo
@@ -207,6 +207,7 @@ function SplashBody({ splash, get, meId }: { splash: Splash; get: Get; meId: str
         case 'carole': return `${target} pioche 3 cartes !`
         case 'marius': return e.blocked ? `Cumul de +${e.blocked} annulé !` : `${actor} se cache sous sa capuche : le joueur suivant passe son tour !`
         case 'nini': return `Tout le monde passe sa main au voisin !`
+        case 'cycy2': return e.fetched ? `Le chien de ${actor} rapporte : ${cardLabel(e.fetched)} !` : `${actor} lance la balle… mais le chien revient bredouille !`
       }
     })()
     return (

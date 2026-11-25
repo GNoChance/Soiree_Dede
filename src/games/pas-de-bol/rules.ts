@@ -23,6 +23,8 @@ export interface PersoMeta {
   effect: string
   needsColor?: boolean
   needsTarget?: boolean
+  /** Choisir une carte de la défausse visible (Va chercher !). */
+  needsPick?: boolean
 }
 
 export const PERSOS: Record<PersoSlug, PersoMeta> = {
@@ -35,6 +37,7 @@ export const PERSOS: Record<PersoSlug, PersoMeta> = {
   carole: { slug: 'carole', name: 'Karo', title: 'Coup de griffe', emoji: '🐱', expression: 'colere', effect: 'Le joueur de ton choix pioche 3 cartes.', needsTarget: true },
   marius: { slug: 'marius', name: 'Marius', title: 'Capuche', emoji: '🧥', expression: 'boude', effect: 'Bouclier : annule un cumul de +2/+4 qui te vise. Sinon, le joueur suivant passe son tour.' },
   nini: { slug: 'nini', name: 'Nini', title: 'Glissade', emoji: '🐧', expression: 'surprise', effect: 'Chacun passe sa main à son voisin, dans le sens du jeu.' },
+  cycy2: { slug: 'cycy2', name: 'Cycy', title: 'Va chercher !', emoji: '🐶', expression: 'clin_oeil', effect: 'Ton chien te rapporte une carte de la défausse : reprends-la en main.', needsPick: true },
 }
 
 export const KIND_LABEL: Record<PdbCard['kind'], string> = {
@@ -67,6 +70,7 @@ export function isPlayable(s: Pick<PdbState, 'pending_draw' | 'pending_kind' | '
 
 export const needsColor = (c: PdbCard) => c.kind === 'wild' || c.kind === 'wild4' || (c.kind === 'perso' && !!c.perso && !!PERSOS[c.perso].needsColor)
 export const needsTarget = (c: PdbCard) => c.kind === 'perso' && !!c.perso && !!PERSOS[c.perso].needsTarget
+export const needsPick = (c: PdbCard) => c.kind === 'perso' && !!c.perso && !!PERSOS[c.perso].needsPick
 
 const KIND_ORDER: Record<PdbCard['kind'], number> = { num: 0, plus2: 1, reverse: 2, skip: 3, wild: 4, wild4: 5, perso: 6 }
 
@@ -90,7 +94,7 @@ export function hashOf(s: string): number {
 }
 
 export const pdbActions = {
-  play: (card: string, extra: { color?: PdbColor; target?: string; announce?: boolean } = {}): PdbAction => ({ type: 'play', card, ...extra }),
+  play: (card: string, extra: { color?: PdbColor; target?: string; pick?: string; announce?: boolean } = {}): PdbAction => ({ type: 'play', card, ...extra }),
   draw: (): PdbAction => ({ type: 'draw' }),
   pass: (): PdbAction => ({ type: 'pass' }),
   lastCard: (): PdbAction => ({ type: 'last_card' }),

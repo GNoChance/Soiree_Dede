@@ -8,7 +8,7 @@
 
 export type PdbColor = 'tomate' | 'soleil' | 'menthe' | 'ciel'
 export type PdbKind = 'num' | 'plus2' | 'reverse' | 'skip' | 'wild' | 'wild4' | 'perso'
-export type PersoSlug = 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini'
+export type PersoSlug = 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini' | 'cycy2'
 
 export interface PdbCard {
   id: string
@@ -20,7 +20,7 @@ export interface PdbCard {
 }
 
 export type PdbLogEntry =
-  | { n: number; t: 'play'; p: string; card: PdbCard; color: PdbColor; target?: string; blocked?: number; discarded?: PdbCard[]; chosen?: PdbColor; stolen?: boolean; skipped?: boolean }
+  | { n: number; t: 'play'; p: string; card: PdbCard; color: PdbColor; target?: string; blocked?: number; discarded?: PdbCard[]; chosen?: PdbColor; stolen?: boolean; skipped?: boolean; fetched?: PdbCard }
   | { n: number; t: 'draw'; p: string; count: number; auto?: boolean; cumul?: boolean }
   | { n: number; t: 'pass'; p: string; auto?: boolean }
   | { n: number; t: 'announce'; p: string }
@@ -97,7 +97,7 @@ export interface PdbSecret {
 }
 
 export type PdbAction =
-  | { type: 'play'; card: string; color?: PdbColor; target?: string; announce?: boolean }
+  | { type: 'play'; card: string; color?: PdbColor; target?: string; announce?: boolean; /** Va chercher ! (cycy2) : id d'une carte de state.pile */ pick?: string }
   | { type: 'draw' }
   | { type: 'pass' }
   | { type: 'last_card' }

@@ -107,7 +107,7 @@ export type SoundName =
   | 'drumroll' | 'clock' | 'clock_last'
   // cartes (Pas de bol)
   | 'slap' | 'deal' | 'shuffle' | 'plus2' | 'plus4' | 'reverse' | 'skip' | 'wild' | 'bell'
-  | 'perso_kevin' | 'perso_cycy' | 'perso_dede' | 'perso_manon' | 'perso_mika' | 'perso_cecile' | 'perso_carole' | 'perso_marius' | 'perso_nini'
+  | 'perso_kevin' | 'perso_cycy' | 'perso_dede' | 'perso_manon' | 'perso_mika' | 'perso_cecile' | 'perso_carole' | 'perso_marius' | 'perso_nini' | 'perso_cycy2'
 
 const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
   // carte posée sur la table : claque sèche
@@ -160,6 +160,11 @@ const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
   perso_nini: (c) => {
     tone(c, { freq: 300, slideTo: 900, dur: 0.15, gain: 0.16 })
     tone(c, { freq: 900, slideTo: 300, start: 0.15, dur: 0.15, gain: 0.16 })
+  },
+  // Va chercher ! : deux petits « ouaf » (glissando court vers le grave).
+  perso_cycy2: (c) => {
+    tone(c, { freq: 520, slideTo: 260, dur: 0.09, type: 'square', gain: 0.1 })
+    tone(c, { freq: 560, slideTo: 280, start: 0.16, dur: 0.09, type: 'square', gain: 0.1 })
   },
   pop: (c) => tone(c, { freq: 620, slideTo: 220, dur: 0.1, gain: 0.22 }),
   tick: (c) => tone(c, { freq: 1400, dur: 0.035, type: 'square', gain: 0.08 }),

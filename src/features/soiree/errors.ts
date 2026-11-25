@@ -62,6 +62,7 @@ const MESSAGES: Record<string, string> = {
   not_a_player: 'Tu ne joues pas cette partie.',
   not_alive: 'Tu as été éliminé·e : tu regardes la partie.',
   invalid_target: 'Ce joueur ne peut pas être choisi.',
+  invalid_fetch: 'Choisis une carte de la défausse.',
   cannot_vote_self: 'Pas le droit de voter pour toi-même !',
   // Pas de bol !
   not_your_turn: 'Ce n’est pas ton tour !',
