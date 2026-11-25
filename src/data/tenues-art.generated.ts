@@ -85,6 +85,33 @@ export const TENUE_ART: readonly string[] = [
   'cycy/irma',
   'cycy/elf',
   'cycy/santa',
+  'cycy2/star',
+  'cycy2/spy',
+  'cycy2/croupier',
+  'cycy2/teacher',
+  'cycy2/student',
+  'cycy2/painter',
+  'cycy2/werewolf',
+  'cycy2/pyro',
+  'cycy2/pirate',
+  'cycy2/bowler',
+  'cycy2/philosopher',
+  'cycy2/cinema',
+  'cycy2/archer',
+  'cycy2/actor',
+  'cycy2/coach',
+  'cycy2/strategist',
+  'cycy2/tictactoe',
+  'cycy2/admiral',
+  'cycy2/tycoon',
+  'cycy2/hacker',
+  'cycy2/chess',
+  'cycy2/cowboy',
+  'cycy2/golfer',
+  'cycy2/host',
+  'cycy2/irma',
+  'cycy2/elf',
+  'cycy2/santa',
   'dede/star',
   'dede/spy',
   'dede/croupier',
@@ -338,6 +365,32 @@ export const TENUE_PORTRAITS: readonly string[] = [
   'cycy/cowboy',
   'cycy/elf',
   'cycy/santa',
+  'cycy2/star',
+  'cycy2/spy',
+  'cycy2/croupier',
+  'cycy2/teacher',
+  'cycy2/student',
+  'cycy2/painter',
+  'cycy2/werewolf',
+  'cycy2/pyro',
+  'cycy2/pirate',
+  'cycy2/bowler',
+  'cycy2/philosopher',
+  'cycy2/cinema',
+  'cycy2/archer',
+  'cycy2/actor',
+  'cycy2/coach',
+  'cycy2/strategist',
+  'cycy2/tictactoe',
+  'cycy2/admiral',
+  'cycy2/tycoon',
+  'cycy2/hacker',
+  'cycy2/chess',
+  'cycy2/cowboy',
+  'cycy2/golfer',
+  'cycy2/host',
+  'cycy2/elf',
+  'cycy2/santa',
   'dede/tycoon',
   'dede/admiral',
   'dede/tictactoe',
@@ -759,6 +812,87 @@ export const TENUE_ART_BAD: readonly string[] = [
   'cycy/santa/pouces',
   'cycy/santa/timide',
   'cycy/santa/determine',
+  'cycy2/star/pouces',
+  'cycy2/star/timide',
+  'cycy2/star/determine',
+  'cycy2/spy/pouces',
+  'cycy2/spy/timide',
+  'cycy2/spy/determine',
+  'cycy2/croupier/pouces',
+  'cycy2/croupier/timide',
+  'cycy2/croupier/determine',
+  'cycy2/teacher/pouces',
+  'cycy2/teacher/timide',
+  'cycy2/teacher/determine',
+  'cycy2/student/pouces',
+  'cycy2/student/timide',
+  'cycy2/student/determine',
+  'cycy2/painter/pouces',
+  'cycy2/painter/timide',
+  'cycy2/painter/determine',
+  'cycy2/werewolf/pouces',
+  'cycy2/werewolf/timide',
+  'cycy2/werewolf/determine',
+  'cycy2/pyro/pouces',
+  'cycy2/pyro/timide',
+  'cycy2/pyro/determine',
+  'cycy2/pirate/pouces',
+  'cycy2/pirate/timide',
+  'cycy2/pirate/determine',
+  'cycy2/bowler/pouces',
+  'cycy2/bowler/timide',
+  'cycy2/bowler/determine',
+  'cycy2/philosopher/pouces',
+  'cycy2/philosopher/timide',
+  'cycy2/philosopher/determine',
+  'cycy2/cinema/pouces',
+  'cycy2/cinema/timide',
+  'cycy2/cinema/determine',
+  'cycy2/archer/pouces',
+  'cycy2/archer/timide',
+  'cycy2/archer/determine',
+  'cycy2/actor/pouces',
+  'cycy2/actor/timide',
+  'cycy2/actor/determine',
+  'cycy2/coach/pouces',
+  'cycy2/coach/timide',
+  'cycy2/coach/determine',
+  'cycy2/strategist/pouces',
+  'cycy2/strategist/timide',
+  'cycy2/strategist/determine',
+  'cycy2/tictactoe/pouces',
+  'cycy2/tictactoe/timide',
+  'cycy2/tictactoe/determine',
+  'cycy2/admiral/pouces',
+  'cycy2/admiral/timide',
+  'cycy2/admiral/determine',
+  'cycy2/tycoon/pouces',
+  'cycy2/tycoon/timide',
+  'cycy2/tycoon/determine',
+  'cycy2/hacker/pouces',
+  'cycy2/hacker/timide',
+  'cycy2/hacker/determine',
+  'cycy2/chess/pouces',
+  'cycy2/chess/timide',
+  'cycy2/chess/determine',
+  'cycy2/cowboy/pouces',
+  'cycy2/cowboy/timide',
+  'cycy2/cowboy/determine',
+  'cycy2/golfer/pouces',
+  'cycy2/golfer/timide',
+  'cycy2/golfer/determine',
+  'cycy2/host/pouces',
+  'cycy2/host/timide',
+  'cycy2/host/determine',
+  'cycy2/irma/pouces',
+  'cycy2/irma/timide',
+  'cycy2/irma/determine',
+  'cycy2/elf/pouces',
+  'cycy2/elf/timide',
+  'cycy2/elf/determine',
+  'cycy2/santa/pouces',
+  'cycy2/santa/timide',
+  'cycy2/santa/determine',
   'dede/star/pouces',
   'dede/star/timide',
   'dede/star/determine',
@@ -1683,6 +1817,141 @@ export const TENUE_ART_FILL: Readonly<Record<string, Readonly<Record<string, str
     "determine": "gamer"
   },
   "cycy/santa": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/star": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/spy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/croupier": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/teacher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/student": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/painter": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/werewolf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/pyro": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/pirate": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/bowler": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/philosopher": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/cinema": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/archer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/actor": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/coach": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/strategist": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/tictactoe": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/admiral": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/tycoon": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/hacker": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/chess": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/cowboy": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/golfer": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/host": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/irma": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/elf": {
+    "pouces": "amoureux",
+    "timide": "cool",
+    "determine": "gamer"
+  },
+  "cycy2/santa": {
     "pouces": "amoureux",
     "timide": "cool",
     "determine": "gamer"
