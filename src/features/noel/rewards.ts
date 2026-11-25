@@ -42,5 +42,5 @@ export const NOEL_BAND_REWARDS: { label: string; emoji: string; soon?: boolean }
   { label: 'Effet « Salon enneigé »', emoji: '🌨️' },
   { label: 'Cadre animé « Aurore de la bande »', emoji: '🌌' },
   { label: '250 pièces + titre « La Bande de Noël »', emoji: '🎄' },
-  { label: 'Gros Lot : tenue Pyjama de Noël, soirée secrète, trophée, 500 pièces, plaque souvenir', emoji: '🎁', soon: true },
+  { label: 'Gros Lot : 500 pièces, trophée « Esprit d’équipe 2026 », thème secret « Le Réveillon de la Bande », plaque souvenir dans l’album (et la tenue Pyjama de Noël fin décembre)', emoji: '🎁' },
 ]

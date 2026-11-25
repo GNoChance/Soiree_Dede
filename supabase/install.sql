@@ -6367,7 +6367,9 @@ as $$
               when p_total >= 14000 then 2 when p_total >= 6000 then 1 else 0 end
 $$;
 
--- Récompense d'un palier collectif -> {coins, item_id, ready}
+-- Récompense d'un palier collectif -> {coins, item_id, ready}. Palier 5 (Gros Lot) : 500 pièces + trophée
+-- « Esprit d'équipe <année> » (cf. _noel_claim) + thème secret du Réveillon + plaque de l'album ; la tenue
+-- Pyjama de Noël est débloquée par ce trophée dès que son art existe (tenues.sql), sans attendre ici.
 create or replace function public._noel_band_reward(p_tier integer)
 returns jsonb language plpgsql stable security definer
 set search_path = public, extensions
@@ -6378,8 +6380,7 @@ declare
 begin
   return jsonb_build_object('coins', v_coins, 'item_id', v_item,
     'ready', p_tier between 1 and 5
-             and (v_item is null or exists (select 1 from public.items where id = v_item))
-             and (p_tier <> 5 or exists (select 1 from public.tenues where id = 'pyjama_noel')));
+             and (v_item is null or exists (select 1 from public.items where id = v_item)));
 end $$;
 
 -- Ancienne version (remplacée par _noel_all_flakes / _noel_band_override).
@@ -6471,6 +6472,10 @@ begin
       values (p_profile, p_key, v_kind, t, v_coins, v_item) on conflict do nothing;
       continue when not found;
       perform public._ledger_add(p_profile, v_coins, 'event_' || v_kind, p_key || ':' || t);
+      -- Gros Lot : trophée daté de l'édition (absent du catalogue = rien).
+      if v_kind = 'band' and t = 5 then
+        perform public.evaluate_trophy(p_profile, 'gen_esprit_equipe_' || split_part(p_key, '-', 2));
+      end if;
       v_new := v_new || jsonb_build_object('kind', v_kind, 'tier', t, 'coins', v_coins, 'item_id', v_item, 'compensated', v_comp);
     end loop;
   end loop;
@@ -6545,6 +6550,33 @@ begin
     'new_claims', v_new);
 end $$;
 
+-- A-t-il reçu le Gros Lot d'une édition (palier 5 de la Grande Hotte) ? Thème secret du Réveillon.
+create or replace function public._noel_gros_lot_ok(p_profile uuid)
+returns boolean language sql stable security definer
+set search_path = public, extensions
+as $$
+  select exists (select 1 from public.noel_claims where profile_id = p_profile and kind = 'band' and tier = 5)
+$$;
+
+-- Gros Lot de la dernière édition (album, Réveillon) -> {key, year, reached, mine, total, contributors}.
+-- Dernière édition = celle de décembre de cette année (en décembre) ou de l'an dernier (janvier → novembre).
+create or replace function public.noel_gros_lot()
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me   uuid := public._require_member();
+  v_day  date := public._noel_day();
+  v_year integer := extract(year from v_day)::int - case when extract(month from v_day) = 12 then 0 else 1 end;
+  v_key  text := 'noel-' || v_year;
+  v_band jsonb := public._noel_band(v_key, public._noel_all_flakes(v_key));
+begin
+  return jsonb_build_object('key', v_key, 'year', v_year,
+    'reached', (v_band->>'tier')::int >= 5,
+    'mine', exists (select 1 from public.noel_claims where profile_id = v_me and event_key = v_key and kind = 'band' and tier = 5),
+    'total', (v_band->>'total')::int, 'contributors', v_band->'contributors');
+end $$;
+
 -- Aperçu admin (LECTURE SEULE, rien n'est écrit) : l'état de l'événement comme au jour p_day
 -- (missions de ce jour, Hotte « à faire », aucune récompense) + les 5 manches de la Hotte de ce jour
 -- AVEC les réponses (le front corrige en local). -> {state, rounds}
@@ -6606,6 +6638,9 @@ revoke all on function public.noel_state() from public, anon;
 grant execute on function public.noel_state() to authenticated;
 revoke all on function public.noel_preview(date) from public, anon;
 grant execute on function public.noel_preview(date) to authenticated;
+revoke all on function public._noel_gros_lot_ok(uuid) from public, anon, authenticated;
+revoke all on function public.noel_gros_lot() from public, anon;
+grant execute on function public.noel_gros_lot() to authenticated;
 
 
 -- ===== features\presence.sql =====
@@ -7596,7 +7631,9 @@ begin
   if exists (select 1 from public.matches m where m.soiree_id = p_soiree_id and m.status <> 'finished') then
     raise exception 'match_in_progress';
   end if;
-  if p_theme is null or p_theme not in ('noel', 'nouvel-an', 'surprise')
+  -- 'bande' : thème secret « Le Réveillon de la Bande », réservé à un hôte qui a reçu le Gros Lot de Noël.
+  if p_theme is null or not (p_theme in ('noel', 'nouvel-an', 'surprise')
+                             or (p_theme = 'bande' and public._noel_gros_lot_ok(v_s.host_id)))
      or p_rounds is null or p_rounds not in (4, 6, 8)
      or cardinality(v_ch) not between 1 and 60 then
     raise exception 'reveillon_invalid';
@@ -9069,6 +9106,10 @@ begin
           select count(*) as c from public.soiree_players sp
            where sp.soiree_id in (select soiree_id from public.soiree_players where profile_id = p_profile)
            group by sp.soiree_id) x;
+      when 'noel_band' then
+        -- Gros Lot de la Grande Hotte (noel.sql) pour l'édition rule.key
+        select count(*) into v from public.noel_claims
+         where profile_id = p_profile and event_key = p_rule->>'key' and kind = 'band' and tier = 5;
       when 'stickers' then
         -- compteur persistant (le chat est purgé en fin de soirée), incrémenté par send_soiree_message
         select coalesce(max(stickers_sent), 0) into v from public.player_stats where profile_id = p_profile;
@@ -9525,7 +9566,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
   ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230),
   ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231),
-  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232)
+  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232),
+  ('gen_esprit_equipe_2026', null, null, 'Esprit d''équipe 2026', 'Remplir la Grande Hotte de Noël 2026 avec la bande (Gros Lot)', null, '{"agg":"special","name":"noel_band","key":"noel-2026","threshold":1}'::jsonb, true, 233)
 on conflict (id) do update
   set tenue_id = excluded.tenue_id, slot = excluded.slot, name = excluded.name, description = excluded.description,
       game_id = excluded.game_id, rule = excluded.rule, active = excluded.active, sort_order = excluded.sort_order;

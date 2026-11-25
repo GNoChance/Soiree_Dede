@@ -8,6 +8,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { rpcErrorMessage } from '@/lib/rpcError'
 import { AlbumLeaf } from './AlbumLeaf'
 import { AlbumCover } from './AlbumCover'
+import { AlbumPlaque } from './AlbumPlaque'
+import { useGrosLot } from '@/features/noel/grosLot'
 import { albumYearFrom, useAlbum } from './api'
 
 /** /album : le livre de l'année, feuilleté page par page (boutons, glissement ou flèches du clavier). */
@@ -18,7 +20,11 @@ export function AlbumPage() {
   const { data, error, loading } = useAlbum(year)
   const [page, setPage] = useState(0)
   const [dir, setDir] = useState(1)
-  const total = (data?.soirees.length ?? 0) + 1 // couverture + une page par soirée
+  // Plaque souvenir du Gros Lot de Noël : juste après la couverture de l'année de l'édition.
+  const lot = useGrosLot()
+  const plaque = lot?.reached && lot.year === year ? lot : null
+  const extra = plaque ? 1 : 0
+  const total = (data?.soirees.length ?? 0) + 1 + extra // couverture (+ plaque) + une page par soirée
 
   const go = useCallback(
     (d: number) => {
@@ -81,7 +87,13 @@ export function AlbumPage() {
                 onDragEnd={onDragEnd}
                 className="touch-pan-y pb-2 pr-1"
               >
-                {page === 0 ? <AlbumCover year={year} soirees={data.soirees} /> : <AlbumLeaf soiree={data.soirees[page - 1]} />}
+                {page === 0 ? (
+                  <AlbumCover year={year} soirees={data.soirees} />
+                ) : plaque && page === 1 ? (
+                  <AlbumPlaque lot={plaque} />
+                ) : (
+                  <AlbumLeaf soiree={data.soirees[page - 1 - extra]} />
+                )}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -89,7 +101,7 @@ export function AlbumPage() {
           {total > 1 && (
             <div className="flex items-center gap-3">
               <Button size="lg" variant="secondary" aria-label="Page précédente" disabled={page === 0} onClick={() => go(-1)} icon={<ChevronLeft className="size-6" />} />
-              <p className="flex-1 text-center font-extrabold text-muted">{page === 0 ? 'Couverture' : `Soirée ${page} / ${total - 1}`}</p>
+              <p className="flex-1 text-center font-extrabold text-muted">{page === 0 ? 'Couverture' : plaque && page === 1 ? '🎄 Plaque souvenir' : `Soirée ${page - extra} / ${total - 1 - extra}`}</p>
               <Button size="lg" aria-label="Page suivante" disabled={page >= total - 1} onClick={() => go(1)} icon={<ChevronRight className="size-6" />} />
             </div>
           )}

@@ -294,6 +294,20 @@ await setNow('2026-12-11T20:00:00Z')
   ok('_noel_all_flakes = ❄️ de chaque membre (sans les 0)', same && Object.values(all).every((n) => n > 0), JSON.stringify(all))
   const cf = await one(`select public._noel_claim($1, $2, 450, 22000) r`, [F, KEY])
   ok('_noel_claim(profil, clé, mes ❄️, total bande) utilise les totaux passés', cf.r.filter((c) => c.kind === 'band').map((c) => c.tier).join(',') === '1,2,3', JSON.stringify(cf.r))
+
+  // Gros Lot (palier 5, 38 000 ❄️) : 500 pièces + trophée « Esprit d'équipe 2026 », sans attendre la tenue Pyjama
+  await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 38000 $$`)
+  const sg5 = await state(uid(20))
+  const g5 = sg5.r?.new_claims.find((c) => c.kind === 'band' && c.tier === 5)
+  ok('Gros Lot : palier 5 attribué (500 pièces)', g5?.coins === 500, JSON.stringify(sg5.r?.new_claims ?? sg5.err))
+  ok('Gros Lot : trophée Esprit d’équipe 2026', !!(await one(`select 1 x from public.trophy_unlocks where profile_id = $1 and trophy_id = 'gen_esprit_equipe_2026'`, [G])))
+  const gl = await call(uid(20), `select public.noel_gros_lot() r`)
+  ok('noel_gros_lot : atteint, à moi, contributeurs', gl.r?.reached === true && gl.r.mine === true && gl.r.key === KEY && gl.r.contributors.length > 0, JSON.stringify(gl.r ?? gl.err))
+  const poor = (await one(`select id from public.profiles p where not is_guest and coalesce((public._noel_all_flakes($1)->>p.id::text)::int, 0) < 400 order by sort_order limit 1`, [KEY])).id
+  await db.query(`insert into public.device_sessions(auth_uid, profile_id) values ($1, $2) on conflict do nothing`, [uid(40), poor])
+  const gp = await call(uid(40), `select public.noel_gros_lot() r`)
+  ok('noel_gros_lot : atteint mais pas à moi (< 400 ❄️)', gp.r?.reached === true && gp.r.mine === false, JSON.stringify(gp.r ?? gp.err))
+  await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 30000 $$`)
   const t0 = Date.now()
   await state(uid(20))
   const ms = Date.now() - t0

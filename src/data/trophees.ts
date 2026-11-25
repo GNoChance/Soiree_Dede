@@ -308,6 +308,7 @@ export const TROPHIES: TrophyDef[] = [
   { id: "gen_collectionneur", tenue: null, slot: null, name: "Collectionneur", condition: "Compléter une planche de tenue (les 11 trophées)", game: null, active: true, target: 11 },
   { id: "gen_madame_irma", tenue: null, slot: null, name: "Madame Irma", condition: "3 bons pronostics d'affilée", game: null, active: true, target: 3 },
   { id: "gen_esprit_noel", tenue: null, slot: null, name: "Esprit de Noël", condition: "Ouvrir 12 cases du calendrier de l'Avent", game: null, active: true, target: 12 },
+  { id: "gen_esprit_equipe_2026", tenue: null, slot: null, name: "Esprit d'équipe 2026", condition: "Remplir la Grande Hotte de Noël 2026 avec la bande (Gros Lot)", game: null, active: true, target: 1 },
 ]
 
 const BY_ID = new Map(TROPHIES.map((t) => [t.id, t]))

@@ -9,7 +9,8 @@ import { fx } from '@/lib/feedback'
 import { toast } from '@/store/toast'
 import { toastError } from '@/features/soiree/errors'
 import { ROUND_CHOICES, compatibleGameIds, startReveillon } from './api'
-import { THEME_LIST, challengeIds, defaultTheme, getTheme, type ThemeId } from './themes'
+import { THEMES, THEME_LIST, challengeIds, defaultTheme, getTheme, type ThemeId } from './themes'
+import { useGrosLot } from '@/features/noel/grosLot'
 
 /**
  * Carte de l'hôte au salon : « Mode Réveillon » -> choix du thème et du nombre de manches,
@@ -22,6 +23,9 @@ export function ReveillonLauncher({ soireeId, playerCount, disabled }: { soireeI
   const [rounds, setRounds] = useState<number>(6)
   const [busy, setBusy] = useState(false)
   const t = getTheme(theme)
+  // Thème secret « Le Réveillon de la Bande » : seulement pour un hôte qui a reçu le Gros Lot de Noël.
+  const lot = useGrosLot(open)
+  const themes = lot?.mine ? [THEMES.bande, ...THEME_LIST] : THEME_LIST
   const games = compatibleGameIds(playerCount)
 
   const go = async () => {
@@ -73,7 +77,7 @@ export function ReveillonLauncher({ soireeId, playerCount, disabled }: { soireeI
 
           <div className="flex flex-col gap-2">
             <p className="font-display text-lg font-extrabold">1. Le thème</p>
-            {THEME_LIST.map((th) => {
+            {themes.map((th) => {
               const sel = th.id === theme
               return (
                 <motion.button

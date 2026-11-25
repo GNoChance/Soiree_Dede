@@ -24,7 +24,9 @@ export function NoelCelebrations() {
   }, [open])
   const pass = queue.filter((c) => c.kind === 'pass')
   const band = queue.filter((c) => c.kind === 'band')
-  const title = band.length && !pass.length
+  const title = band.some((c) => c.tier === 5)
+    ? '🎁 LE GROS LOT DE LA BANDE !'
+    : band.length && !pass.length
     ? '🛷 La Grande Hotte avance !'
     : pass.length === 1 && !band.length
       ? `🎄 Pass de Noël : palier ${pass[0].tier} !`
@@ -67,12 +69,14 @@ function ClaimRow({ c }: { c: NoelClaim }) {
       className="sticker-sm flex items-center gap-3 rounded-card bg-surface p-2"
     >
       <div className="flex size-14 shrink-0 items-center justify-center text-4xl">
-        {it ? <ItemPreview it={it} size={52} /> : '🪙'}
+        {it ? <ItemPreview it={it} size={52} /> : c.kind === 'band' && c.tier === 5 ? '🎁' : '🪙'}
       </div>
       <div className="min-w-0 flex-1 text-left">
-        <p className="font-display font-extrabold">{c.kind === 'band' ? `Grande Hotte · palier ${c.tier}` : `Pass · palier ${c.tier}`}</p>
+        <p className="font-display font-extrabold">{c.kind === 'band' ? (c.tier === 5 ? '🎁 Gros Lot de la Grande Hotte' : `Grande Hotte · palier ${c.tier}`) : `Pass · palier ${c.tier}`}</p>
         <p className="text-sm font-bold">
-          {c.compensated
+          {c.kind === 'band' && c.tier === 5
+            ? `${c.coins} pièces, trophée « Esprit d’équipe », thème secret du Réveillon et plaque souvenir dans l’album !`
+            : c.compensated
             ? `Objet déjà à toi : ${c.coins} pièces à la place`
             : it
               ? `${it.label}${c.coins > 0 ? ` + ${c.coins} pièces` : ''}`

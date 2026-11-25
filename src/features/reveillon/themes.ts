@@ -6,7 +6,7 @@ import { parisMonthDay } from '@/features/noel/season'
  * chaque manche. Placeholders : {gagnant} (un gagnant de la manche), {perdant} (dernier
  * classé), {joueur} (quelqu'un du salon tiré au sort). Ajouter un défi = une ligne ici.
  */
-export type ThemeId = 'noel' | 'nouvel-an' | 'surprise'
+export type ThemeId = 'noel' | 'nouvel-an' | 'surprise' | 'bande'
 
 export interface ReveillonTheme {
   id: ThemeId
@@ -47,6 +47,17 @@ export const THEMES: Record<ThemeId, ReveillonTheme> = {
     color: '#ff8fa3',
     decor: ['🎈', '🎉', '🎊', '🌟', '🎁', '🥳'],
     outro: 'Quelle soirée ! On remet ça quand vous voulez.',
+  },
+  // Thème SECRET (Gros Lot de la Grande Hotte de Noël) : proposé seulement à un hôte qui l'a reçu
+  // (noel_gros_lot().mine côté front, _noel_gros_lot_ok dans reveillon_start côté serveur). Textes : Fable.
+  bande: {
+    id: 'bande',
+    name: 'Le Réveillon de la Bande',
+    emoji: '🛷',
+    tagline: 'Vous avez rempli la Grande Hotte : voici votre réveillon secret, avec des défis rien que pour la bande !',
+    color: '#74c0fc',
+    decor: ['❄️', '🛷', '🎅', '🏆', '🤝', '✨'],
+    outro: 'Bravo la bande : une Grande Hotte bien remplie et un réveillon dont on reparlera longtemps !',
   },
 }
 
@@ -103,6 +114,19 @@ export const CHALLENGES: Challenge[] = [
   { id: 's_ovation', theme: 'surprise', emoji: '👏', text: 'Standing ovation pour {gagnant} ! Tout le monde se lève et applaudit pendant 10 secondes.' },
   { id: 's_anniversaire', theme: 'surprise', emoji: '🎂', text: '{perdant} chante « Joyeux anniversaire » à la personne la plus proche, même si ce n’est pas son anniversaire.' },
   { id: 's_tope', theme: 'surprise', emoji: '✋', text: 'Tournée de « tope-là » : {gagnant} invente un tope-là original pour chaque personne.' },
+  // --- Le Réveillon de la Bande (thème secret, Grande Hotte remplie ; textes Fable) ---
+  { id: 'b_cri_ralliement', theme: 'bande', emoji: '📣', text: '{gagnant} invente le cri de ralliement de la bande. À trois, tout le monde le pousse en chœur, le poing levé !' },
+  { id: 'b_hotte_imaginaire', theme: 'bande', emoji: '🎅', text: '{joueur} fait circuler une hotte imaginaire : chacun y glisse à voix haute un cadeau pour toute la bande (un fou rire, des vacances, une raclette géante…).' },
+  { id: 'b_neige_champion', theme: 'bande', emoji: '❄️', text: 'Il neige sur {gagnant} ! Toute la bande agite les doigts comme des flocons qui tombent, pendant 10 secondes de gloire bien méritée.' },
+  { id: 'b_surnom', theme: 'bande', emoji: '🏷️', text: '{joueur} raconte d’où vient son surnom dans la bande. Sans surnom, pas de panique : la bande lui en offre un tout neuf, et très gentil !' },
+  { id: 'b_souvenir_bande', theme: 'bande', emoji: '💭', text: '{joueur} commence par « Vous vous souvenez de la fois où… » et raconte un souvenir de la bande en 30 secondes. Les autres ont le droit d’ajouter les détails oubliés !' },
+  { id: 'b_photo_officielle', theme: 'bande', emoji: '📸', text: 'Photo officielle de la bande ! Tout le monde se serre autour de {gagnant} et crie « Flocooons ! » à la place de « ouistiti ».' },
+  { id: 'b_dede_a_dit', theme: 'bande', emoji: '🎤', text: 'Dédé a dit ! {gagnant} donne trois ordres rigolos à la bande, comme à « Jacques a dit » : sans « Dédé a dit » au début, il ne faut surtout pas obéir.' },
+  { id: 'b_discours_hotte', theme: 'bande', emoji: '🏆', text: '{perdant} prononce le discours officiel, qui commence par « Chère bande, nous avons rempli la Grande Hotte… » et s’improvise pendant 15 secondes. Applaudissements obligatoires !' },
+  { id: 'b_flocon_or', theme: 'bande', emoji: '🏅', text: '{perdant} remet le Flocon d’or de la soirée à la personne qui l’a le plus fait rire, et explique pourquoi.' },
+  { id: 'b_hymne_dede', theme: 'bande', emoji: '🎶', text: '{perdant} choisit un air que tout le monde connaît. La bande le chante en chœur en remplaçant toutes les paroles par « Dédé » !' },
+  { id: 'b_compte_flocons', theme: 'bande', emoji: '🔢', text: 'La bande compte jusqu’à 10 flocons : n’importe qui dit le nombre suivant, mais une seule voix à la fois. Si deux personnes parlent en même temps, on repart à 1 (trois essais maximum) !' },
+  { id: 'b_mission_couleur', theme: 'bande', emoji: '🎯', text: 'Mission express ! {joueur} annonce une couleur et toute la bande a 10 secondes pour toucher un objet de cette couleur : mission réussie si personne ne reste les mains vides.' },
 ]
 
 export const getChallenge = (id: string | null | undefined): Challenge | undefined => CHALLENGES.find((c) => c.id === id)

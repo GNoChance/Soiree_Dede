@@ -119,7 +119,9 @@ begin
   if exists (select 1 from public.matches m where m.soiree_id = p_soiree_id and m.status <> 'finished') then
     raise exception 'match_in_progress';
   end if;
-  if p_theme is null or p_theme not in ('noel', 'nouvel-an', 'surprise')
+  -- 'bande' : thème secret « Le Réveillon de la Bande », réservé à un hôte qui a reçu le Gros Lot de Noël.
+  if p_theme is null or not (p_theme in ('noel', 'nouvel-an', 'surprise')
+                             or (p_theme = 'bande' and public._noel_gros_lot_ok(v_s.host_id)))
      or p_rounds is null or p_rounds not in (4, 6, 8)
      or cardinality(v_ch) not between 1 and 60 then
     raise exception 'reveillon_invalid';

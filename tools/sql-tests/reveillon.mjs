@@ -125,4 +125,14 @@ ok('soirée terminée : plus d’action', (await next(0)).err?.includes('soiree_
 const solo = (await call(3, `select public.create_soiree('{}'::uuid[]) r`)).r.id
 ok('seul dans le salon : not_enough_players', (await call(3, `select public.reveillon_start($1, 'noel', 4, $2::text[], $3::text[]) r`, [solo, arr(GAMES), arr(CH)])).err?.includes('not_enough_players'))
 
+// Thème secret « Le Réveillon de la Bande » : réservé à un hôte qui a reçu le Gros Lot (palier 5 de la Grande Hotte)
+{
+  const s2 = (await call(1, `select public.create_soiree($1::uuid[]) r`, [arr([C, D])])).r.id
+  const bande = () => call(1, `select public.reveillon_start($1, 'bande', 4, $2::text[], $3::text[]) r`, [s2, arr(GAMES), arr(['b_un', 'b_deux'])])
+  ok('thème bande : refusé sans le Gros Lot', (await bande()).err?.includes('reveillon_invalid'))
+  await sys(`insert into public.noel_claims(profile_id, event_key, kind, tier, coins) values ($1, 'noel-2026', 'band', 5, 500)`, [B])
+  const ok2 = await bande()
+  ok('thème bande : accepté pour un hôte qui a le Gros Lot', ok2.r?.theme === 'bande', JSON.stringify(ok2))
+}
+
 process.exit(failed ? 1 : 0)

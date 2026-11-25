@@ -173,6 +173,10 @@ begin
           select count(*) as c from public.soiree_players sp
            where sp.soiree_id in (select soiree_id from public.soiree_players where profile_id = p_profile)
            group by sp.soiree_id) x;
+      when 'noel_band' then
+        -- Gros Lot de la Grande Hotte (noel.sql) pour l'édition rule.key
+        select count(*) into v from public.noel_claims
+         where profile_id = p_profile and event_key = p_rule->>'key' and kind = 'band' and tier = 5;
       when 'stickers' then
         -- compteur persistant (le chat est purgé en fin de soirée), incrémenté par send_soiree_message
         select coalesce(max(stickers_sent), 0) into v from public.player_stats where profile_id = p_profile;
@@ -629,7 +633,8 @@ insert into public.trophies (id, tenue_id, slot, name, description, game_id, rul
   ('gen_garde_robe', null, null, 'Garde-robe', 'Débloquer 5 tenues', null, '{"agg":"special","name":"tenues","threshold":5}'::jsonb, true, 229),
   ('gen_collectionneur', null, null, 'Collectionneur', 'Compléter une planche de tenue (les 11 trophées)', null, '{"agg":"special","name":"full_board","threshold":11}'::jsonb, true, 230),
   ('gen_madame_irma', null, null, 'Madame Irma', '3 bons pronostics d''affilée', null, '{"agg":"special","name":"prono_streak","threshold":3}'::jsonb, true, 231),
-  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232)
+  ('gen_esprit_noel', null, null, 'Esprit de Noël', 'Ouvrir 12 cases du calendrier de l''Avent', null, '{"agg":"special","name":"advent","threshold":12}'::jsonb, true, 232),
+  ('gen_esprit_equipe_2026', null, null, 'Esprit d''équipe 2026', 'Remplir la Grande Hotte de Noël 2026 avec la bande (Gros Lot)', null, '{"agg":"special","name":"noel_band","key":"noel-2026","threshold":1}'::jsonb, true, 233)
 on conflict (id) do update
   set tenue_id = excluded.tenue_id, slot = excluded.slot, name = excluded.name, description = excluded.description,
       game_id = excluded.game_id, rule = excluded.rule, active = excluded.active, sort_order = excluded.sort_order;
