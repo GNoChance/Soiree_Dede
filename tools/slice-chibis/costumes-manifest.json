@@ -145,7 +145,8 @@
       "host",
       "cowboy",
       "irma",
-      "elf"
+      "elf",
+      "santa"
     ],
     "portraits": [
       "spy",
@@ -173,7 +174,8 @@
       "golfer",
       "host",
       "cowboy",
-      "elf"
+      "elf",
+      "santa"
     ]
   },
   "dede": {
