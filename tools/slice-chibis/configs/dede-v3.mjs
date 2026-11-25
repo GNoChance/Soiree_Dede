@@ -8,6 +8,6 @@ const S = (name) => ({ name, file: `dede-${name}.png`, n: 12, dir: name, map: MA
 export default {
   slug: 'dede',
   src: 'assets-source/costumes/dede-v3',
-  sheets: 'star spy croupier teacher student painter werewolf pyro pirate bowler philosopher cinema archer actor coach strategist tictactoe admiral racer tycoon hacker chess golfer host elf'.split(' ').map(S),
-  portraits: 'tycoon admiral tictactoe coach actor archer pyro pirate bowler painter cinema werewolf philosopher student spy teacher croupier star racer strategist hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `dede-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'star spy croupier teacher student painter werewolf pyro pirate bowler philosopher cinema archer actor coach strategist tictactoe admiral racer tycoon hacker chess golfer host elf santa'.split(' ').map(S),
+  portraits: 'tycoon admiral tictactoe coach actor archer pyro pirate bowler painter cinema werewolf philosopher student spy teacher croupier star racer strategist hacker chess golfer host cowboy elf santa'.split(' ').map((n) => ({ file: `dede-${n}-portrait.png`, dir: n, cutout: true })),
 };
