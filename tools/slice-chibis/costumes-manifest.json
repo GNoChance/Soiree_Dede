@@ -576,7 +576,8 @@
       "host",
       "irma",
       "elf",
-      "santa"
+      "santa",
+      "racer"
     ],
     "portraits": [
       "star",
@@ -604,7 +605,8 @@
       "golfer",
       "host",
       "elf",
-      "santa"
+      "santa",
+      "racer"
     ]
   }
 }
