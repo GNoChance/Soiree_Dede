@@ -117,7 +117,7 @@ ok('classement général sans invité', !(await one(`select 1 x from public.lead
 ok('classement par jeu sans invité', !(await one(`select 1 x from public.leaderboard_by_game where profile_id = $1`, [G])) &&
   !!(await one(`select 1 x from public.leaderboard_by_game where profile_id = $1 and game_id = 'morpion'`, [A])))
 const wk = (await call(uid(0), `select public.leaderboard_week() r`)).r
-ok('classement de la semaine sans invité', wk.rows.every((r) => r.profile_id !== G && r.profile_id !== G2) && wk.rows.length === 9, String(wk.rows.length))
+ok('classement de la semaine sans invité', wk.rows.every((r) => r.profile_id !== G && r.profile_id !== G2) && wk.rows.length === (await one(`select count(*)::int n from public.profiles where not is_guest`)).n, String(wk.rows.length))
 const ss = (await call(UG, `select public.soiree_standings($1) r`, [sid])).r
 ok('classement de la soirée avec l’invité', ss?.standings.some((r) => r.profile_id === G && r.wins === 1), JSON.stringify(ss))
 

@@ -20,7 +20,8 @@ const cfgPath = args.find((a) => a.endsWith('.mjs'));
 const preview = args.includes('--preview');
 const only = args.filter((a) => !a.startsWith('--') && a !== cfgPath);
 const CFG = (await import(pathToFileURL(path.resolve(cfgPath)).href)).default;
-const SIZE = 256, THUMB = 128, MARGIN = 9, Q = 88, RING = 5;
+// size / thumb : tenue de base (default) en 512 / 160 comme les planches de slice.mjs.
+const SIZE = CFG.size ?? 256, THUMB = CFG.thumb ?? 128, MARGIN = Math.round(9 * SIZE / 256), Q = 88, RING = 5;
 const PSIZE = 512, PTHUMB = 160;
 const CHECK = path.join(HERE, 'out-check');
 fs.mkdirSync(CHECK, { recursive: true });

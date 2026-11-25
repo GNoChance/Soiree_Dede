@@ -129,7 +129,7 @@ function FinalCard({ r, onShare, onSouvenir, busy, onDone, doneLabel }: { r: Soi
   return (
     <div className={cn(BASE, 'bg-sun')}>
       <div className="flex flex-wrap justify-center -space-x-2">
-        {r.players.slice(0, 9).map((p, i) => (
+        {r.players.slice(0, 10).map((p, i) => (
           <motion.div key={p.profile_id} animate={{ y: [0, -8, 0] }} transition={{ repeat: Infinity, duration: 1.4, delay: i * 0.15 }}>
             <Avatar slug={p.slug} tenue={p.equipped_tenue} expression="joie" size={64} />
           </motion.div>

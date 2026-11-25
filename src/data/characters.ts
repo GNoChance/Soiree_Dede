@@ -2,7 +2,7 @@ import type { ExpressionId } from './expressions'
 import { emojiAvatarOf, guestSpriteUrl, isEmojiSlug } from './guests'
 
 export type CharacterSlug =
-  | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini'
+  | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini' | 'cycy2'
 
 export interface Character {
   slug: CharacterSlug
@@ -39,6 +39,8 @@ export const CHARACTERS: Character[] = [
   { slug: 'carole', firstName: 'Carole', nickname: 'Karo', color: '#FB8500', expressions: CAROLE },
   { slug: 'marius', firstName: 'Marius', nickname: 'Marius', color: '#3A86FF', expressions: STANDARD },
   { slug: 'nini', firstName: 'Nicolas', nickname: 'Nini', color: '#7AE582', expressions: NINI },
+  // Cyrielle, la copine de Nini (même surnom que Cycy : le slug les distingue). Tenue de base seulement pour l'instant.
+  { slug: 'cycy2', firstName: 'Cyrielle', nickname: 'Cycy', color: '#D4A373', expressions: STANDARD },
 ]
 
 export const CHARACTERS_BY_SLUG = Object.fromEntries(

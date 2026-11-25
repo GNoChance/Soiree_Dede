@@ -26,6 +26,7 @@ export const VOICES: Record<CharacterSlug, Voice> = {
   carole: { intros: ['Petit coup de griffe !', 'Miaou, regarde là :'], chutes: ['Je rentre les griffes si tu rejoues.', 'Ronron… à la prochaine !'], bravo: 'Tu m’as bien eue, bravo !', learned: 'J’ai flairé quelque chose :' },
   marius: { intros: ['Bon. Regarde.', 'Bah, c’est simple :'], chutes: ['Voilà.', 'T’inquiète, ça arrive.'], bravo: 'Pas mal. Vraiment.', learned: 'J’ai vu un truc :' },
   nini: { intros: ['Oups, ça a glissé là :', 'Attends, je te montre (sans tomber) :'], chutes: ['Moi aussi je glisse souvent !', 'On se relève et on y retourne !'], bravo: 'Waouh, j’ai rien vu venir !', learned: 'J’ai fini par comprendre :' },
+  cycy2: { intros: ['Attends, je t’explique :', 'Regarde bien, c’est là :'], chutes: ['La prochaine, c’est la bonne !', 'On s’en refait une ?'], bravo: 'Trop forte, j’adore !', learned: 'J’ai bien retenu un truc :' },
 }
 
 const FEMININE = new Set<CharacterSlug>(['cycy', 'dede', 'manon', 'cecile', 'carole'])

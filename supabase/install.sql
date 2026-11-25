@@ -23211,7 +23211,7 @@ revoke all on function public.game_tu_preferes_action(jsonb, jsonb, uuid, boolea
 
 -- ===== seed.sql =====
 -- =============================================================================
--- Soirées de Dédé — seed des 9 profils (idempotent)
+-- Soirées de Dédé — seed des 10 profils (idempotent)
 -- À exécuter APRÈS schema.sql. Ne touche jamais au PIN, à l'XP ni au pseudo
 -- d'un profil existant (on conflict : prénom, expressions et ordre seulement).
 -- =============================================================================
@@ -23225,7 +23225,9 @@ insert into public.profiles (slug, first_name, nickname, expressions, sort_order
   ('cecile', 'Cécile',   'Cécile', array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','amoureux','cool','gamer'], 6),
   ('carole', 'Carole',   'Karo',   array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','pouces','timide','charmee'], 7),
   ('marius', 'Marius',   'Marius', array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','amoureux','cool','gamer'], 8),
-  ('nini',   'Nicolas',  'Nini',   array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','pouces','timide','gamer'], 9)
+  ('nini',   'Nicolas',  'Nini',   array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','pouces','timide','gamer'], 9),
+  -- Cyrielle, la copine de Nini (surnom « Cycy » comme l'autre Cyrielle ; slug cycy2)
+  ('cycy2',  'Cyrielle', 'Cycy',   array['joie','colere','pleurs','boude','reflexion','dodo','bisou','clin_oeil','surprise','amoureux','cool','gamer'], 10)
 on conflict (slug) do update
   set first_name  = excluded.first_name,
       expressions = excluded.expressions,

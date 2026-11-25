@@ -15,7 +15,7 @@ export type ExpressionId =
   | 'pouces' | 'timide' | 'charmee' | 'determine';
 
 export type ProfileSlug =
-  | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini';
+  | 'kevin' | 'cycy' | 'dede' | 'manon' | 'mika' | 'cecile' | 'carole' | 'marius' | 'nini' | 'cycy2';
 
 /** Map profile_id -> expressions nouvellement débloquées (entrées non vides seulement). */
 export type NewUnlocks = Record<UUID, ExpressionId[]>;
