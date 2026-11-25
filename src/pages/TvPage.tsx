@@ -17,6 +17,7 @@ import { isDuelState } from '@/features/duel/tv'
 import { Reactions } from '@/features/reactions/Reactions'
 import { useWakeLock } from '@/lib/wakeLock'
 import { cn } from '@/lib/cn'
+import { SnowLayer } from '@/components/ui/SnowLayer'
 
 /** Plein écran du navigateur (si disponible). */
 function useFullscreen() {
@@ -173,7 +174,9 @@ export function TvPage() {
   }
 
   return (
-    <div className="pt-safe pb-safe pl-safe pr-safe fixed inset-0 z-30 flex flex-col bg-paper">
+    <div className="pt-safe pb-safe pl-safe pr-safe fixed inset-0 z-30 isolate flex flex-col bg-paper">
+      {/* Effet « Salon enneigé » de l'hôte (slot fx_salon) : neige légère en fond de l'écran télé. */}
+      {soireeData && byId[soireeData.soiree.host_id]?.equippedItems?.fx_salon === 'fx_salon_neige' && <SnowLayer className="-z-10" count={30} size={26} duration={13} />}
       <header className="flex shrink-0 items-center gap-2 border-b-[3px] border-ink bg-surface px-3 py-1.5">
         <span className="text-2xl">{state && tvGame ? (game?.emoji ?? '📺') : '📺'}</span>
         <div className="flex min-w-0 flex-1 items-center gap-2">

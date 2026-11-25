@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { saveLaunch, type LauncherPreset } from '@/features/soiree/rematch'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { SnowLayer } from '@/components/ui/SnowLayer'
 import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -152,7 +153,9 @@ export function SoireePage() {
   return (
     // Hôte : la barre « C'est parti ! » est fixée en bas ; la page réserve sa hauteur
     // mesurée pour que la fin (« Terminer la soirée ») reste atteignable.
-    <div className="flex flex-col gap-5 pb-10" style={isHost && barH ? { paddingBottom: barH + 16 } : undefined}>
+    <div className="isolate flex flex-col gap-5 pb-10" style={isHost && barH ? { paddingBottom: barH + 16 } : undefined}>
+      {/* Effet « Salon enneigé » de l'hôte (slot fx_salon) : neige légère derrière le salon. */}
+      {byId[soiree.host_id]?.equippedItems?.fx_salon === 'fx_salon_neige' && <SnowLayer fixed className="-z-10" count={22} size={18} duration={11} />}
       <div className="flex items-center gap-2">
         {!isGuest && <button
           type="button"
@@ -394,21 +397,35 @@ function CodeCard({ code }: { code: string }) {
 }
 
 function PlayersGrid({ ids, hostId, meId, byId, onKick, noLinks }: { ids: string[]; hostId: string; meId: string; byId: ReturnType<typeof usePlayers>['byId']; onKick?: (id: string) => void; noLinks?: boolean }) {
+  const reduce = useReducedMotion()
   return (
     <div className="grid grid-cols-3 gap-y-5 pt-3">
       <AnimatePresence>
         {ids.map((id, i) => {
           const p = playerOrPlaceholder(byId, id)
+          // Effet « Entrée en traîneau » (slot fx_entree) : l'avatar glisse depuis la gauche sur un traîneau (1 s).
+          const sled = !reduce && p.equippedItems?.fx_entree === 'fx_traineau'
           return (
             <motion.div
               key={id}
               layout
-              initial={{ scale: 0, rotate: -30 }}
-              animate={{ scale: 1, rotate: 0 }}
+              initial={sled ? { x: -320, scale: 1, rotate: 0 } : { scale: 0, rotate: -30 }}
+              animate={sled ? { x: 0, scale: 1, rotate: 0 } : { scale: 1, rotate: 0 }}
               exit={{ scale: 0, rotate: 30, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 14 }}
+              transition={sled ? { duration: 1, ease: [0.2, 0.8, 0.3, 1] } : { type: 'spring', stiffness: 380, damping: 14 }}
               className="relative flex justify-center"
             >
+              {sled && (
+                <motion.span
+                  aria-hidden
+                  className="pointer-events-none absolute top-11 left-1/2 z-10 -translate-x-1/2 text-5xl"
+                  initial={{ opacity: 1, rotate: -8 }}
+                  animate={{ opacity: [1, 1, 0], rotate: [-8, 4, 0] }}
+                  transition={{ duration: 1.6, times: [0, 0.7, 1] }}
+                >
+                  🛷
+                </motion.span>
+              )}
               {/* Invités (mode invité) : pas de page profil, ni pour eux ni pour les voir. */}
               {noLinks || p.isGuest ? (
                 <PlayerToken player={p} host={id === hostId} bounce delay={i * 0.17} size={72} showTitle label={id === meId ? `${p.nickname} (toi)` : p.isGuest ? `${p.nickname} 👋` : p.nickname} />

@@ -237,11 +237,15 @@ await setNow('2026-12-11T20:00:00Z')
   ok('pièces des paliers 1..9 = 240', (await ledger(G, 'event_pass')) === 240, String(await ledger(G, 'event_pass')))
   ok('objets des paliers 3, 6, 9', (await owns(G, 't_lutin_chef')) && (await owns(G, 'cb_papier_cadeau')) && (await owns(G, 'd_sucre_orge')))
   ok('new_claims renvoyés une seule fois', sg.r?.new_claims.filter((c) => c.kind === 'pass').length === 9 && (await state(uid(20))).r.new_claims.length === 0)
-  // Palier 10 (effet, lot 2) pas prêt : sauté, le 11 est attribué
+  // Palier 10 : effet « Neige sur l'avatar » (lot 2), puis équipable dans son propre slot
   await perfect(G, 11, 2)
   await state(uid(20))
   const cg2 = (await claims(G)).map((c) => c.tier)
-  ok('palier 10 pas prêt : non attribué, 11 attribué', !cg2.includes(10) && cg2.includes(11), cg2.join(','))
+  ok('palier 10 : effet Neige attribué, 11 aussi', cg2.includes(10) && cg2.includes(11) && (await owns(G, 'fx_neige')), cg2.join(','))
+  const eq = await call(uid(20), `select public.equip_item('fx_avatar', 'fx_neige') r`)
+  ok('effet équipé dans le slot fx_avatar', eq.r?.fx_avatar === 'fx_neige', JSON.stringify(eq))
+  ok('effet : mauvais slot refusé', (await call(uid(20), `select public.equip_item('frame', 'fx_neige') r`)).err?.includes('item_invalid_slot'))
+  ok('les 4 effets existent, chacun dans son slot', (await one(`select string_agg(id || ':' || slot, ',' order by id) r from public.items where id like 'fx\_%'`)).r === 'fx_neige:fx_avatar,fx_salon_neige:fx_salon,fx_sapins:fx_victoire,fx_traineau:fx_entree', (await one(`select string_agg(id || ':' || slot, ',' order by id) r from public.items where id like 'fx\_%'`)).r)
   // Idempotence
   const before = [await ledger(G, 'event_pass'), (await claims(G)).length]
   await state(uid(20))
@@ -264,18 +268,18 @@ await setNow('2026-12-11T20:00:00Z')
   ok('contributeurs : triés, sans les membres à 0', band.contributors.every((c, i, a) => c.flakes > 0 && (i === 0 || a[i - 1].flakes >= c.flakes)) && !band.contributors.some((c) => c.profile_id === I), JSON.stringify(band.contributors))
   ok('paliers collectifs', JSON.stringify(await Promise.all([0, 5999, 6000, 14000, 22000, 38000, 99999].map(async (t) => (await one(`select public._noel_band_tier($1) r`, [t])).r))) === '[0,0,1,2,3,5,5]')
 
-  // Total simulé à 22 000 : paliers 1 et 3 pour les éligibles (≥ 400 ❄️), le 2 pas prêt
+  // Total simulé à 22 000 : paliers 1, 2 (Salon enneigé) et 3 pour les éligibles (≥ 400 ❄️)
   await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 22000 $$`)
   await state(uid(20))
   const bg = (await claims(G, 'band')).map((c) => c.tier).join(',')
-  ok('éligible : paliers collectifs 1 et 3 (2 pas prêt)', bg === '1,3' && (await ledger(G, 'event_band')) === 100 && (await owns(G, 'f_noel_aurore')), bg)
+  ok('éligible : paliers collectifs 1, 2 et 3', bg === '1,2,3' && (await ledger(G, 'event_band')) === 100 && (await owns(G, 'f_noel_aurore')) && (await owns(G, 'fx_salon_neige')), bg)
   // I : 3 jours parfaits = 390 ❄️ -> pas éligible, puis 402 -> rattrapage
   await perfect(I, 20, 3)
   const si = await state(uid(22))
   ok('I à 390 ❄️ : non éligible, rien reçu', si.r?.flakes === 390 && si.r.band.eligible === false && (await claims(I, 'band')).length === 0, JSON.stringify(si.r?.band ?? si.err))
   await hotte(I, days[23], 2, 100)
   const si2 = await state(uid(22))
-  ok('I à 402 ❄️ : éligible, paliers déjà atteints rattrapés', si2.r?.flakes === 402 && si2.r.band.eligible && (await claims(I, 'band')).map((c) => c.tier).join(',') === '1,3', JSON.stringify(si2.r?.band))
+  ok('I à 402 ❄️ : éligible, paliers déjà atteints rattrapés', si2.r?.flakes === 402 && si2.r.band.eligible && (await claims(I, 'band')).map((c) => c.tier).join(',') === '1,2,3', JSON.stringify(si2.r?.band))
   await db.query(`create or replace function public._noel_band_override(p_key text) returns integer language sql stable as $$ select 30000 $$`)
   await state(uid(20))
   ok('palier collectif 4 : 250 pièces + titre', (await ledger(G, 'event_band')) === 350 && (await owns(G, 't_bande_noel')))
@@ -289,7 +293,7 @@ await setNow('2026-12-11T20:00:00Z')
   }
   ok('_noel_all_flakes = ❄️ de chaque membre (sans les 0)', same && Object.values(all).every((n) => n > 0), JSON.stringify(all))
   const cf = await one(`select public._noel_claim($1, $2, 450, 22000) r`, [F, KEY])
-  ok('_noel_claim(profil, clé, mes ❄️, total bande) utilise les totaux passés', cf.r.filter((c) => c.kind === 'band').map((c) => c.tier).join(',') === '1,3', JSON.stringify(cf.r))
+  ok('_noel_claim(profil, clé, mes ❄️, total bande) utilise les totaux passés', cf.r.filter((c) => c.kind === 'band').map((c) => c.tier).join(',') === '1,2,3', JSON.stringify(cf.r))
   const t0 = Date.now()
   await state(uid(20))
   const ms = Date.now() - t0

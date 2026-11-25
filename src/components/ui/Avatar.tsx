@@ -5,6 +5,7 @@ import { usePlayersStore } from '@/features/soiree/players'
 import { ChibiImage } from './ChibiImage'
 import { useTenueArt } from './tenueArt'
 import { AvatarFrame } from './AvatarFrame'
+import { SnowLayer } from './SnowLayer'
 import { equippedOf } from '@/data/cadeaux'
 
 export interface AvatarProps {
@@ -21,6 +22,8 @@ export interface AvatarProps {
    * null -> aucun cadre.
    */
   frame?: string | null
+  /** Effet d'avatar (slot fx_avatar). Non renseigné -> effet équipé du joueur dans l'annuaire ; null -> aucun. */
+  fx?: string | null
   size?: number
   /** Pastille de statut (ex: couronne, check) en bas a droite */
   badge?: React.ReactNode
@@ -31,13 +34,15 @@ export interface AvatarProps {
 }
 
 /** Disque sticker (couleur d'accent du perso) + chibi dedans. */
-export function Avatar({ slug, expression = 'joie', tenue, frame, size = 56, badge, bounce, selected, className }: AvatarProps) {
+export function Avatar({ slug, expression = 'joie', tenue, frame, fx, size = 56, badge, bounce, selected, className }: AvatarProps) {
   const color = accentColorOf(slug)
   const directoryTenue = usePlayersStore((s) => (tenue === undefined ? s.list.find((p) => p.slug === slug)?.equippedTenue : undefined))
   const wanted = tenue ?? directoryTenue ?? 'default'
   const art = useTenueArt(slug, wanted)
-  const directoryItems = usePlayersStore((s) => (frame === undefined ? s.list.find((p) => p.slug === slug)?.equippedItems : undefined))
+  const directoryItems = usePlayersStore((s) => (frame === undefined || fx === undefined ? s.list.find((p) => p.slug === slug)?.equippedItems : undefined))
   const frameDef = equippedOf(frame === undefined ? directoryItems : frame ? { frame } : null, 'frame')?.frame
+  // Neige sur l'avatar : seulement à partir de 48 px (en dessous, illisible et coûteux dans les longues listes).
+  const snow = size >= 48 && (fx === undefined ? directoryItems?.fx_avatar : fx) === 'fx_neige'
   return (
     <motion.div
       animate={bounce ? { y: [0, -6, 0] } : undefined}
@@ -48,12 +53,13 @@ export function Avatar({ slug, expression = 'joie', tenue, frame, size = 56, bad
       {frameDef && <AvatarFrame frame={frameDef} size={size} />}
       <div
         className={cn(
-          'flex size-full items-center justify-center overflow-hidden rounded-full border-[3px] border-ink shadow-sticker-sm',
+          'relative flex size-full items-center justify-center overflow-hidden rounded-full border-[3px] border-ink shadow-sticker-sm',
           selected && 'ring-4 ring-sun',
         )}
         style={{ backgroundColor: color }}
       >
         <ChibiImage slug={slug} expression={expression} tenue={wanted} size={size * 0.92} bare className="mt-[6%]" />
+        {snow && <SnowLayer count={size >= 100 ? 9 : 6} size={Math.max(8, size * 0.15)} duration={4.5} />}
       </div>
       {art.missingEmoji && (
         <span

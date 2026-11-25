@@ -31,7 +31,7 @@ alter table public.items add column if not exists pass_tier integer;
 alter table public.items drop constraint if exists items_season_check;
 alter table public.items add constraint items_season_check check (season is null or season in ('hiver', 'printemps', 'ete', 'automne'));
 alter table public.items drop constraint if exists items_slot_check;
-alter table public.items add constraint items_slot_check check (slot in ('frame', 'title', 'kart', 'golf_ball', 'bowling_ball', 'chess', 'card_back', 'dice', 'marks'));
+alter table public.items add constraint items_slot_check check (slot in ('frame', 'title', 'kart', 'golf_ball', 'bowling_ball', 'chess', 'card_back', 'dice', 'marks', 'fx_avatar', 'fx_entree', 'fx_victoire', 'fx_salon'));
 alter table public.items enable row level security;
 drop policy if exists items_select on public.items;
 create policy items_select on public.items for select to authenticated using (true);
@@ -205,7 +205,12 @@ insert into public.items(id, slot, label, event, event_tier, band_tier) values
   ('f_noel_houx', 'frame', 'Couronne de houx', 'noel', 27, null),
   ('t_acharne_noel', 'title', 'Acharné de Noël', 'noel', 30, null),
   ('f_noel_aurore', 'frame', 'Aurore de la bande', 'noel', null, 3),
-  ('t_bande_noel', 'title', 'La Bande de Noël', 'noel', null, 4)
+  ('t_bande_noel', 'title', 'La Bande de Noël', 'noel', null, 4),
+  -- Effets spéciaux (un slot chacun, cumulables) : Pass de Noël 10, 18, 25 et Grande Hotte palier 2.
+  ('fx_neige', 'fx_avatar', 'Neige sur l’avatar', 'noel', 10, null),
+  ('fx_traineau', 'fx_entree', 'Entrée en traîneau', 'noel', 18, null),
+  ('fx_sapins', 'fx_victoire', 'Pluie de sapins', 'noel', 25, null),
+  ('fx_salon_neige', 'fx_salon', 'Salon enneigé', 'noel', null, 2)
 on conflict (id) do update set slot = excluded.slot, label = excluded.label, event = excluded.event,
   event_tier = excluded.event_tier, band_tier = excluded.band_tier;
 
@@ -262,7 +267,7 @@ declare
   v_me uuid := public._require_profile();
   v_out jsonb;
 begin
-  if p_slot is null or p_slot not in ('frame', 'title', 'kart', 'golf_ball', 'bowling_ball', 'chess', 'card_back', 'dice', 'marks') then
+  if p_slot is null or p_slot not in ('frame', 'title', 'kart', 'golf_ball', 'bowling_ball', 'chess', 'card_back', 'dice', 'marks', 'fx_avatar', 'fx_entree', 'fx_victoire', 'fx_salon') then
     raise exception 'item_invalid_slot';
   end if;
   if p_item is not null then

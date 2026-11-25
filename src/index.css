@@ -75,6 +75,18 @@
   50% { opacity: 1; }
 }
 .noel-bulb { animation: noel-bulb 1.4s ease-in-out infinite; }
+/* Neige (SnowLayer : effets « Neige sur l'avatar » et « Salon enneigé ») : la chute suit la hauteur du
+   conteneur (cqh). Animations réduites : flocons immobiles à leur place. */
+.snow-layer { container-type: size; }
+.snow-flake { position: absolute; top: var(--y); left: var(--x); line-height: 1; color: #fff; text-shadow: 0 0 2px #1f1b2e, 0 0 1px #1f1b2e; }
+@media (prefers-reduced-motion: no-preference) {
+  .snow-flake { top: -1.2em; animation: snow-fall var(--d) linear var(--delay) infinite; }
+}
+@keyframes snow-fall {
+  from { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(var(--sway), 55cqh, 0) rotate(160deg); }
+  to { transform: translate3d(0, calc(100cqh + 1.4em), 0) rotate(320deg); }
+}
 @keyframes wiggle {
   0%, 100% { transform: rotate(-4deg); }
   50% { transform: rotate(4deg); }

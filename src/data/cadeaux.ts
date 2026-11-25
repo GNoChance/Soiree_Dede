@@ -4,7 +4,7 @@
  * Sources : calendrier de l'Avent (`adventDay` = cadeau de cette case, `adventCount` = palier en cases ouvertes),
  * ou une règle serveur (items.rule : trophée, niveau, champion de la semaine, victoires) décrite par `howTo`.
  */
-export type ItemSlot = 'frame' | 'title' | 'kart' | 'golf_ball' | 'bowling_ball' | 'chess' | 'card_back' | 'dice' | 'marks'
+export type ItemSlot = 'frame' | 'title' | 'kart' | 'golf_ball' | 'bowling_ball' | 'chess' | 'card_back' | 'dice' | 'marks' | 'fx_avatar' | 'fx_entree' | 'fx_victoire' | 'fx_salon'
 
 /** Décor d'un cadre : anneau (fond CSS) + éléments répartis autour + un éventuel élément en haut. */
 export interface FrameStyle {
@@ -72,6 +72,10 @@ export const SLOTS: { id: ItemSlot; label: string; emoji: string; hint: string }
   { id: 'card_back', label: 'Dos de cartes', emoji: '🃏', hint: 'Pas de bol et Kems, sur ton écran.' },
   { id: 'dice', label: 'Dés', emoji: '🎲', hint: 'Menteur, sur ton écran.' },
   { id: 'marks', label: 'Croix et ronds', emoji: '❌', hint: 'Morpion, sur ton écran.' },
+  { id: 'fx_avatar', label: 'Effet d’avatar', emoji: '✨', hint: 'Sur ton avatar, partout dans l’appli.' },
+  { id: 'fx_entree', label: 'Effet d’entrée', emoji: '✨', hint: 'Quand tu arrives dans le salon.' },
+  { id: 'fx_victoire', label: 'Effet de victoire', emoji: '✨', hint: 'Sur ton écran quand tu gagnes une partie.' },
+  { id: 'fx_salon', label: 'Effet de salon', emoji: '✨', hint: 'Dans le salon et le mode télé de tes soirées (quand tu es l’hôte).' },
 ]
 
 export const ITEMS: ItemDef[] = [
@@ -243,6 +247,11 @@ export const ITEMS: ItemDef[] = [
   { id: 't_acharne_noel', slot: 'title', label: 'Acharné de Noël', emoji: '🎅', event: 'noel', eventTier: 30, howTo: 'Pass de Noël, palier 30 (le dernier !).' },
   { id: 'f_noel_aurore', slot: 'frame', label: 'Aurore de la bande', emoji: '🌌', event: 'noel', bandTier: 3, howTo: 'Grande Hotte de la bande, palier 3.', frame: { ring: 'conic-gradient(#06D6A0, #118AB2, #7B2CBF, #EF476F, #06D6A0)', spin: true, emojis: ['✨'], count: 6, top: '🌌' } },
   { id: 't_bande_noel', slot: 'title', label: 'La Bande de Noël', emoji: '🎄', event: 'noel', bandTier: 4, howTo: 'Grande Hotte de la bande, palier 4.' },
+  // Effets spéciaux (un slot chacun, cumulables) : rendus dans Avatar, le salon, l'écran de résultats et le mode télé.
+  { id: 'fx_neige', slot: 'fx_avatar', label: 'Neige sur l’avatar', emoji: '❄️', event: 'noel', eventTier: 10, howTo: 'Pass de Noël, palier 10.' },
+  { id: 'fx_traineau', slot: 'fx_entree', label: 'Entrée en traîneau', emoji: '🛷', event: 'noel', eventTier: 18, howTo: 'Pass de Noël, palier 18.' },
+  { id: 'fx_sapins', slot: 'fx_victoire', label: 'Pluie de sapins', emoji: '🎄', event: 'noel', eventTier: 25, howTo: 'Pass de Noël, palier 25.' },
+  { id: 'fx_salon_neige', slot: 'fx_salon', label: 'Salon enneigé', emoji: '🌨️', event: 'noel', bandTier: 2, howTo: 'Grande Hotte de la bande, palier 2.' },
 ]
 
 const BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]))

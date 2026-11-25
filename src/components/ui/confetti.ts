@@ -35,3 +35,17 @@ export function burstFrom(el: Element, particleCount = 50) {
   const r = el.getBoundingClientRect()
   burst({ x: (r.left + r.width / 2) / window.innerWidth, y: (r.top + r.height / 2) / window.innerHeight }, particleCount)
 }
+
+/** Effet « Pluie de sapins » (slot fx_victoire) : la victoire tombe en 🎄🎁⭐ au lieu des confettis. */
+let treeShapes: confetti.Shape[] | null = null
+export function treesConfetti(ms = 2200) {
+  treeShapes ??= ['🎄', '🎁', '⭐'].map((text) => confetti.shapeFromText({ text, scalar: 2.4 }))
+  const opts = { disableForReducedMotion: true, zIndex: 100, shapes: treeShapes, scalar: 2.4, flat: true }
+  const end = Date.now() + ms
+  const frame = () => {
+    void confetti({ ...opts, particleCount: 2, startVelocity: 14, spread: 150, angle: 270, gravity: 0.6, ticks: 260, origin: { x: Math.random(), y: -0.1 } })
+    if (Date.now() < end) requestAnimationFrame(frame)
+  }
+  frame()
+  void confetti({ ...opts, particleCount: 40, spread: 100, startVelocity: 40, origin: { x: 0.5, y: 0.6 } })
+}

@@ -8,7 +8,10 @@ const INK = '#1f1b2e'
 export function ItemPreview({ it, size = 48 }: { it: ItemDef; size?: number }) {
   const profile = useSession((s) => s.profile)
   if (it.slot === 'frame' && profile) {
-    return <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} frame={it.id} size={size * 0.92} />
+    return <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} frame={it.id} fx={null} size={size * 0.92} />
+  }
+  if (it.slot === 'fx_avatar' && profile) {
+    return <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} frame={null} fx={it.id} size={Math.max(48, size * 0.92)} />
   }
   if (it.cardBack) {
     return (

@@ -5,7 +5,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ChibiImage } from '@/components/ui/ChibiImage'
-import { victoryConfetti } from '@/components/ui/confetti'
+import { treesConfetti, victoryConfetti } from '@/components/ui/confetti'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { refreshProfile } from '@/lib/auth'
@@ -51,7 +51,9 @@ export function ResultsScreen({ matchId, state, meId, players, game, onBack, rem
   useEffect(() => {
     if (me?.won) {
       fx.fanfare()
-      victoryConfetti(2200)
+      // Effet « Pluie de sapins » équipé (slot fx_victoire) : 🎄🎁⭐ au lieu des confettis.
+      if (players[meId]?.equippedItems?.fx_victoire === 'fx_sapins') treesConfetti(2600)
+      else victoryConfetti(2200)
     } else if (me) {
       fx.whoosh()
     }
