@@ -34,6 +34,12 @@ as $$ select '{"dice":2,"star_count":[1,2,2,2,2,3,3],"star_price":30,"half_price
 drop function if exists public._dp_board();
 drop function if exists public._dp_next();
 drop function if exists public._dp_prev();
+-- Anciennes versions à un paramètre (avant la taille de plateau) : avec p_size default 's', un appel à
+-- un seul paramètre devenait ambigu (« _dp_map(text) is not unique ») et la fin de partie plantait.
+drop function if exists public._dp_board(text);
+drop function if exists public._dp_next(text);
+drop function if exists public._dp_prev(text);
+drop function if exists public._dp_map(text);
 
 -- Les 5 plateaux, dans l'ordre de leur numéro (stat map_no).
 create or replace function public._dp_maps()

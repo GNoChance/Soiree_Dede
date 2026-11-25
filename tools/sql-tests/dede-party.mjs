@@ -1269,5 +1269,36 @@ for (const map of MAPS) {
 if (ecartsBig.length) console.log(`\n⚠ Grandes tailles, à surveiller (${SIZE_SIMS} parties par config) :\n  - ${ecartsBig.join('\n  - ')}`)
 else console.log('\nGrandes tailles : aucun écart > 15 % avec la spec.')
 
+// ----------------------------------------------------------------------------- base déjà installée
+// En prod, les anciennes versions à un paramètre (avant la taille de plateau) existaient encore : avec la
+// nouvelle (p_size default 's'), tout appel à un paramètre devenait ambigu (« _dp_map(text) is not unique »)
+// et la fin de partie plantait. Recoller le SQL doit les supprimer.
+{
+  for (const f of ['board', 'next', 'prev', 'map'])
+    await db.exec(`create or replace function public._dp_${f}(p_map text) returns jsonb language sql as $$ select '{}'::jsonb $$`)
+  await db.exec(fs.readFileSync(new URL('../../supabase/games/dede-party.sql', import.meta.url), 'utf8'))
+  const calls = []
+  for (const f of ['board', 'next', 'prev', 'map']) {
+    try {
+      await db.query(`select public._dp_${f}('grand') r`)
+    } catch (e) {
+      calls.push(`${f} : ${e.message}`)
+    }
+  }
+  ok('SQL recollé sur une ancienne base : plus de surcharge ambiguë', calls.length === 0, calls.join(' | '))
+  const st = must(await start({ ...OPTS, rounds: 6 }, P.slice(0, 2)), 'reinstall')
+  let cur = st
+  let fin = null
+  for (let i = 0; i < 300 && cur.state.phase !== 'finished'; i++) {
+    const r = await act(late(cur), A, tick, true)
+    if (r.err) {
+      fin = r.err
+      break
+    }
+    cur = r.r
+  }
+  ok('SQL recollé : la cérémonie se termine (finished)', cur.state.phase === 'finished', fin ?? cur.state.phase)
+}
+
 console.log(failed ? '\nÉCHEC' : '\nTout est OK')
 process.exit(failed ? 1 : 0)
