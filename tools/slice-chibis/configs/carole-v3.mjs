@@ -11,6 +11,6 @@ const S = (name, dir = name) => ({ name, file: `carole-${name}.png`, n: 12, dir,
 export default {
   slug: 'carole',
   src: 'assets-source/costumes/carole-v3',
-  sheets: 'tycoon admiral tictactoe strategist coach actor cinema bowler philosopher archer pyro painter student werewolf teacher croupier star spy racer pirate hacker chess host cowboy elf'.split(' ').map((n) => S(n)),
-  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer hacker chess golfer host cowboy elf'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
+  sheets: 'tycoon admiral tictactoe strategist coach actor cinema bowler philosopher archer pyro painter student werewolf teacher croupier star spy racer pirate hacker chess host cowboy elf santa'.split(' ').map((n) => S(n)),
+  portraits: 'tycoon admiral tictactoe strategist actor cinema archer philosopher coach bowler pirate pyro werewolf painter student teacher croupier star spy racer hacker chess golfer host cowboy elf santa'.split(' ').map((n) => ({ file: `carole-${n}-portrait.png`, dir: n, cutout: true })),
 };
