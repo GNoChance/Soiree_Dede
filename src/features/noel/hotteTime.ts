@@ -10,3 +10,16 @@ export function hotteTimeUp(deadline: string | null | undefined, nowMs: number):
 export function parisDay(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms)
 }
+
+/**
+ * Correction locale d'une manche (aperçu admin uniquement : le vrai jeu est corrigé par le serveur).
+ * Même règle que _hotte_proche_ok : « combien ? » juste à ±15 % (au moins ±1), virgule acceptée.
+ */
+export function hotteLocalOk(round: { type: string; answer: string }, given: string): boolean {
+  if (round.type !== 'proche') return given === round.answer
+  const txt = given.trim().replace(',', '.')
+  const v = Number(txt)
+  const target = Number(round.answer)
+  if (!txt || !Number.isFinite(v)) return false
+  return Math.abs(v - target) <= Math.max(1, 0.15 * Math.abs(target))
+}

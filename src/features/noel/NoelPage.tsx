@@ -9,6 +9,7 @@ import { BandPanel } from './BandGauge'
 import { useNoelIntro } from './intro'
 import { Flakes, MissionList, StreakLine, hotteButtonLabel } from './NoelParts'
 import { PassTrack } from './PassTrack'
+import { PreviewBar } from './PreviewBar'
 
 type Tab = 'missions' | 'pass' | 'band'
 
@@ -54,6 +55,7 @@ export function NoelPage() {
         <h1 className="flex-1 text-3xl">Noël</h1>
       </div>
 
+      <PreviewBar />
       {!state && <Skeleton className="h-64 w-full" />}
       {state && (state.phase === 'off' || state.phase === 'before') && (
         <p className="sticker rounded-card bg-surface p-4 text-center font-bold">

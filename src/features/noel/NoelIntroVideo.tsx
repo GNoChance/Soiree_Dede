@@ -5,7 +5,7 @@ import { Volume2, VolumeX, X } from 'lucide-react'
 import { isGuestProfile } from '@/features/guest/api'
 import { useSession } from '@/store/session'
 import { useUpdateHold } from '@/store/updateHold'
-import { useNoelState } from './api'
+import { useNoelState, useNoelStore } from './api'
 import { introSeen, markIntroSeen, useNoelIntro } from './intro'
 
 const SRC = '/videos/noel-2026.mp4'
@@ -21,14 +21,16 @@ export function NoelIntroVideo() {
   const forced = useNoelIntro((s) => s.open)
   const close = useNoelIntro((s) => s.close)
   const busy = useUpdateHold((s) => s.holds > 0)
+  // Aperçu admin : jamais de lecture automatique, et la vidéo n'est pas marquée « vue » (le vrai 1er décembre reste intact).
+  const preview = useNoelStore((s) => s.preview !== null)
   const [auto, setAuto] = useState(false)
   const [muted, setMuted] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
 
   const key = state?.key ?? null
   useEffect(() => {
-    if (member && profile && key && state?.phase === 'live' && !busy && !introSeen(key, profile.id)) setAuto(true)
-  }, [member, profile, key, state?.phase, busy])
+    if (member && profile && key && state?.phase === 'live' && !busy && !preview && !introSeen(key, profile.id)) setAuto(true)
+  }, [member, profile, key, state?.phase, busy, preview])
 
   const open = member && (forced || auto)
 
@@ -45,7 +47,7 @@ export function NoelIntroVideo() {
   }, [open])
 
   const done = () => {
-    if (profile && key) markIntroSeen(key, profile.id)
+    if (profile && key && !preview) markIntroSeen(key, profile.id)
     setAuto(false)
     close()
   }

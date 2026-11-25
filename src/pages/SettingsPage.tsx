@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { KeyRound, LogOut, Pencil, RefreshCw } from 'lucide-react'
 import { AdminMembres } from '@/features/admin/AdminMembres'
+import { AdminNoel } from '@/features/admin/AdminNoel'
 import { usePlayers } from '@/features/soiree/players'
 import { AdminSoirees } from '@/features/admin/AdminSoirees'
 import { PushReminderCard } from '@/features/push/PushReminderCard'
@@ -170,6 +171,11 @@ export function SettingsPage() {
       {profile?.is_admin && (
         <StaggerItem>
           <AdminSoirees />
+        </StaggerItem>
+      )}
+      {profile?.is_admin && (
+        <StaggerItem>
+          <AdminNoel />
         </StaggerItem>
       )}
       <StaggerItem>

@@ -326,5 +326,23 @@ await setNow('2026-12-11T20:00:00Z')
   ok('rappel en novembre : noel_streak null', nov.length === 1 && nov[0].noel_streak === null, JSON.stringify(nov))
 }
 
+// =============================================================================
+// 6. Aperçu admin (lecture seule) : état comme au jour choisi + manches avec réponses
+// =============================================================================
+{
+  await setNow('2026-11-25T12:00:00Z')
+  await db.query('update public.profiles set is_admin = (id = $1)', [A])
+  const counts = `select (select count(*) from public.hotte_runs)::int h, (select count(*) from public.noel_claims)::int c, (select count(*) from public.coin_ledger)::int l`
+  ok('aperçu : refusé aux non-admins', (await call(uid(1), `select public.noel_preview('2026-12-01') r`)).err === 'forbidden')
+  const before = await one(counts)
+  const pv = await call(uid(0), `select public.noel_preview('2026-12-05') r`)
+  const st = pv.r?.state
+  ok('aperçu : état live au 5 déc', st?.phase === 'live' && st.day === '2026-12-05' && st.key === KEY && st.missions.length === 3 && st.hotte.status === 'todo' && st.new_claims.length === 0, JSON.stringify(pv.r ?? pv.err))
+  ok('aperçu : 5 manches avec réponses', pv.r?.rounds?.length === 5 && pv.r.rounds.every((r) => typeof r.answer === 'string'), JSON.stringify(pv.r?.rounds))
+  const after = await one(counts)
+  ok('aperçu : rien écrit', JSON.stringify(before) === JSON.stringify(after), JSON.stringify([before, after]))
+  ok('aperçu : jour hors événement refusé', (await call(uid(0), `select public.noel_preview('2026-11-20') r`)).err === 'noel_preview_day')
+}
+
 console.log(failed ? '\nDES TESTS ONT ÉCHOUÉ' : '\nTous les tests passent')
 process.exit(failed ? 1 : 0)

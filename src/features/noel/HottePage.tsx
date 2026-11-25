@@ -12,10 +12,25 @@ import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import { fx } from '@/lib/feedback'
 import { useSession } from '@/store/session'
 import { useHoldUpdate } from '@/store/updateHold'
-import { useNoelState } from './api'
-import { hotteAnswer, hotteBoard, hotteFlakes, hotteStart, type HotteBoardRow, type HotteRun } from './hotteApi'
+import { useNoelState, useNoelStore, type NoelPreview } from './api'
+import { hotteAnswer, hotteBoard, hotteFlakes, hotteStart, type HotteAnswer, type HotteBoardRow, type HotteRound, type HotteRun } from './hotteApi'
 import { HotteRoundView, type RoundFeedback } from './hotte/Rounds'
-import { hotteTimeUp, parisDay } from './hotteTime'
+import { hotteLocalOk, hotteTimeUp, parisDay } from './hotteTime'
+import { PreviewBar } from './PreviewBar'
+
+/** Aperçu admin : essai local (5 min) sur les manches du jour simulé, rien n'est envoyé au serveur. */
+function previewRun(p: NoelPreview): HotteRun {
+  const now = serverNow()
+  return {
+    day: p.day,
+    started_at: new Date(now).toISOString(),
+    deadline: new Date(now + 5 * 60_000).toISOString(),
+    rounds: p.rounds.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'answer')) as unknown as HotteRound),
+    answers: [],
+    score: 0,
+    finished: false,
+  }
+}
 
 type Phase = 'intro' | 'loading' | 'play' | 'end'
 
@@ -23,6 +38,9 @@ type Phase = 'intro' | 'loading' | 'play' | 'end'
 export function HottePage() {
   const navigate = useNavigate()
   const { state, refetch } = useNoelState(true)
+  const preview = useNoelStore((s) => s.preview)
+  const meId = useSession((s) => s.profile?.id)
+  const startedAt = useRef(0)
   const [phase, setPhase] = useState<Phase>('intro')
   const [run, setRun] = useState<HotteRun | null>(null)
   const [feedback, setFeedback] = useState<RoundFeedback | null>(null)
@@ -36,7 +54,11 @@ export function HottePage() {
   const sending = useRef(false)
   const ended = useRef(false)
 
-  const loadBoard = async () => {
+  const loadBoard = async (final = 0) => {
+    if (preview) {
+      setBoard(meId ? [{ profile_id: meId, score: final, secs: Math.round((serverNow() - startedAt.current) / 1000) }] : [])
+      return
+    }
     try {
       setBoard(await hotteBoard())
     } catch {
@@ -51,7 +73,7 @@ export function HottePage() {
     setPhase('end')
     if (final >= 4) victoryConfetti(1800)
     else fx.success()
-    await Promise.all([loadBoard(), refetch()])
+    await Promise.all([loadBoard(final), refetch()])
   }
 
   // Hotte déjà faite AUJOURD'HUI (pas l'état d'hier resté en mémoire) : directement le résultat.
@@ -63,6 +85,7 @@ export function HottePage() {
       setPhase('end')
       void loadBoard()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doneToday, phase, state?.hotte.score])
 
   // Temps écoulé (vraie échéance, pas la valeur initiale du compte à rebours) : l'essai est clos
@@ -75,7 +98,8 @@ export function HottePage() {
   const start = async () => {
     setPhase('loading')
     try {
-      const r = await hotteStart()
+      startedAt.current = serverNow()
+      const r = preview ? previewRun(preview) : await hotteStart()
       setRun(r)
       setScore(r.score)
       if (r.finished) await finish(r.score)
@@ -95,7 +119,13 @@ export function HottePage() {
     sending.current = true
     const round = idx + 1
     try {
-      const res = await hotteAnswer(round, a)
+      const res: HotteAnswer = preview
+        ? (() => {
+            const ok = hotteLocalOk(preview.rounds[idx], a)
+            const sc = run.score + (ok ? 1 : 0)
+            return { ok, correct: preview.rounds[idx].answer, score: sc, finished: round >= 5 }
+          })()
+        : await hotteAnswer(round, a)
       setFeedback({ chosen: a, correct: res.correct, ok: res.ok })
       if (res.ok) fx.success()
       else fx.fail()
@@ -130,6 +160,8 @@ export function HottePage() {
           </span>
         )}
       </div>
+
+      <PreviewBar />
 
       {phase === 'intro' && (
         <Card className="flex flex-col items-center gap-4 text-center">

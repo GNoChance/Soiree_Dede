@@ -53,6 +53,15 @@ interface NoelStore {
   clearQueue: () => void
   /** Relit l'état, sauf si la dernière lecture date de moins de minAgeMs (0 = toujours). */
   refresh: (minAgeMs?: number) => Promise<void>
+  /** Aperçu admin (noel_preview) : état simulé d'un jour + manches de la Hotte AVEC réponses. Rien n'est enregistré. */
+  preview: NoelPreview | null
+  startPreview: (day: string) => Promise<void>
+  stopPreview: () => void
+}
+
+export interface NoelPreview {
+  day: string
+  rounds: (Record<string, unknown> & { type: string; answer: string })[]
 }
 
 let inflight: Promise<void> | null = null
@@ -63,7 +72,19 @@ export const useNoelStore = create<NoelStore>((set, get) => ({
   fetchedAt: 0,
   queue: [],
   clearQueue: () => set({ queue: [] }),
+  preview: null,
+  startPreview: async (day) => {
+    const { data, error } = await loose.rpc('noel_preview', { p_day: day })
+    if (error) throw error
+    const res = data as { state: NoelState; rounds: NoelPreview['rounds'] }
+    set({ preview: { day, rounds: res.rounds }, state: res.state, queue: [] })
+  },
+  stopPreview: () => {
+    set({ preview: null, state: null, fetchedAt: 0 })
+    void get().refresh(0)
+  },
   refresh: (minAgeMs = 0) => {
+    if (get().preview) return Promise.resolve() // aperçu : l'état simulé reste affiché
     if (inflight) return inflight
     if (minAgeMs > 0 && Date.now() - get().fetchedAt < minAgeMs) return Promise.resolve()
     inflight = (async () => {
@@ -72,6 +93,7 @@ export const useNoelStore = create<NoelStore>((set, get) => ({
         const { data, error } = await loose.rpc('noel_state', {})
         if (error || !data) return
         const st = data as NoelState
+        if (get().preview) return
         set({ state: st, fetchedAt: Date.now(), queue: [...get().queue, ...(st.new_claims ?? [])] })
       } finally {
         set({ loading: false })

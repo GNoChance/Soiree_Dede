@@ -1688,6 +1688,45 @@ begin
     'new_claims', v_new);
 end $$;
 
+-- Aperçu admin (LECTURE SEULE, rien n'est écrit) : l'état de l'événement comme au jour p_day
+-- (missions de ce jour, Hotte « à faire », aucune récompense) + les 5 manches de la Hotte de ce jour
+-- AVEC les réponses (le front corrige en local). -> {state, rounds}
+create or replace function public.noel_preview(p_day date)
+returns jsonb language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  v_me   uuid := public._require_admin();
+  v_key  text := public._noel_key_for(p_day);
+  b      record;
+  v_flk  jsonb;
+  v_band jsonb;
+  v_tot  integer;
+  v_tier integer;
+  v_ms   jsonb := '[]'::jsonb;
+  m      text;
+begin
+  if v_key is null then raise exception 'noel_preview_day'; end if;
+  select * into b from public._noel_bounds(v_key);
+  v_flk := public._noel_flakes(v_me, v_key);
+  v_band := public._noel_band(v_key, public._noel_all_flakes(v_key));
+  v_tot := (v_flk->>'total')::int;
+  v_tier := least(30, v_tot / 150);
+  foreach m in array public._noel_missions(v_key, p_day) loop
+    v_ms := v_ms || jsonb_build_object('id', m, 'done', public._noel_mission_done(v_me, m, p_day));
+  end loop;
+  return jsonb_build_object(
+    'state', jsonb_build_object(
+      'phase', 'live', 'key', v_key, 'day', p_day, 'starts_on', b.starts_on, 'ends_on', b.ends_on,
+      'missions', v_ms, 'soiree_bonus', public._noel_soiree_bonus(v_me, p_day),
+      'hotte', jsonb_build_object('status', 'todo', 'score', 0, 'flakes', 0),
+      'flakes', v_tot, 'tier', v_tier, 'next_at', case when v_tier < 30 then (v_tier + 1) * 150 end,
+      'streak', v_flk->'streak',
+      'band', v_band || jsonb_build_object('me', v_tot, 'eligible', v_tot >= 400),
+      'new_claims', '[]'::jsonb),
+    'rounds', public._hotte_rounds(p_day));
+end $$;
+
 revoke all on function public._noel_day() from public, anon, authenticated;
 revoke all on function public._noel_key_for(date) from public, anon, authenticated;
 revoke all on function public._noel_bounds(text) from public, anon, authenticated;
@@ -1708,6 +1747,8 @@ revoke all on function public._noel_claim(uuid, text) from public, anon, authent
 revoke all on function public._noel_claim(uuid, text, integer, integer) from public, anon, authenticated;
 revoke all on function public.noel_state() from public, anon;
 grant execute on function public.noel_state() to authenticated;
+revoke all on function public.noel_preview(date) from public, anon;
+grant execute on function public.noel_preview(date) to authenticated;
 
 
 -- ===== features\presence.sql =====
