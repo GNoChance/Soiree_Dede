@@ -64,7 +64,9 @@ export function BandPanel({ st }: { st: NoelState }) {
       <p className={cn('sticker rounded-card p-3 text-center font-bold', b.eligible ? 'bg-mint/40' : 'bg-sun/40')}>
         {b.eligible
           ? `Tu as apporté ${fmt(b.me)} ❄️ : tu touches les récompenses de la bande ! 🎉`
-          : `Tu as apporté ${fmt(b.me)} ❄️. Apporte encore ${fmt(NOEL_ELIGIBLE - b.me)} ❄️ pour toucher les récompenses de la bande.`}
+          : st.phase === 'over'
+            ? `Tu as apporté ${fmt(b.me)} ❄️ cette année. Il en fallait ${fmt(NOEL_ELIGIBLE)} pour les récompenses de la bande : rendez-vous l’an prochain !`
+            : `Tu as apporté ${fmt(b.me)} ❄️. Apporte encore ${fmt(NOEL_ELIGIBLE - b.me)} ❄️ pour toucher les récompenses de la bande.`}
       </p>
       <div className="sticker flex flex-col gap-1 rounded-card bg-surface p-4">
         <p className="mb-1 font-display text-xl font-extrabold">🛷 Les lutins de la bande</p>

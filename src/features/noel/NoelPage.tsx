@@ -4,12 +4,15 @@ import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { noelDaysLeft, useNoelState, type NoelState } from './api'
+import { noelDaysLeft, useNoelState, useNoelStore, type NoelState } from './api'
 import { BandPanel } from './BandGauge'
 import { useNoelIntro } from './intro'
 import { Flakes, MissionList, StreakLine, hotteButtonLabel } from './NoelParts'
 import { PassTrack } from './PassTrack'
 import { PreviewBar } from './PreviewBar'
+import { HotteBoardCard, useHotteBoard } from './HotteBoard'
+import { parisDay } from './hotteTime'
+import { serverNow } from '@/features/soiree/useServerClock'
 
 type Tab = 'missions' | 'pass' | 'band'
 
@@ -40,6 +43,10 @@ export function NoelPage() {
   const { state } = useNoelState(true)
   const [tab, setTab] = useState<Tab>('missions')
   const replay = useNoelIntro((s) => s.replay)
+  const preview = useNoelStore((s) => s.preview !== null)
+  // Classement du jour de la Hotte : visible ici une fois ma Hotte du jour faite (règle du serveur).
+  const hotteDone = !preview && state?.phase === 'live' && state.hotte.status === 'done' && state.day === parisDay(serverNow())
+  const board = useHotteBoard(hotteDone)
 
   return (
     <div className="flex flex-col gap-4">
@@ -87,6 +94,7 @@ export function NoelPage() {
                   <Button size="lg" fullWidth onClick={() => navigate('/noel/hotte')}>
                     {hotteButtonLabel(state)}
                   </Button>
+                  {hotteDone && <HotteBoardCard board={board} />}
                 </>
               ) : (
                 <p className="sticker rounded-card bg-surface p-4 text-center font-bold">Les missions sont terminées pour cette année.</p>

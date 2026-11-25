@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Clock } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { victoryConfetti } from '@/components/ui/confetti'
 import { errorCode, toastError } from '@/features/soiree/errors'
-import { playerOrPlaceholder, usePlayers } from '@/features/soiree/players'
 import { serverNow, useCountdown } from '@/features/soiree/useServerClock'
 import { fx } from '@/lib/feedback'
 import { useSession } from '@/store/session'
@@ -15,6 +13,7 @@ import { useHoldUpdate } from '@/store/updateHold'
 import { useNoelState, useNoelStore, type NoelPreview } from './api'
 import { hotteAnswer, hotteBoard, hotteFlakes, hotteStart, type HotteAnswer, type HotteBoardRow, type HotteRound, type HotteRun } from './hotteApi'
 import { HotteRoundView, type RoundFeedback } from './hotte/Rounds'
+import { HotteBoardCard } from './HotteBoard'
 import { hotteLocalOk, hotteTimeUp, parisDay } from './hotteTime'
 import { PreviewBar } from './PreviewBar'
 
@@ -94,6 +93,17 @@ export function HottePage() {
     if (phase === 'play' && run && !feedback && hotteTimeUp(run.deadline, serverNow())) void finish(run.score)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, left, feedback])
+
+  // Essai commencé puis interrompu (appli fermée, retour arrière) : on reprend directement là où on en était.
+  const resumed = useRef(false)
+  const running = state?.hotte.status === 'running' && state.phase === 'live' && !preview && state.day === parisDay(serverNow())
+  useEffect(() => {
+    if (running && phase === 'intro' && !resumed.current) {
+      resumed.current = true
+      void start()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, phase])
 
   const start = async () => {
     setPhase('loading')
@@ -203,8 +213,6 @@ export function HottePage() {
 }
 
 function HotteEnd({ score, board, onBack }: { score: number; board: HotteBoardRow[] | null; onBack: () => void }) {
-  const { byId } = usePlayers()
-  const meId = useSession((s) => s.profile?.id)
   return (
     <div className="flex flex-col gap-4">
       <Card className="flex flex-col items-center gap-2 text-center">
@@ -214,22 +222,7 @@ function HotteEnd({ score, board, onBack }: { score: number; board: HotteBoardRo
         <p className="font-display text-2xl font-extrabold">+{hotteFlakes(score)} ❄️</p>
         <p className="font-bold text-muted">{score === 5 ? 'Sans faute, digne du Père Noël ! 🎅' : score >= 3 ? 'Joli ! Les lutins sont fiers de toi.' : 'Le Père Noël a vu pire… Revanche demain !'}</p>
       </Card>
-      <Card className="flex flex-col gap-2">
-        <p className="font-display text-xl font-extrabold">🏆 Classement du jour</p>
-        {board === null && <p className="text-sm font-bold text-muted">Chargement…</p>}
-        {board?.map((r, i) => {
-          const p = playerOrPlaceholder(byId, r.profile_id)
-          return (
-            <div key={r.profile_id} className={`flex items-center gap-3 rounded-card p-2 ${r.profile_id === meId ? 'bg-sun/30' : ''}`}>
-              <span className="w-6 text-center font-display font-extrabold">{i + 1}</span>
-              <Avatar slug={p.slug} tenue={p.equippedTenue} size={40} />
-              <span className="min-w-0 flex-1 truncate font-bold">{p.nickname}</span>
-              <span className="font-display font-extrabold">{r.score}/5</span>
-              <span className="w-12 text-right text-xs font-bold text-muted">{r.secs} s</span>
-            </div>
-          )
-        })}
-      </Card>
+      <HotteBoardCard board={board} />
       <Button size="lg" fullWidth onClick={onBack}>
         Retour à Noël
       </Button>

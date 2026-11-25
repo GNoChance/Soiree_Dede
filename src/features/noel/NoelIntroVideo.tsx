@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation } from 'react-router'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Volume2, VolumeX, X } from 'lucide-react'
 import { isGuestProfile } from '@/features/guest/api'
@@ -24,13 +25,15 @@ export function NoelIntroVideo() {
   // Aperçu admin : jamais de lecture automatique, et la vidéo n'est pas marquée « vue » (le vrai 1er décembre reste intact).
   const preview = useNoelStore((s) => s.preview !== null)
   const [auto, setAuto] = useState(false)
+  // Lecture automatique seulement sur l'accueil : jamais au salon, en partie, en mode télé ou dans une page de jeu.
+  const onHub = useLocation().pathname === '/'
   const [muted, setMuted] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
 
   const key = state?.key ?? null
   useEffect(() => {
-    if (member && profile && key && state?.phase === 'live' && !busy && !preview && !introSeen(key, profile.id)) setAuto(true)
-  }, [member, profile, key, state?.phase, busy, preview])
+    if (member && profile && key && state?.phase === 'live' && onHub && !busy && !preview && !introSeen(key, profile.id)) setAuto(true)
+  }, [member, profile, key, state?.phase, busy, preview, onHub])
 
   const open = member && (forced || auto)
 
@@ -39,12 +42,19 @@ export function NoelIntroVideo() {
     const v = video.current
     if (!open || !v) return
     v.muted = false
+    setMuted(false)
     v.play().catch(() => {
       v.muted = true
       setMuted(true)
       void v.play().catch(() => undefined)
     })
   }, [open])
+
+  // Vidéo injoignable (réseau) : on ferme sans la marquer « vue », elle se relancera à la prochaine ouverture.
+  const failed = () => {
+    setAuto(false)
+    close()
+  }
 
   const done = () => {
     if (profile && key && !preview) markIntroSeen(key, profile.id)
@@ -71,7 +81,7 @@ export function NoelIntroVideo() {
             playsInline
             preload="auto"
             onEnded={done}
-            onError={done}
+            onError={failed}
           />
           <button
             type="button"
