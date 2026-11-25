@@ -4,7 +4,7 @@
  * Pour ajouter une tenue : une ligne ici + une ligne dans tenues.sql (+ la planche, cf. tools/slice-chibis/README.md).
  */
 
-export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host' | 'irma' | 'lutin'
+export type TenueId = 'default' | 'star' | 'espion' | 'croupier' | 'prof' | 'ecolier' | 'artiste' | 'loup' | 'artificier' | 'pirate' | 'bowler' | 'philosophe' | 'vedette' | 'archer' | 'comedien' | 'coach' | 'stratege' | 'ninja' | 'amiral' | 'magnat' | 'pilote' | 'hacker' | 'grandmaitre' | 'cowboy' | 'golfer' | 'host' | 'irma' | 'lutin' | 'pere_noel'
 
 export interface TenueDef {
   id: TenueId
@@ -34,6 +34,8 @@ export interface TenueDef {
    * montre qu'une fois débloquée (`SECRET_TENUES`, aucun portrait). Tous ses stickers sont offerts d'office.
    */
   secretTrophy?: string
+  /** Tenue secrète offerte autrement que par un trophée (ex. palier 30 du Pass de Noël) : mêmes règles que `secretTrophy`. */
+  secret?: boolean
 }
 
 const wins = (id: TenueId, label: string, emoji: string, gameId: string, gameName: string, threshold = 10): TenueDef => ({
@@ -93,6 +95,8 @@ export const SECRET_TENUES: TenueDef[] = [
   { id: 'irma', label: 'Madame Irma', emoji: '🔮', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'irma', secretTrophy: 'gen_madame_irma' },
   // Tenue de Noël (dossier d'art `elf`, planches + portraits des 9 persos), trophée « Esprit de Noël » = 12 cases de l'Avent.
   { id: 'lutin', label: 'Lutin', emoji: '🧝', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'elf', secretTrophy: 'gen_esprit_noel' },
+  // Tenue de Noël (dossier d'art `santa`, planches + portraits des 9 persos), palier 30 du Pass de Noël.
+  { id: 'pere_noel', label: 'Père Noël', emoji: '🎅', gameId: null, threshold: 0, condition: 'Tenue secrète', art: 'santa', secret: true },
 ]
 
 export const TENUES_BY_ID = Object.fromEntries([...TENUES, ...SECRET_TENUES].map((t) => [t.id, t])) as Record<TenueId, TenueDef>
@@ -101,4 +105,4 @@ export const getTenue = (id: string | null | undefined): TenueDef | undefined =>
   id ? (TENUES_BY_ID as Record<string, TenueDef>)[id] : undefined
 
 /** Tenue secrète : tous ses stickers sont utilisables (pas de trophée par rang). */
-export const isSecretTenue = (id: string | null | undefined): boolean => Boolean(getTenue(id)?.secretTrophy)
+export const isSecretTenue = (id: string | null | undefined): boolean => Boolean(getTenue(id)?.secretTrophy || getTenue(id)?.secret)

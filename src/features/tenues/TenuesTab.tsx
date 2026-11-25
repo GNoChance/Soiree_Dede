@@ -146,7 +146,7 @@ function TenueCard({
       <div className="relative flex h-36 w-full items-center justify-center">
         {portrait ? (
           <PortraitCard src={portrait} label={def.label} unlocked={unlocked} reveal={reveal} />
-        ) : def.secretTrophy && hasArt && unlocked ? (
+        ) : (def.secretTrophy || def.secret) && hasArt && unlocked ? (
           // Surprise : la tenue secrète surgit en tournoyant la première fois qu'on la voit sur cet appareil.
           <motion.div
             initial={reveal ? { scale: 0, rotate: -35 } : false}
@@ -192,7 +192,7 @@ function TenueCard({
 
       {unlocked ? (
         <p className={cn('text-xs font-bold', equipped ? 'text-[#1f1b2e]/70' : 'text-muted')}>
-          {def.secretTrophy ? 'Tenue secrète découverte ✨' : def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
+          {def.secretTrophy || def.secret ? 'Tenue secrète découverte ✨' : def.default ? 'Débloquée d\'office' : hasArt ? 'Débloquée !' : 'Débloquée ! Stickers bientôt ✨'}
           {trophies && !def.default && ` · 🏆 ${trophies.got}/${trophies.total}`}
         </p>
       ) : (

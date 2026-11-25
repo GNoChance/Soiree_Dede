@@ -33,7 +33,7 @@ export const NOEL_PASS_REWARDS: NoelPassReward[] = [
   c(100),
   { itemId: 'f_noel_houx', label: 'Cadre « Couronne de houx »', emoji: '🌿' },
   c(100), c(100),
-  { coins: 200, itemId: 't_acharne_noel', label: 'Tenue Père Noël + titre « Acharné de Noël » + 200 pièces', emoji: '🎅', soon: true },
+  { coins: 200, itemId: 't_acharne_noel', label: 'Tenue Père Noël + titre « Acharné de Noël » + 200 pièces', emoji: '🎅' },
 ]
 
 /** Paliers de la Grande Hotte (miroir de _noel_band_reward). */

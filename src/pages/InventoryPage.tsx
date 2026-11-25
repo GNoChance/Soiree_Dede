@@ -180,7 +180,7 @@ export function InventoryPage() {
         <StaggerItem>
           <p className="text-center text-sm font-bold text-muted">
             {isSecretTenue(tenue)
-              ? <>Stickers en {tenueDef.emoji} {tenueDef.label} : toute la planche est à toi, cadeau de la voyante ✨</>
+              ? <>Stickers en {tenueDef.emoji} {tenueDef.label} : toute la planche est à toi ✨</>
               : <>Stickers en {tenueDef.emoji} {tenueDef.label} : « Joie » est offert, les autres se gagnent avec leur trophée 🏆.</>}
           </p>
         </StaggerItem>

@@ -6472,6 +6472,10 @@ begin
       values (p_profile, p_key, v_kind, t, v_coins, v_item) on conflict do nothing;
       continue when not found;
       perform public._ledger_add(p_profile, v_coins, 'event_' || v_kind, p_key || ':' || t);
+      -- Palier 30 du pass : tenue secrète Père Noël (toute la planche, cf. _tenue_slot_ok).
+      if v_kind = 'pass' and t = 30 then
+        insert into public.tenue_unlocks(profile_id, tenue_id) values (p_profile, 'pere_noel') on conflict do nothing;
+      end if;
       -- Gros Lot : trophée daté de l'édition (absent du catalogue = rien).
       if v_kind = 'band' and t = 5 then
         perform public.evaluate_trophy(p_profile, 'gen_esprit_equipe_' || split_part(p_key, '-', 2));
@@ -8737,7 +8741,9 @@ on conflict (id) do update
 insert into public.tenues (id, label, emoji, game_id, condition_type, threshold, sort_order, trophy_id) values
   ('irma', 'Madame Irma', '🔮', null, 'trophy', 0, 900, 'gen_madame_irma'),
   -- Tenue de Noël secrète « Lutin » : trophée gen_esprit_noel (12 cases du calendrier de l'Avent ouvertes).
-  ('lutin', 'Lutin', '🧝', null, 'trophy', 0, 901, 'gen_esprit_noel')
+  ('lutin', 'Lutin', '🧝', null, 'trophy', 0, 901, 'gen_esprit_noel'),
+  -- Tenue de Noël secrète « Père Noël » (art santa) : palier 30 du Pass de Noël (_noel_claim, noel.sql), sans trophée.
+  ('pere_noel', 'Père Noël', '🎅', null, 'trophy', 0, 902, null)
 on conflict (id) do update
   set label          = excluded.label,
       emoji          = excluded.emoji,
@@ -8746,6 +8752,11 @@ on conflict (id) do update
       threshold      = excluded.threshold,
       sort_order     = excluded.sort_order,
       trophy_id      = excluded.trophy_id;
+
+-- Rattrapage (idempotent) : palier 30 du Pass de Noël déjà inscrit -> tenue Père Noël.
+insert into public.tenue_unlocks(profile_id, tenue_id)
+select c.profile_id, 'pere_noel' from public.noel_claims c where c.kind = 'pass' and c.tier = 30
+on conflict do nothing;
 
 -- Tenue équipée invalide -> retour à 'default'
 update public.profiles set equipped_tenue = 'default'

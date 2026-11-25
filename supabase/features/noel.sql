@@ -389,6 +389,10 @@ begin
       values (p_profile, p_key, v_kind, t, v_coins, v_item) on conflict do nothing;
       continue when not found;
       perform public._ledger_add(p_profile, v_coins, 'event_' || v_kind, p_key || ':' || t);
+      -- Palier 30 du pass : tenue secrète Père Noël (toute la planche, cf. _tenue_slot_ok).
+      if v_kind = 'pass' and t = 30 then
+        insert into public.tenue_unlocks(profile_id, tenue_id) values (p_profile, 'pere_noel') on conflict do nothing;
+      end if;
       -- Gros Lot : trophée daté de l'édition (absent du catalogue = rien).
       if v_kind = 'band' and t = 5 then
         perform public.evaluate_trophy(p_profile, 'gen_esprit_equipe_' || split_part(p_key, '-', 2));
