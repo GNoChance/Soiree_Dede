@@ -167,10 +167,10 @@ function RoundView({ round, index, total, onDone }: RoundProps) {
 }
 
 /** Écran de jeu : enchaîne les manches, renvoie les réponses à la fin. */
-export function DailyPlay({ rounds, onFinish, onRound }: { rounds: DailyRound[]; onFinish: (answers: RoundAnswer[]) => void; /** Appelé après chaque manche (enregistrement au fil de l'eau). */ onRound?: (idx: number, a: RoundAnswer) => void }) {
-  const [idx, setIdx] = useState(0)
-  const answers = useRef<RoundAnswer[]>([])
-  const [total, setTotal] = useState(0)
+export function DailyPlay({ rounds, onFinish, onRound, done = [] }: { rounds: DailyRound[]; onFinish: (answers: RoundAnswer[]) => void; /** Appelé après chaque manche (enregistrement au fil de l'eau). */ onRound?: (idx: number, a: RoundAnswer) => void; /** Manches déjà jouées (reprise après un rechargement) : on repart à la suivante. */ done?: RoundAnswer[] }) {
+  const [idx, setIdx] = useState(done.length)
+  const answers = useRef<RoundAnswer[]>(done)
+  const [total, setTotal] = useState(() => done.reduce((t, a) => t + a.points, 0))
   return (
     <div className="flex flex-col gap-3 pb-6">
       <p className="text-center text-sm font-bold text-muted">Score : {total}</p>

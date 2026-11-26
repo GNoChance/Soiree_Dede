@@ -12,6 +12,8 @@ export interface DailyToday {
   players: number
   streak: number
   secs_left: number | null
+  /** Manches déjà jouées (statut running) : reprise du défi à la suivante. */
+  answers?: Array<{ points: number; ms: number }> | null
 }
 export interface DailySubmitResult {
   score: number

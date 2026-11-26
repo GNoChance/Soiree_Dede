@@ -46,6 +46,7 @@ ok('points négatifs ramenés à 0', (await (async () => { await save(0, 3, -40)
 ok('tentative en cours : pas encore au classement', rowOf(await board(), A) === undefined)
 const t0 = (await call(0, `select public.daily_today() r`)).r
 ok('daily_today : running avec temps restant', t0.status === 'running' && t0.secs_left > 0, JSON.stringify(t0))
+ok('daily_today : running → manches déjà jouées (reprise du défi)', Array.isArray(t0.answers) && t0.answers.length === 4 && t0.answers[0].points === 90, JSON.stringify(t0))
 
 // --- une tentative interrompue compte une fois les 10 minutes écoulées -------------------
 const xp0 = await xpOf(A)

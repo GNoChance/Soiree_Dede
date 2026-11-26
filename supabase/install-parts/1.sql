@@ -3202,7 +3202,7 @@ as $$
   ), 0)
 $$;
 
--- Etat du joueur : {day, status: todo|running|done|missed, score, rank, players, streak, secs_left}
+-- Etat du joueur : {day, status: todo|running|done|missed, score, rank, players, streak, secs_left, answers (running)}
 create or replace function public.daily_today()
 returns jsonb language plpgsql security definer
 set search_path = public, extensions
@@ -3229,6 +3229,8 @@ begin
   return jsonb_build_object(
     'day', v_day, 'status', v_status, 'score', case when v_status = 'done' then r.score end,
     'rank', v_rank, 'players', v_n, 'streak', public._daily_streak(v_me),
+    -- manches deja jouees : le front reprend le defi a la suivante apres un rechargement
+    'answers', case when v_status = 'running' then r.answers end,
     'secs_left', case when v_status = 'running'
                       then greatest(0, extract(epoch from (r.started_at + interval '10 minutes' - now()))::int) end);
 end $$;

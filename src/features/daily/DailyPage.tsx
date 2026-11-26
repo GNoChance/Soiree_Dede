@@ -25,6 +25,7 @@ export function DailyPage() {
   const today = useDailyToday(version)
   const [phase, setPhase] = useState<Phase>('home')
   const [rounds, setRounds] = useState<DailyRound[]>([])
+  const [done, setDone] = useState<RoundAnswer[]>([])
   const [result, setResult] = useState<DailySubmitResult | null>(null)
   // Pas de « Mettre à jour » en plein défi : le rechargement clôturerait la tentative.
   useHoldUpdate(phase === 'loading' || phase === 'play' || phase === 'sending')
@@ -41,6 +42,7 @@ export function DailyPage() {
     try {
       const r = await buildChallenge(today.data.day)
       await startDaily()
+      setDone([])
       setRounds(r)
       setPhase('play')
     } catch (e) {
@@ -50,8 +52,23 @@ export function DailyPage() {
     }
   }
 
-  // Appli rechargée ou coupée en cours de défi : on termine avec les manches déjà enregistrées.
+  // Appli rechargée ou coupée en cours de défi : on reprend à la manche suivante (même tirage,
+  // même jour). Si les questions ne se chargent pas, on termine avec les manches déjà enregistrées.
   const resume = async () => {
+    const t = today.data
+    if (!t) return
+    const prev = (t.answers ?? []).map((a) => ({ points: a.points, ms: a.ms }))
+    if (prev.length < 6) {
+      setPhase('loading')
+      try {
+        setRounds(await buildChallenge(t.day))
+        setDone(prev)
+        setPhase('play')
+        return
+      } catch {
+        /* banques introuvables : on termine ci-dessous */
+      }
+    }
     setPhase('sending')
     try {
       const res = await finishDaily()
@@ -92,7 +109,7 @@ export function DailyPage() {
   const status = today.data?.status
   const title = today.data ? dailyTitle(today.data.day) : 'Défi du jour'
 
-  if (phase === 'play') return <DailyPlay rounds={rounds} onFinish={(a) => void finish(a)} onRound={onRound} />
+  if (phase === 'play') return <DailyPlay rounds={rounds} done={done} onFinish={(a) => void finish(a)} onRound={onRound} />
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -119,8 +136,8 @@ export function DailyPage() {
           )}
           {status === 'running' && phase === 'home' && (
             <>
-              <p className="font-bold text-[#1f1b2e]">Ton défi a été interrompu. Les manches déjà jouées sont gardées : tu peux le terminer maintenant pour voir ton score.</p>
-              <Button size="lg" fullWidth onClick={() => void resume()}>Terminer et voir mon score</Button>
+              <p className="font-bold text-[#1f1b2e]">Ton défi a été interrompu. Les manches déjà jouées sont gardées : reprends là où tu en étais{today.data?.secs_left ? ` (encore ${Math.ceil(today.data.secs_left / 60)} min)` : ''} !</p>
+              <Button size="lg" fullWidth onClick={() => void resume()}>Reprendre mon défi</Button>
             </>
           )}
           {status === 'missed' && phase === 'home' && (
