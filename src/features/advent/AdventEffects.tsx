@@ -15,7 +15,7 @@ export function Rays({ size = 360, loop = false, className }: { size?: number; l
     <motion.span
       aria-hidden
       className={'pointer-events-none absolute top-1/2 left-1/2 rounded-full ' + (className ?? '')}
-      style={{ ...style, opacity: 0.7 }}
+      style={{ ...style, background: 'repeating-conic-gradient(from 0deg, rgba(255, 190, 40, 0.5) 0deg 9deg, rgba(255, 190, 40, 0) 9deg 24deg)', opacity: 0.9 }}
       animate={{ rotate: 360 }}
       transition={{ repeat: Infinity, duration: 16, ease: 'linear' }}
     />

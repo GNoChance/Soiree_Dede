@@ -69,12 +69,13 @@ function Bow() {
   )
 }
 
-function Knob({ side }: { side: 'left' | 'right' }) {
+function Knob({ side, top = '50%' }: { side: 'left' | 'right'; top?: string }) {
   return (
     <span
       aria-hidden
-      className="absolute top-1/2 rounded-full"
+      className="absolute rounded-full"
       style={{
+        top,
         [side]: 'calc(var(--u) * 0.1)',
         width: 'calc(var(--u) * 0.15)',
         height: 'calc(var(--u) * 0.15)',
@@ -136,7 +137,12 @@ function Front({ def, status, digit, hinge }: FaceProps) {
           }}
         />
       )}
-      <span className="absolute inset-0 flex flex-col items-center justify-center" style={{ gap: 'calc(var(--u) * 0.04)', opacity: status === 'missed' ? 0.8 : 1 }}>
+      <span className="absolute inset-0 flex flex-col items-center justify-center" style={{
+          gap: 'calc(var(--u) * 0.04)',
+          opacity: status === 'missed' ? 0.8 : 1,
+          ...(def.size === 'front' ? (hinge === 'left' ? { paddingLeft: '26%' } : { paddingRight: '26%' }) : null),
+        }}
+      >
         <span className="advent-door-num" style={{ fontSize: `calc(var(--u) * ${NUM[def.size]})` }}>
           {digit}
         </span>
@@ -168,7 +174,7 @@ function Front({ def, status, digit, hinge }: FaceProps) {
         )}
       </span>
 
-      <Knob side={hinge === 'left' ? 'right' : 'left'} />
+      <Knob side={hinge === 'left' ? 'right' : 'left'} top={def.size === 'front' ? '64%' : '50%'} />
 
       {status === 'missed' && (
         <span className="absolute inset-0 overflow-hidden" style={{ borderRadius: `calc(${RADIUS} - 3px)` }}>
@@ -253,10 +259,14 @@ export function AdventDoor({ def, status, phase, emoji, reduce, onTap, elRef }: 
   const blur = useTransform(p, (v) => Math.min(Math.max(v, 0), 1.25) * 4)
   const shadow = useMotionTemplate`drop-shadow(${sx}px ${sy}px ${blur}px rgba(20, 10, 50, 0.5))`
 
+  // Le battant garde son habit de cadeau (ruban, noeud) pendant qu'il pivote.
+  const faceStatus: CaseStatus = phase ? 'ready' : status
   const hingeSide = def.hinge === 'right' ? 'right' : 'left'
   const lightOn = open || status === 'ready' || phase === 'swing'
   const shaking = phase === 'shake'
   const swing = phase === 'swing'
+  // Les grandes portes ont déjà un grand emoji : il jaillit moins fort.
+  const peak = size === 'front' ? 1.9 : size === 'big' ? 2.1 : 2.7
 
   const wiggle = status === 'ready' && !shaking && !reduce
   const animateProp = shaking && !reduce
@@ -321,17 +331,17 @@ export function AdventDoor({ def, status, phase, emoji, reduce, onTap, elRef }: 
           {double ? (
             <>
               <Leaf hinge="left" rotateY={leftDeg} className="left-0 w-1/2">
-                <Front def={def} status={status} digit="2" hinge="left" />
+                <Front def={def} status={faceStatus} digit="2" hinge="left" />
                 <Back color={def.color} />
               </Leaf>
               <Leaf hinge="right" rotateY={rightDeg} className="right-0 w-1/2">
-                <Front def={def} status={status} digit="4" hinge="right" />
+                <Front def={def} status={faceStatus} digit="4" hinge="right" />
                 <Back color={def.color} />
               </Leaf>
             </>
           ) : (
             <Leaf hinge={hingeSide} rotateY={isRight ? rightDeg : leftDeg} className="inset-x-0">
-              <Front def={def} status={status} digit={String(day)} hinge={hingeSide} />
+              <Front def={def} status={faceStatus} digit={String(day)} hinge={hingeSide} />
               <Back color={def.color} />
             </Leaf>
           )}
@@ -347,7 +357,7 @@ export function AdventDoor({ def, status, phase, emoji, reduce, onTap, elRef }: 
             className="absolute top-1/2 left-1/2 flex items-center justify-center"
             style={{ width: '2em', height: '2em', marginLeft: '-1em', marginTop: '-1em', fontSize: `calc(var(--u) * ${EMO[size]})`, lineHeight: 1, filter: 'drop-shadow(0 4px 0 rgba(31,27,46,.35))' }}
             initial={{ scale: 0.2, y: 0, opacity: 0, rotate: -25 }}
-            animate={{ scale: [0.2, 2.7, 2.5, 2.6, 1], y: ['0%', '-95%', '-82%', '-90%', '0%'], rotate: [-25, 14, -8, 6, 0], opacity: [0, 1, 1, 1, 1] }}
+            animate={{ scale: [0.2, peak, peak * 0.93, peak * 0.97, 1], y: ['0%', '-95%', '-82%', '-90%', '0%'], rotate: [-25, 14, -8, 6, 0], opacity: [0, 1, 1, 1, 1] }}
             transition={{ duration: 1.7, delay: 0.25, times: [0, 0.3, 0.5, 0.78, 1], ease: 'easeOut' }}
           >
             {emoji}

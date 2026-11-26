@@ -57,7 +57,7 @@ function Roof({ lit }: { lit: number }) {
   const window = clamp01((lit - 3) / 9)
   const complete = lit >= 24
   return (
-    <svg viewBox={`0 0 ${ROOF_W} ${ROOF_H}`} className="relative block w-full overflow-visible" aria-hidden>
+    <svg viewBox={`0 0 ${ROOF_W} ${ROOF_H}`} className="pointer-events-none relative z-[3] block w-full overflow-visible" aria-hidden>
       <defs>
         <clipPath id={`roof-${uid}`}>
           <path d={`M4 128 L${PEAK.x} ${PEAK.y} L356 128 Z`} />
