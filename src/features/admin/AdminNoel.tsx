@@ -59,6 +59,9 @@ export function AdminNoel() {
       <Button variant="secondary" fullWidth icon={<PlayCircle className="size-5" />} onClick={replay}>
         Voir la vidéo d’annonce
       </Button>
+      <Button variant="secondary" fullWidth onClick={() => navigate('/avent-apercu')}>
+        🎄 Calendrier de l’Avent (démo)
+      </Button>
     </Card>
   )
 }

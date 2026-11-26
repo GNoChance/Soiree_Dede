@@ -150,3 +150,57 @@ img { -webkit-user-drag: none; user-select: none; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Calendrier de l'Avent : maison en carton sous la neige ---------- */
+.advent-sky { background: linear-gradient(180deg, #2b3489 0%, #3f3c97 52%, #6a52ad 100%); }
+.dark .advent-sky { background: linear-gradient(180deg, #0d1034 0%, #1a1a52 52%, #2e2568 100%); }
+.advent-star {
+  position: absolute; left: var(--x); top: var(--y); width: var(--s); height: var(--s);
+  border-radius: 9999px; background: #fff6c9; box-shadow: 0 0 6px 1px rgba(255, 246, 201, 0.75);
+  animation: advent-twinkle var(--d) ease-in-out var(--delay) infinite;
+}
+@keyframes advent-twinkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+.advent-facade {
+  background-color: #fff0d2;
+  background-image: repeating-linear-gradient(90deg, rgba(176, 116, 54, 0.1) 0 2px, transparent 2px 11px);
+}
+.advent-door-num {
+  font-family: var(--font-display); font-weight: 800; line-height: 1; color: #fff; letter-spacing: -0.02em;
+  -webkit-text-stroke: 0.2em #1f1b2e; paint-order: stroke fill; text-shadow: 0 0.06em 0 rgba(31, 27, 46, 0.35);
+}
+.advent-glow { animation: advent-glow 1.5s ease-in-out infinite; }
+@keyframes advent-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 214, 80, 0.9), 0 0 10px 1px rgba(255, 190, 40, 0.65); }
+  50% { box-shadow: 0 0 0 5px rgba(255, 214, 80, 0), 0 0 22px 6px rgba(255, 190, 40, 0.95); }
+}
+.advent-ring { animation: advent-ring 2.2s ease-in-out infinite; }
+@keyframes advent-ring {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.04); }
+}
+.advent-bulb { transform-box: fill-box; transform-origin: 50% 0; }
+.advent-bulb-on { animation: advent-bulb-pop 0.7s cubic-bezier(0.3, 1.6, 0.5, 1) var(--delay, 0s) backwards, advent-bulb-glint 2.6s ease-in-out calc(var(--delay, 0s) + 0.7s) infinite; }
+@keyframes advent-bulb-pop {
+  0% { transform: scale(0.3); filter: brightness(3); }
+  60% { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+@keyframes advent-bulb-glint {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+.advent-smoke { transform-box: fill-box; transform-origin: center; animation: advent-smoke 4.2s ease-out var(--delay, 0s) infinite; }
+@keyframes advent-smoke {
+  0% { transform: translate(0, 14px) scale(0.5); opacity: 0; }
+  25% { opacity: 0.85; }
+  100% { transform: translate(10px, -34px) scale(1.7); opacity: 0; }
+}
+.advent-star-top { transform-box: fill-box; transform-origin: center; }
+.advent-star-on { animation: advent-star-beat 1.6s ease-in-out infinite; }
+@keyframes advent-star-beat {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 5px #ffd23f); }
+  50% { transform: scale(1.18); filter: drop-shadow(0 0 12px #fff3a6); }
+}

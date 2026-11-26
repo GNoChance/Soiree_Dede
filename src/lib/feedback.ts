@@ -103,6 +103,8 @@ function arp(c: AudioContext, freqs: number[], { step = 0.09, dur = 0.16, type =
 
 export type SoundName =
   | 'pop' | 'success' | 'fail' | 'tick' | 'whoosh' | 'fanfare' | 'cash'
+  // calendrier de l'Avent : porte qui tremble, papier déchiré, charnière qui grince, pluie d'étincelles
+  | 'rattle' | 'rip' | 'creak' | 'sparkle'
   // suspense : roulement de tambour (1,6 s + cymbale), tic-tac des 5 dernières secondes
   | 'drumroll' | 'clock' | 'clock_last'
   // cartes (Pas de bol)
@@ -166,6 +168,26 @@ const SOUNDS: Record<SoundName, (c: AudioContext) => void> = {
     tone(c, { freq: 520, slideTo: 260, dur: 0.09, type: 'square', gain: 0.1 })
     tone(c, { freq: 560, slideTo: 280, start: 0.16, dur: 0.09, type: 'square', gain: 0.1 })
   },
+  // porte de carton qui tremble : petits chocs secs de plus en plus rapprochés
+  rattle: (c) => {
+    for (let i = 0; i < 9; i++) noiseHit(c, { start: i * 0.07 - i * i * 0.003, dur: 0.05, freq: 380 + (i % 3) * 140, gain: 0.07 + 0.012 * i })
+    tone(c, { freq: 110, slideTo: 160, dur: 0.6, type: 'triangle', gain: 0.07 })
+  },
+  // papier déchiré : crépitement de bruit aigu sur un souffle qui s'ouvre
+  rip: (c) => {
+    noiseSweep(c, 0.34, 1400, 5200, 0.2)
+    for (let i = 0; i < 16; i++) {
+      const r = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1
+      noiseHit(c, { start: i * 0.02 + r * 0.01, dur: 0.018 + r * 0.02, freq: 3200 + r * 3600, gain: 0.09 + r * 0.1, type: 'highpass' })
+    }
+  },
+  // charnière : grincement qui monte puis retombe
+  creak: (c) => {
+    tone(c, { freq: 150, slideTo: 330, dur: 0.38, type: 'sawtooth', gain: 0.05 })
+    tone(c, { freq: 330, start: 0.36, slideTo: 190, dur: 0.3, type: 'sawtooth', gain: 0.04 })
+    noiseSweep(c, 0.5, 500, 1600, 0.05)
+  },
+  sparkle: (c) => arp(c, [1568, 2093, 2637, 3136, 2637, 3520], { step: 0.055, dur: 0.22, type: 'sine', gain: 0.06 }),
   pop: (c) => tone(c, { freq: 620, slideTo: 220, dur: 0.1, gain: 0.22 }),
   tick: (c) => tone(c, { freq: 1400, dur: 0.035, type: 'square', gain: 0.08 }),
   success: (c) => {
@@ -239,4 +261,8 @@ export const fx = {
   whoosh: () => { playSound('whoosh'); vibrate(8) },
   cash: () => { playSound('cash'); vibrate([8, 30, 12]) },
   fanfare: () => { playSound('fanfare'); vibrate([30, 40, 30, 40, 120]) },
+  rattle: () => { playSound('rattle'); vibrate([20, 30, 20, 30, 20, 30, 30]) },
+  rip: () => { playSound('rip'); vibrate(35) },
+  creak: () => playSound('creak'),
+  sparkle: () => playSound('sparkle'),
 }

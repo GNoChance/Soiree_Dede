@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router'
 import { FullLayout, RequireProfile, Root, TabsLayout } from '@/components/layout/Layouts'
 import { HubPage } from '@/pages/HubPage'
@@ -26,6 +27,9 @@ import { CartesPage } from '@/features/cartes/CartesPage'
 import { RouteError } from '@/pages/RouteError'
 import { onPushOpen } from '@/features/push/push'
 import { GuestJoinPage } from '@/features/guest/GuestJoinPage'
+
+// Aperçu admin du calendrier de l'Avent (données factices, réservé à l'admin).
+const AdventPreviewPage = lazy(() => import('@/features/advent/AdventPreviewPage'))
 
 const router = createBrowserRouter([
   {
@@ -66,6 +70,7 @@ const router = createBrowserRouter([
               { path: '/defi', element: <DailyPage /> },
               { path: '/noel/hotte', element: <HottePage /> },
               { path: '/avent', element: <AdventPage /> },
+              { path: '/avent-apercu', element: <Suspense fallback={null}><AdventPreviewPage /></Suspense> },
               { path: '/solo/:gameId', element: <SoloRoute /> },
               { path: '/entrainement/:gameId', element: <TrainingRoute /> },
             ],

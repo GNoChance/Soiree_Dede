@@ -1,87 +1,72 @@
-import { useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Modal } from '@/components/ui/Modal'
-import { confettiRain } from '@/components/ui/confetti'
-import { fx } from '@/lib/feedback'
 import { refreshProfile } from '@/lib/auth'
 import { toastError } from '@/features/soiree/errors'
 import { toast } from '@/store/toast'
 import { getTrophy } from '@/data/trophees'
-import { openAdventDay, useAdventState } from './api'
-import { ADVENT_TEXTS } from './texts'
-import { adventDayItem, getItem, type ItemDef } from '@/data/cadeaux'
+import { openAdventDay, useAdventState, type AdventState } from './api'
+import { AdventCalendar } from './AdventCalendar'
+import { AdventRewardModal, type AdventReward } from './AdventRewardModal'
+import type { CaseStatus } from './layout'
 import { usePlayersStore } from '@/features/soiree/players'
 
-type CaseStatus = 'opened' | 'ready' | 'today' | 'future' | 'missed'
-
 const pad = (n: number) => String(n).padStart(2, '0')
+const dateOf = (year: number | undefined, d: number) => `${year}-12-${pad(d)}`
 
-const SLOT_NAMES: Record<ItemDef['slot'], string> = {
-  frame: 'Cadre d’avatar',
-  title: 'Titre sous ton pseudo',
-  kart: 'Pour Dédé Kart',
-  fx_avatar: 'Effet d’avatar',
-  fx_entree: 'Effet d’entrée au salon',
-  fx_victoire: 'Effet de victoire',
-  fx_salon: 'Effet de salon',
-  golf_ball: 'Pour le Mini-golf',
-  bowling_ball: 'Pour le Bowling',
-  chess: 'Pour les Échecs',
-  card_back: 'Dos de cartes',
-  dice: 'Dés du Menteur',
-  marks: 'Croix et ronds du Morpion',
+function statusFor(data: AdventState | null | undefined, d: number): CaseStatus {
+  if (!data) return 'future'
+  const date = dateOf(data.year, d)
+  if (data.opened.includes(date)) return 'opened'
+  if (data.done.includes(date)) return 'ready'
+  if (date > data.today) return 'future'
+  return date === data.today ? 'today' : 'missed'
 }
 
 /** Calendrier de l'Avent : 24 cases, une par jour du 1er au 24 décembre. */
 export function AdventPage() {
   const navigate = useNavigate()
-  const reduce = useReducedMotion()
   const [version, setVersion] = useState(0)
   const { data, loading } = useAdventState(version)
-  const [busy, setBusy] = useState<number | null>(null)
-  const [shown, setShown] = useState<{ day: number; xp: number; gifts: string[] } | null>(null)
+  const [shown, setShown] = useState<AdventReward | null>(null)
+  // Résultat du serveur, gardé jusqu'à la fin de l'animation d'ouverture de la porte.
+  const pending = useRef<{ reward: AdventReward; trophy: boolean } | null>(null)
 
-  const dateOf = (d: number) => `${data?.year}-12-${pad(d)}`
-  const statusOf = (d: number): CaseStatus => {
-    if (!data) return 'future'
-    const date = dateOf(d)
-    if (data.opened.includes(date)) return 'opened'
-    if (data.done.includes(date)) return 'ready'
-    if (date > data.today) return 'future'
-    return date === data.today ? 'today' : 'missed'
+  const statuses = useMemo(() => Array.from({ length: 24 }, (_, i) => statusFor(data, i + 1)), [data])
+
+  /** Appel serveur au tap (pendant que la porte tremble). En cas d'erreur : toast, et la porte se referme. */
+  const openDay = async (d: number) => {
+    try {
+      const r = await openAdventDay(dateOf(data?.year, d))
+      pending.current = { reward: { day: d, xp: r.xp, gifts: r.gifts ?? [] }, trophy: !!r.trophy }
+      if (r.gifts?.length) void usePlayersStore.getState().load(true)
+      setVersion((v) => v + 1)
+      void refreshProfile().catch(() => undefined)
+    } catch (e) {
+      toastError(e)
+      setVersion((v) => v + 1)
+      throw e
+    }
   }
 
-  const tap = async (d: number) => {
-    const st = statusOf(d)
+  const revealed = (d: number) => {
+    const p = pending.current
+    pending.current = null
+    setShown(p && p.reward.day === d ? p.reward : { day: d, xp: 0, gifts: [] })
+    if (p?.trophy) toast.success(`Trophée « ${getTrophy('gen_esprit_noel')?.name ?? 'Esprit de Noël'} » : tu as débloqué la tenue Lutin ! 🧝`)
+  }
+
+  const tapStatic = (d: number, st: CaseStatus) => {
     if (st === 'opened') return setShown({ day: d, xp: 0, gifts: [] })
     if (st === 'future') return void toast('Pas touche ! Cette case s’ouvrira le jour J.')
     if (st === 'missed') return void toast('Trop tard : il fallait finir le défi ce jour-là. Pas de rattrapage !')
     if (st === 'today') return void toast('Finis le défi du jour pour ouvrir la case !')
-    setBusy(d)
-    try {
-      const r = await openAdventDay(dateOf(d))
-      fx.fanfare()
-      if (!reduce) confettiRain(1800)
-      setShown({ day: d, xp: r.xp, gifts: r.gifts ?? [] })
-      if (r.gifts?.length) void usePlayersStore.getState().load(true)
-      setVersion((v) => v + 1)
-      void refreshProfile().catch(() => undefined)
-      if (r.trophy) toast.success(`Trophée « ${getTrophy('gen_esprit_noel')?.name ?? 'Esprit de Noël'} » : tu as débloqué la tenue Lutin ! 🧝`)
-    } catch (e) {
-      toastError(e)
-      setVersion((v) => v + 1)
-    } finally {
-      setBusy(null)
-    }
   }
 
   const openedCount = data?.opened.length ?? 0
   const readyCount = data?.done.filter((x) => !data.opened.includes(x)).length ?? 0
-  const text = shown ? ADVENT_TEXTS[shown.day - 1] : null
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -99,86 +84,13 @@ export function AdventPage() {
       {loading && !data ? (
         <p className="text-center font-bold text-muted">Chargement…</p>
       ) : (
-        <div className="grid grid-cols-4 gap-3">
-          {Array.from({ length: 24 }, (_, i) => i + 1).map((d) => {
-            const st = statusOf(d)
-            const t = ADVENT_TEXTS[d - 1]
-            return (
-              <motion.button
-                key={d}
-                type="button"
-                disabled={busy !== null}
-                onClick={() => void tap(d)}
-                aria-label={`Case ${d}`}
-                whileTap={{ scale: 0.92 }}
-                animate={st === 'ready' && !reduce ? { rotate: [-3, 3, -3] } : { rotate: 0 }}
-                transition={st === 'ready' ? { repeat: Infinity, duration: 1.2 } : undefined}
-                className={
-                  'sticker-sm flex aspect-square flex-col items-center justify-center rounded-card border-[3px] border-ink font-display font-extrabold text-[#1f1b2e] ' +
-                  (st === 'opened' ? 'bg-mint' : st === 'ready' ? 'bg-sun' : st === 'today' ? 'bg-white' : st === 'missed' ? 'bg-sunk text-muted opacity-60' : 'bg-white')
-                }
-              >
-                <span className="text-xs leading-none">{d}</span>
-                <span className="text-2xl leading-none">
-                  {st === 'opened' ? t.emoji : st === 'ready' ? '🎁' : st === 'missed' ? '✖️' : st === 'today' ? '🎄' : '🔒'}
-                </span>
-              </motion.button>
-            )
-          })}
-        </div>
+        <AdventCalendar statuses={statuses} onOpenDay={openDay} onRevealed={revealed} onTapStatic={tapStatic} />
       )}
       <Button variant="secondary" fullWidth onClick={() => navigate('/defi')}>
         Aller au défi du jour
       </Button>
 
-      <Modal open={Boolean(shown)} onClose={() => setShown(null)} title={shown ? `Case n° ${shown.day}` : undefined}>
-        {shown && text && (
-          <div className="flex flex-col items-center gap-4 text-center">
-            <motion.div
-              initial={reduce ? false : { scale: 0, rotate: -40 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 9 }}
-              className="text-7xl"
-            >
-              {text.emoji}
-            </motion.div>
-            <p className="text-lg font-bold">{text.text}</p>
-            {shown.xp > 0 && <p className="rounded-chip border-2 border-ink bg-sun px-3 py-1 font-display font-extrabold text-[#1f1b2e]">+{shown.xp} XP</p>}
-            {(() => {
-              const gifts = (shown.gifts.length ? shown.gifts.map(getItem) : [adventDayItem(shown.day)]).filter(Boolean) as ItemDef[]
-              if (!gifts.length) return null
-              return (
-                <div className="flex w-full flex-col gap-2">
-                  <p className="font-display font-extrabold">{shown.gifts.length ? (gifts.length > 1 ? 'Tes cadeaux :' : 'Ton cadeau :') : 'Cadeau de cette case :'}</p>
-                  {gifts.map((g, i) => (
-                    <motion.div
-                      key={g.id}
-                      initial={reduce ? false : { scale: 0, rotate: 12 }}
-                      animate={{ scale: 1, rotate: 0 }}
-                      transition={{ type: 'spring', stiffness: 260, damping: 10, delay: 0.3 + i * 0.15 }}
-                      className="sticker-sm flex items-center gap-3 rounded-card border-[3px] border-ink bg-mint p-2 text-left text-[#1f1b2e]"
-                    >
-                      <span className="text-3xl leading-none">{g.emoji}</span>
-                      <span className="flex flex-col">
-                        <span className="font-extrabold">{g.label}</span>
-                        <span className="text-xs font-bold">{SLOT_NAMES[g.slot]}</span>
-                      </span>
-                    </motion.div>
-                  ))}
-                  {shown.gifts.length > 0 && (
-                    <Button variant="secondary" fullWidth onClick={() => navigate('/inventaire?onglet=deco')}>
-                      Équiper mes cadeaux
-                    </Button>
-                  )}
-                </div>
-              )
-            })()}
-            <Button fullWidth onClick={() => setShown(null)}>
-              Merci Père Noël !
-            </Button>
-          </div>
-        )}
-      </Modal>
+      <AdventRewardModal shown={shown} onClose={() => setShown(null)} />
     </div>
   )
 }
