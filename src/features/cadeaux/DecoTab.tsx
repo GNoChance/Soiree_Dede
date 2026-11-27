@@ -16,8 +16,8 @@ import { getSeason, lastDayLabel } from '@/data/saisons'
 import { equipItem, useOwnedItems, type SeasonSync } from './api'
 import { useSeasonStore } from './season'
 
-/** Cadeaux du calendrier de l'Avent : surprise, invisibles tant qu'on ne les a pas. */
-const isAdvent = (it: ItemDef) => Boolean(it.adventDay || it.adventCount)
+/** Cadeaux surprise (calendrier de l'Avent, Pass de Noël, Grande Hotte) : invisibles tant qu'on ne les a pas. */
+const isAdvent = (it: ItemDef) => Boolean(it.adventDay || it.adventCount || it.event)
 
 const howToGet = (it: ItemDef, info: SeasonSync | null) =>
   it.passTier && it.season
