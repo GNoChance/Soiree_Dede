@@ -128,7 +128,24 @@ insert into public.items(id, slot, label, advent_day, advent_count, rule, price)
   ('t_ubb', 'title', 'Supporter UBB', null, null, null, 100),
   ('cb_ubb', 'card_back', 'Rugby bordelais', null, null, null, 250),
   ('k_ubb', 'kart', 'Peinture UBB', null, null, null, 250),
-  ('bb_ubb', 'bowling_ball', 'Boule ovale', null, null, null, 250)
+  ('bb_ubb', 'bowling_ball', 'Boule ovale', null, null, null, 250),
+  -- echecs et effets en boutique (2026-11-27)
+  ('c_bois', 'chess', 'Pièces en bois', null, null, null, 100),
+  ('c_bonbon', 'chess', 'Pièces bonbon', null, null, null, 250),
+  ('c_neon', 'chess', 'Pièces néon', null, null, null, 250),
+  ('c_or', 'chess', 'Or et onyx', null, null, null, 500),
+  ('fx_coeurs', 'fx_avatar', 'Cœurs qui s’envolent', null, null, null, 250),
+  ('fx_etincelles', 'fx_avatar', 'Étincelles', null, null, null, 250),
+  ('fx_billets', 'fx_avatar', 'Pluie de billets', null, null, null, 500),
+  ('fx_skate', 'fx_entree', 'Entrée en skate', null, null, null, 250),
+  ('fx_fusee', 'fx_entree', 'Entrée en fusée', null, null, null, 500),
+  ('fx_licorne', 'fx_entree', 'Entrée à dos de licorne', null, null, null, 500),
+  ('fx_v_ballons', 'fx_victoire', 'Lâcher de ballons', null, null, null, 250),
+  ('fx_v_pizzas', 'fx_victoire', 'Pluie de pizzas', null, null, null, 250),
+  ('fx_v_billets', 'fx_victoire', 'Jackpot', null, null, null, 500),
+  ('fx_salon_bulles', 'fx_salon', 'Salon à bulles', null, null, null, 250),
+  ('fx_salon_confettis', 'fx_salon', 'Salon en fête', null, null, null, 250),
+  ('fx_salon_disco', 'fx_salon', 'Salon disco', null, null, null, 500)
 on conflict (id) do update set slot = excluded.slot, label = excluded.label,
   advent_day = excluded.advent_day, advent_count = excluded.advent_count, rule = excluded.rule, price = excluded.price;
 

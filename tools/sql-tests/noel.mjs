@@ -245,7 +245,8 @@ await setNow('2026-12-11T20:00:00Z')
   const eq = await call(uid(20), `select public.equip_item('fx_avatar', 'fx_neige') r`)
   ok('effet équipé dans le slot fx_avatar', eq.r?.fx_avatar === 'fx_neige', JSON.stringify(eq))
   ok('effet : mauvais slot refusé', (await call(uid(20), `select public.equip_item('frame', 'fx_neige') r`)).err?.includes('item_invalid_slot'))
-  ok('les 4 effets existent, chacun dans son slot', (await one(`select string_agg(id || ':' || slot, ',' order by id) r from public.items where id like 'fx\_%'`)).r === 'fx_neige:fx_avatar,fx_salon_neige:fx_salon,fx_sapins:fx_victoire,fx_traineau:fx_entree', (await one(`select string_agg(id || ':' || slot, ',' order by id) r from public.items where id like 'fx\_%'`)).r)
+  const fxNoel = `select string_agg(id || ':' || slot || ':' || coalesce(price::text, '-'), ',' order by id) r from public.items where id in ('fx_neige', 'fx_salon_neige', 'fx_sapins', 'fx_traineau')`
+  ok('les 4 effets de Noël existent, chacun dans son slot, jamais vendus', (await one(fxNoel)).r === 'fx_neige:fx_avatar:-,fx_salon_neige:fx_salon:-,fx_sapins:fx_victoire:-,fx_traineau:fx_entree:-', (await one(fxNoel)).r)
   // Idempotence
   const before = [await ledger(G, 'event_pass'), (await claims(G)).length]
   await state(uid(20))

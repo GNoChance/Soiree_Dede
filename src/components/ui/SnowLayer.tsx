@@ -9,8 +9,9 @@ const rnd = (i: number, k: number) => {
 /**
  * Neige qui tombe dans son conteneur (qui doit être positionné). Purement décoratif, sans clic.
  * size : taille des flocons en px ; duration : secondes moyennes de chute ; fixed : tout l'écran (fond de page).
+ * glyphs : particules (émojis) à la place des flocons ; rise : elles montent au lieu de tomber (cœurs, bulles).
  */
-export function SnowLayer({ count = 12, size = 14, duration = 7, fixed, className }: { count?: number; size?: number; duration?: number; fixed?: boolean; className?: string }) {
+export function SnowLayer({ count = 12, size = 14, duration = 7, fixed, className, glyphs, rise }: { count?: number; size?: number; duration?: number; fixed?: boolean; className?: string; glyphs?: string[]; rise?: boolean }) {
   return (
     <div aria-hidden className={cn('snow-layer pointer-events-none inset-0 overflow-hidden', fixed ? 'fixed' : 'absolute', className)}>
       {Array.from({ length: count }, (_, i) => {
@@ -18,7 +19,7 @@ export function SnowLayer({ count = 12, size = 14, duration = 7, fixed, classNam
         return (
           <span
             key={i}
-            className="snow-flake"
+            className={cn('snow-flake', rise && 'snow-rise')}
             style={
               {
                 '--x': `${Math.round(rnd(i, 2) * 92)}%`,
@@ -30,7 +31,7 @@ export function SnowLayer({ count = 12, size = 14, duration = 7, fixed, classNam
               } as React.CSSProperties
             }
           >
-            ❄
+            {glyphs?.length ? glyphs[i % glyphs.length] : '❄'}
           </span>
         )
       })}

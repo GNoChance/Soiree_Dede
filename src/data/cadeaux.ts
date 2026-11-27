@@ -52,8 +52,13 @@ export interface ItemDef {
   golf?: { style?: 'snowman' | 'disco'; color?: string; stripe?: string }
   /** Bowling : style spécial ou couleurs de la boule. */
   bowling?: { style?: 'noel' | 'galaxie'; color?: string; band?: string }
-  /** Échecs : thème des pièces. */
-  chess?: 'gingerbread' | 'marble'
+  /** Échecs : thème des pièces (palettes dans games/echecs/Piece.tsx). */
+  chess?: 'gingerbread' | 'marble' | 'wood' | 'candy' | 'neon' | 'gold'
+  /**
+   * Effets (slots fx_*) : `emojis` = particules (avatar, salon) ou confettis (victoire), `rise` = elles montent
+   * au lieu de tomber ; `ride` = monture de l'effet d'entrée (l'avatar arrive dessus depuis la gauche).
+   */
+  fx?: { emojis?: string[]; rise?: boolean; ride?: string }
   /** Dos de cartes (Pas de bol, Kems) : fond CSS + emoji au centre. */
   cardBack?: { bg: string; emoji?: string }
   /** Dés du Menteur : face, arête, points. */
@@ -182,6 +187,23 @@ export const ITEMS: ItemDef[] = [
   { id: 't_tout_ou_rien', slot: 'title', label: 'Tout ou rien', emoji: '🎰', price: 250 },
   { id: 't_chance_insolente', slot: 'title', label: 'Chance insolente', emoji: '🍀', price: 250 },
   { id: 't_legende_vivante', slot: 'title', label: 'Légende vivante', emoji: '🏆', price: 500 },
+  // échecs et effets en boutique (2026-11-27)
+  { id: 'c_bois', slot: 'chess', label: 'Pièces en bois', emoji: '🪵', price: 100, chess: 'wood' },
+  { id: 'c_bonbon', slot: 'chess', label: 'Pièces bonbon', emoji: '🍬', price: 250, chess: 'candy' },
+  { id: 'c_neon', slot: 'chess', label: 'Pièces néon', emoji: '💡', price: 250, chess: 'neon' },
+  { id: 'c_or', slot: 'chess', label: 'Or et onyx', emoji: '👑', price: 500, chess: 'gold' },
+  { id: 'fx_coeurs', slot: 'fx_avatar', label: 'Cœurs qui s’envolent', emoji: '💕', price: 250, fx: { emojis: ['❤️', '💖', '💕'], rise: true } },
+  { id: 'fx_etincelles', slot: 'fx_avatar', label: 'Étincelles', emoji: '✨', price: 250, fx: { emojis: ['✨', '⭐'] } },
+  { id: 'fx_billets', slot: 'fx_avatar', label: 'Pluie de billets', emoji: '💸', price: 500, fx: { emojis: ['💸', '💵', '🪙'] } },
+  { id: 'fx_skate', slot: 'fx_entree', label: 'Entrée en skate', emoji: '🛹', price: 250, fx: { ride: '🛹' } },
+  { id: 'fx_fusee', slot: 'fx_entree', label: 'Entrée en fusée', emoji: '🚀', price: 500, fx: { ride: '🚀' } },
+  { id: 'fx_licorne', slot: 'fx_entree', label: 'Entrée à dos de licorne', emoji: '🦄', price: 500, fx: { ride: '🦄' } },
+  { id: 'fx_v_ballons', slot: 'fx_victoire', label: 'Lâcher de ballons', emoji: '🎈', price: 250, fx: { emojis: ['🎈', '🎉', '🎈'] } },
+  { id: 'fx_v_pizzas', slot: 'fx_victoire', label: 'Pluie de pizzas', emoji: '🍕', price: 250, fx: { emojis: ['🍕', '🧀'] } },
+  { id: 'fx_v_billets', slot: 'fx_victoire', label: 'Jackpot', emoji: '💰', price: 500, fx: { emojis: ['💸', '💰', '🪙'] } },
+  { id: 'fx_salon_bulles', slot: 'fx_salon', label: 'Salon à bulles', emoji: '🫧', price: 250, fx: { emojis: ['🫧'], rise: true } },
+  { id: 'fx_salon_confettis', slot: 'fx_salon', label: 'Salon en fête', emoji: '🎊', price: 250, fx: { emojis: ['🎊', '🎉', '🎈'] } },
+  { id: 'fx_salon_disco', slot: 'fx_salon', label: 'Salon disco', emoji: '🪩', price: 500, fx: { emojis: ['🪩', '✨', '🎶'] } },
   // saisons : collections limitées (price) et exclusifs du passe (passTier), cf. docs/superpowers/specs/2026-11-22-saisons-boutique-design.md
   { id: 't_tout_schuss', slot: 'title', label: 'Tout schuss', emoji: '⛷️', price: 100, season: 'hiver' },
   { id: 't_raclette', slot: 'title', label: 'Team raclette', emoji: '🧀', price: 100, season: 'hiver' },
@@ -248,10 +270,10 @@ export const ITEMS: ItemDef[] = [
   { id: 'f_noel_aurore', slot: 'frame', label: 'Aurore de la bande', emoji: '🌌', event: 'noel', bandTier: 3, howTo: 'Grande Hotte de la bande, palier 3.', frame: { ring: 'conic-gradient(#06D6A0, #118AB2, #7B2CBF, #EF476F, #06D6A0)', spin: true, emojis: ['✨'], count: 6, top: '🌌' } },
   { id: 't_bande_noel', slot: 'title', label: 'La Bande de Noël', emoji: '🎄', event: 'noel', bandTier: 4, howTo: 'Grande Hotte de la bande, palier 4.' },
   // Effets spéciaux (un slot chacun, cumulables) : rendus dans Avatar, le salon, l'écran de résultats et le mode télé.
-  { id: 'fx_neige', slot: 'fx_avatar', label: 'Neige sur l’avatar', emoji: '❄️', event: 'noel', eventTier: 10, howTo: 'Pass de Noël, palier 10.' },
-  { id: 'fx_traineau', slot: 'fx_entree', label: 'Entrée en traîneau', emoji: '🛷', event: 'noel', eventTier: 18, howTo: 'Pass de Noël, palier 18.' },
-  { id: 'fx_sapins', slot: 'fx_victoire', label: 'Pluie de sapins', emoji: '🎄', event: 'noel', eventTier: 25, howTo: 'Pass de Noël, palier 25.' },
-  { id: 'fx_salon_neige', slot: 'fx_salon', label: 'Salon enneigé', emoji: '🌨️', event: 'noel', bandTier: 2, howTo: 'Grande Hotte de la bande, palier 2.' },
+  { id: 'fx_neige', slot: 'fx_avatar', label: 'Neige sur l’avatar', emoji: '❄️', event: 'noel', eventTier: 10, howTo: 'Pass de Noël, palier 10.', fx: { emojis: ['❄'] } },
+  { id: 'fx_traineau', slot: 'fx_entree', label: 'Entrée en traîneau', emoji: '🛷', event: 'noel', eventTier: 18, howTo: 'Pass de Noël, palier 18.', fx: { ride: '🛷' } },
+  { id: 'fx_sapins', slot: 'fx_victoire', label: 'Pluie de sapins', emoji: '🎄', event: 'noel', eventTier: 25, howTo: 'Pass de Noël, palier 25.', fx: { emojis: ['🎄', '🎁', '⭐'] } },
+  { id: 'fx_salon_neige', slot: 'fx_salon', label: 'Salon enneigé', emoji: '🌨️', event: 'noel', bandTier: 2, howTo: 'Grande Hotte de la bande, palier 2.', fx: { emojis: ['❄'] } },
 ]
 
 const BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]))

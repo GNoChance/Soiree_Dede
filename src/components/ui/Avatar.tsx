@@ -6,7 +6,7 @@ import { ChibiImage } from './ChibiImage'
 import { useTenueArt } from './tenueArt'
 import { AvatarFrame } from './AvatarFrame'
 import { SnowLayer } from './SnowLayer'
-import { equippedOf } from '@/data/cadeaux'
+import { equippedOf, getItem } from '@/data/cadeaux'
 
 export interface AvatarProps {
   slug: string
@@ -41,8 +41,8 @@ export function Avatar({ slug, expression = 'joie', tenue, frame, fx, size = 56,
   const art = useTenueArt(slug, wanted)
   const directoryItems = usePlayersStore((s) => (frame === undefined || fx === undefined ? s.list.find((p) => p.slug === slug)?.equippedItems : undefined))
   const frameDef = equippedOf(frame === undefined ? directoryItems : frame ? { frame } : null, 'frame')?.frame
-  // Neige sur l'avatar : seulement à partir de 48 px (en dessous, illisible et coûteux dans les longues listes).
-  const snow = size >= 48 && (fx === undefined ? directoryItems?.fx_avatar : fx) === 'fx_neige'
+  // Effet d'avatar (neige, cœurs…) : seulement à partir de 48 px (en dessous, illisible et coûteux dans les longues listes).
+  const particles = size >= 48 ? getItem(fx === undefined ? directoryItems?.fx_avatar : fx)?.fx : undefined
   return (
     <motion.div
       animate={bounce ? { y: [0, -6, 0] } : undefined}
@@ -59,7 +59,7 @@ export function Avatar({ slug, expression = 'joie', tenue, frame, fx, size = 56,
         style={{ backgroundColor: color }}
       >
         <ChibiImage slug={slug} expression={expression} tenue={wanted} size={size * 0.92} bare className="mt-[6%]" />
-        {snow && <SnowLayer count={size >= 100 ? 9 : 6} size={Math.max(8, size * 0.15)} duration={4.5} />}
+        {particles?.emojis && <SnowLayer count={size >= 100 ? 9 : 6} size={Math.max(8, size * 0.15)} duration={4.5} glyphs={particles.emojis} rise={particles.rise} />}
       </div>
       {art.missingEmoji && (
         <span

@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { saveLaunch, type LauncherPreset } from '@/features/soiree/rematch'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { SnowLayer } from '@/components/ui/SnowLayer'
+import { getItem } from '@/data/cadeaux'
 import { ArrowLeft, Copy, DoorOpen, Flag, Play, Share2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -150,12 +151,13 @@ export function SoireePage() {
     setEnded(null) // l'évènement temps réel a pu arriver avant la réponse
     setHostPodium({ next: Object.values(u).some((l) => l.length) ? u : null })
   }
+  const salonFx = getItem(byId[soiree.host_id]?.equippedItems?.fx_salon)?.fx
   return (
     // Hôte : la barre « C'est parti ! » est fixée en bas ; la page réserve sa hauteur
     // mesurée pour que la fin (« Terminer la soirée ») reste atteignable.
     <div className="isolate flex flex-col gap-5 pb-10" style={isHost && barH ? { paddingBottom: barH + 16 } : undefined}>
-      {/* Effet « Salon enneigé » de l'hôte (slot fx_salon) : neige légère derrière le salon. */}
-      {byId[soiree.host_id]?.equippedItems?.fx_salon === 'fx_salon_neige' && <SnowLayer fixed className="-z-10" count={22} size={18} duration={11} />}
+      {/* Effet de salon de l'hôte (slot fx_salon : neige, bulles…) : particules légères derrière le salon. */}
+      {salonFx?.emojis && <SnowLayer fixed className="-z-10" count={22} size={18} duration={11} glyphs={salonFx.emojis} rise={salonFx.rise} />}
       <div className="flex items-center gap-2">
         {!isGuest && <button
           type="button"
@@ -403,8 +405,9 @@ function PlayersGrid({ ids, hostId, meId, byId, onKick, noLinks }: { ids: string
       <AnimatePresence>
         {ids.map((id, i) => {
           const p = playerOrPlaceholder(byId, id)
-          // Effet « Entrée en traîneau » (slot fx_entree) : l'avatar glisse depuis la gauche sur un traîneau (1 s).
-          const sled = !reduce && p.equippedItems?.fx_entree === 'fx_traineau'
+          // Effet d'entrée (slot fx_entree : traîneau, skate…) : l'avatar glisse depuis la gauche sur sa monture (1 s).
+          const ride = reduce ? undefined : getItem(p.equippedItems?.fx_entree)?.fx?.ride
+          const sled = Boolean(ride)
           return (
             <motion.div
               key={id}
@@ -423,7 +426,7 @@ function PlayersGrid({ ids, hostId, meId, byId, onKick, noLinks }: { ids: string
                   animate={{ opacity: [1, 1, 0], rotate: [-8, 4, 0] }}
                   transition={{ duration: 1.6, times: [0, 0.7, 1] }}
                 >
-                  🛷
+                  {ride}
                 </motion.span>
               )}
               {/* Invités (mode invité) : pas de page profil, ni pour eux ni pour les voir. */}

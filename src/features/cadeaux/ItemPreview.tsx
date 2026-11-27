@@ -1,4 +1,6 @@
 import { Avatar } from '@/components/ui/Avatar'
+import { SnowLayer } from '@/components/ui/SnowLayer'
+import { Piece } from '@/games/echecs/Piece'
 import type { ItemDef } from '@/data/cadeaux'
 import { useSession } from '@/store/session'
 
@@ -12,6 +14,23 @@ export function ItemPreview({ it, size = 48 }: { it: ItemDef; size?: number }) {
   }
   if (it.slot === 'fx_avatar' && profile) {
     return <Avatar slug={profile.slug} expression={profile.equipped_expression} tenue={profile.equipped_tenue} frame={null} fx={it.id} size={Math.max(48, size * 0.92)} />
+  }
+  if (it.chess) {
+    return (
+      <span className="flex items-end" style={{ height: size }}>
+        <span style={{ width: size * 0.62, height: size * 0.62 }}><Piece piece="N" theme={it.chess} /></span>
+        <span style={{ width: size * 0.62, height: size * 0.62, marginLeft: -size * 0.12 }}><Piece piece="k" theme={it.chess} /></span>
+      </span>
+    )
+  }
+  // Effet d'entrée : la monture ; effets de victoire / de salon : un carré où tombent (ou montent) les émojis.
+  if (it.fx?.ride) return <span className="leading-none" style={{ fontSize: size * 0.62 }}>{it.fx.ride}</span>
+  if (it.fx?.emojis && it.slot !== 'fx_avatar') {
+    return (
+      <span className="relative block overflow-hidden rounded-xl border-[3px] border-ink bg-sunk" style={{ width: size, height: size }}>
+        <SnowLayer count={5} size={size * 0.26} duration={3.5} glyphs={it.fx.emojis} rise={it.fx.rise} />
+      </span>
+    )
   }
   if (it.cardBack) {
     return (

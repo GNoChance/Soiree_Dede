@@ -5,7 +5,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ChibiImage } from '@/components/ui/ChibiImage'
-import { treesConfetti, victoryConfetti } from '@/components/ui/confetti'
+import { emojiConfetti, victoryConfetti } from '@/components/ui/confetti'
+import { getItem } from '@/data/cadeaux'
 import { fx } from '@/lib/feedback'
 import { cn } from '@/lib/cn'
 import { refreshProfile } from '@/lib/auth'
@@ -51,8 +52,9 @@ export function ResultsScreen({ matchId, state, meId, players, game, onBack, rem
   useEffect(() => {
     if (me?.won) {
       fx.fanfare()
-      // Effet « Pluie de sapins » équipé (slot fx_victoire) : 🎄🎁⭐ au lieu des confettis.
-      if (players[meId]?.equippedItems?.fx_victoire === 'fx_sapins') treesConfetti(2600)
+      // Effet de victoire équipé (slot fx_victoire : sapins, ballons…) : pluie d'émojis au lieu des confettis.
+      const win = getItem(players[meId]?.equippedItems?.fx_victoire)?.fx?.emojis
+      if (win) emojiConfetti(win, 2600)
       else victoryConfetti(2200)
     } else if (me) {
       fx.whoosh()

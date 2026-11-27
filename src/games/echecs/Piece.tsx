@@ -27,7 +27,30 @@ const MARBLE = {
   detail: { w: '#B9B2A5', b: '#9AA7B3' },
 }
 const VEIN = 'M 42 72 Q 47 64 43 58 Q 40 53 46 48'
-export type PieceTheme = 'gingerbread' | 'marble'
+/** Thèmes de la boutique (c_bois, c_bonbon, c_neon, c_or). */
+const WOOD = {
+  fill: { w: '#E9C38E', b: '#6B3B1C' },
+  shine: { w: '#FFE6C0', b: '#A0643A' },
+  detail: { w: '#A8743F', b: '#D9A066' },
+}
+const CANDY = {
+  fill: { w: '#FFC2D4', b: '#7B2CBF' },
+  shine: { w: '#FFFFFF', b: '#C08BF0' },
+  detail: { w: '#FF4D8D', b: '#FFE066' },
+}
+const NEON = {
+  fill: { w: '#D9FFFB', b: '#2A1B4A' },
+  shine: { w: '#FFFFFF', b: '#FF2BD6' },
+  detail: { w: '#00B3A8', b: '#2BFFF1' },
+}
+const GOLD = {
+  fill: { w: '#FFD166', b: '#26222F' },
+  shine: { w: '#FFF3C4', b: '#5C5870' },
+  detail: { w: '#B07F00', b: '#FFD166' },
+}
+const PALETTES: Partial<Record<PieceTheme, typeof MARBLE>> = { gingerbread: GINGER, marble: MARBLE, wood: WOOD, candy: CANDY, neon: NEON, gold: GOLD }
+const NEON_GLOW = { w: 'drop-shadow(0 0 4px #2BFFF1)', b: 'drop-shadow(0 0 4px #FF2BD6)' }
+export type PieceTheme = 'gingerbread' | 'marble' | 'wood' | 'candy' | 'neon' | 'gold'
 
 const BASE = 'M 22 74 L 78 74 Q 82 74 82 79 L 82 84 Q 82 89 77 89 L 23 89 Q 18 89 18 84 L 18 79 Q 18 74 22 74 Z'
 
@@ -96,7 +119,7 @@ export const Piece = memo(function Piece({ piece, className, flat, theme }: Piec
   const shape = SHAPES[piece.toLowerCase()]
   if (!shape) return null
   const ginger = theme === 'gingerbread'
-  const pal = ginger ? GINGER : theme === 'marble' ? MARBLE : null
+  const pal = (theme && PALETTES[theme]) || null
   const fill = pal ? pal.fill[side] : FILL[side]
   const shine = pal ? pal.shine[side] : SHINE[side]
   const detail = pal ? pal.detail[side] : DETAIL[side]
@@ -112,7 +135,7 @@ export const Piece = memo(function Piece({ piece, className, flat, theme }: Piec
     </>
   )
   return (
-    <svg viewBox="0 0 100 100" className={cn('block size-full overflow-visible', className)} aria-hidden>
+    <svg viewBox="0 0 100 100" className={cn('block size-full overflow-visible', className)} style={theme === 'neon' && !flat ? { filter: NEON_GLOW[side] } : undefined} aria-hidden>
       {!flat && (
         <g transform="translate(4 4)" fill={INK} stroke={INK} strokeWidth={sw} strokeLinejoin="round">
           {all}
@@ -127,7 +150,8 @@ export const Piece = memo(function Piece({ piece, className, flat, theme }: Piec
         <path key={`l${i}`} d={d} stroke={detail} strokeWidth="4" strokeLinecap="round" fill="none" />
       ))}
       {ginger && !flat && <path d={ICING} stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" fill="none" />}
-      {theme === 'marble' && !flat && <path d={VEIN} stroke={detail} strokeWidth="2.5" strokeLinecap="round" fill="none" />}
+      {(theme === 'marble' || theme === 'wood') && !flat && <path d={VEIN} stroke={detail} strokeWidth="2.5" strokeLinecap="round" fill="none" />}
+      {theme === 'candy' && !flat && <path d={ICING} stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" fill="none" />}
       {shape.eye && <circle cx={shape.eye[0]} cy={shape.eye[1]} r="4.5" fill={INK} />}
     </svg>
   )
